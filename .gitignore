@@ -1,0 +1,6 @@
+﻿node_modules/
+dist/
+fieldsync/
+.DS_Store
+*.log
+.env
