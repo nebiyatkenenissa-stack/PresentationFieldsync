@@ -14,8 +14,8 @@ function Sidebar({ activeTab, setActiveTab, user, pendingSync, onLogout }) {
         { id: 'register', label: '🆔 Register' },
         { id: 'reports', label: '📋 Reports' },
         { id: 'report_new', label: '📝 New Report' },
-        { id: 'attendance', label: '📋 Attendance' },
-        { id: 'tasks', label: '📋 Tasks' },
+        // ❌ Attendance REMOVED from Officer sidebar
+        // ❌ Tasks REMOVED from Officer sidebar
         { id: 'leaves', label: '📅 Leaves' },
         { id: 'permissions', label: '📋 Permissions' }
       );

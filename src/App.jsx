@@ -271,7 +271,7 @@ function App() {
   }, [getUserNotifications]);
 
   // ============================================================
-  // DATA LOADING
+  // DATA LOADING - DISABLE AUTO-LOGIN
   // ============================================================
   useEffect(() => {
     const loadAllData = async () => {
@@ -314,14 +314,12 @@ function App() {
         setAppNotifications(notificationsData);
         setPermissions(permissionsData);
 
-        const authData = await db.auth.toArray();
-        if (authData.length > 0) {
-          const session = authData[0];
-          const loggedInUser = usersData.find(u => u.id === session.userId);
-          if (loggedInUser && loggedInUser.status === 'active') {
-            setUser(loggedInUser);
-          }
-        }
+        // ===== DISABLE AUTO-LOGIN =====
+        // Clear any existing session to force login
+        await db.auth.clear();
+        
+        // The auto-login is now disabled - user must login manually
+        
       } catch (error) {
         console.error('Error loading data:', error);
       } finally {
@@ -498,7 +496,8 @@ function App() {
           employeeName: r.employeeName,
           region: r.region,
           totalReports: 0,
-          totalRegistrations: 0,
+          // FIX: Use ACTUAL registered citizens count from citizens array
+          totalRegistrations: citizens.filter(c => c.registeredBy === r.employeeId).length,
           avgEfficiency: 0,
           attendanceRate: 0,
           totalWorkHours: 0,
@@ -511,7 +510,6 @@ function App() {
         };
       }
       map[r.employeeId].totalReports += 1;
-      map[r.employeeId].totalRegistrations += r.registrations || 0;
     });
 
     attendance.forEach(a => {
@@ -544,10 +542,10 @@ function App() {
     });
 
     return Object.values(map);
-  }, [reports, attendance, screenTime, liveStatus]);
+  }, [reports, attendance, screenTime, liveStatus, citizens]);
 
   const totalReports = reports.length;
-  const totalRegistrations = reports.reduce((sum, r) => sum + (r.registrations || 0), 0);
+  const totalRegistrations = citizens.length; // FIX: Use actual citizen count
   const totalCitizens = citizens.length;
   const pendingSync = reports.filter(r => !r.synced).length;
 
@@ -556,7 +554,8 @@ function App() {
     reports.forEach(r => {
       if (!map[r.region]) map[r.region] = { reports: 0, registrations: 0, employees: new Set() };
       map[r.region].reports += 1;
-      map[r.region].registrations += r.registrations || 0;
+      // FIX: Use actual registered citizens by region
+      map[r.region].registrations += citizens.filter(c => c.region === r.region).length;
       map[r.region].employees.add(r.employeeId);
     });
     return Object.entries(map).map(([region, data]) => ({
@@ -564,7 +563,7 @@ function App() {
       ...data,
       employees: data.employees.size
     }));
-  }, [reports]);
+  }, [reports, citizens]);
 
   const attendanceSummary = useMemo(() => {
     const today = getToday();
@@ -657,7 +656,7 @@ function App() {
     if (user) addNotification(user.id, 'Goodbye', 'You have been logged out successfully', 'info');
     if (user) addAuditLog('LOGOUT', { email: user.email, name: user.name });
     setUser(null);
-    await db.auth.delete('session');
+    await db.auth.clear();
     window.location.reload();
   };
 
@@ -802,7 +801,7 @@ function App() {
   };
 
   // ============================================================
-  // LEAVE MANAGEMENT - SUPERVISOR ONLY SELF
+  // LEAVE MANAGEMENT - Supervisor sees ONLY own, Manager sees all but NO Request button
   // ============================================================
   const handleRequestLeave = async (e) => {
     e.preventDefault();
@@ -878,7 +877,7 @@ function App() {
   };
 
   // ============================================================
-  // PERMISSION MANAGEMENT - SUPERVISOR ONLY SELF
+  // PERMISSION MANAGEMENT - Supervisor sees ONLY own, Manager sees all but NO Request button
   // ============================================================
   const handleRequestPermission = async (e) => {
     e.preventDefault();
@@ -1158,16 +1157,6 @@ function App() {
       }
     }
     addAuditLog('REGISTER_CITIZEN', { nationalId: newCitizen.nationalId, name: `${newCitizen.firstName} ${newCitizen.lastName}` });
-
-    const today = getToday();
-    const existingReport = reports.find(r => r.employeeId === user.employeeId && r.reportDate === today);
-    if (existingReport) {
-      setReports(prev => {
-        const updated = prev.map(r => r.id === existingReport.id ? { ...r, registrations: (r.registrations || 0) + 1 } : r);
-        db.reports.bulkPut(updated);
-        return updated;
-      });
-    }
 
     setCitizenForm({
       firstName: '',
@@ -1476,7 +1465,6 @@ function App() {
       d.setDate(d.getDate() - i);
       dateOptions.push(d.toISOString().slice(0, 10));
     }
-    // For Supervisor: only show team screen time
     const displayScreenTime = isSupervisor ? getSupervisorScreenTime() : filteredScreenTime;
     
     return (
@@ -1606,10 +1594,9 @@ function App() {
   };
 
   // ============================================================
-  // RENDER TASKS - Uses filteredTasks
+  // RENDER TASKS
   // ============================================================
   const renderTasks = () => {
-    // For supervisor, filteredTasks already has team tasks only
     const displayTasks = isSupervisor ? getSupervisorTasks() : filteredTasks;
     
     return (
@@ -1662,19 +1649,23 @@ function App() {
   };
 
   // ============================================================
-  // RENDER LEAVES - SUPERVISOR ONLY SELF
+  // RENDER LEAVES - Manager has NO Request button
   // ============================================================
   const renderLeaves = () => {
-    // DIRECT FILTER: Supervisor sees ONLY own leaves
     const displayLeaves = isSupervisor 
       ? leaves.filter(l => l.employeeId === user.employeeId)
       : filteredLeaves;
+    
+    // Manager does NOT see Request button
+    const showRequestButton = isOfficer || isSupervisor;
     
     return (
       <div className="leaves-management">
         <div className="leaves-header">
           <div><h4>Leave Requests</h4><p>{displayLeaves.length} requests</p></div>
-          {(isOfficer || isSupervisor) && <button className="btn-primary" onClick={() => setShowLeaveModal(true)}>📋 Request Leave</button>}
+          {showRequestButton && (
+            <button className="btn-primary" onClick={() => setShowLeaveModal(true)}>📋 Request Leave</button>
+          )}
         </div>
         <div className="table-wrapper">
           <table>
@@ -1701,19 +1692,23 @@ function App() {
   };
 
   // ============================================================
-  // RENDER PERMISSIONS - SUPERVISOR ONLY SELF
+  // RENDER PERMISSIONS - Manager has NO Request button
   // ============================================================
   const renderPermissions = () => {
-    // DIRECT FILTER: Supervisor sees ONLY own permissions
     const displayPermissions = isSupervisor 
       ? permissions.filter(p => p.employeeId === user.employeeId)
       : filteredPermissions;
+    
+    // Manager does NOT see Request button
+    const showRequestButton = isOfficer || isSupervisor;
     
     return (
       <div className="permissions-management">
         <div className="permissions-header">
           <div><h4>Permission Requests</h4><p>{displayPermissions.length} requests</p></div>
-          {(isOfficer || isSupervisor) && <button className="btn-primary" onClick={() => setShowPermissionRequestModal(true)}>📋 Request Permission</button>}
+          {showRequestButton && (
+            <button className="btn-primary" onClick={() => setShowPermissionRequestModal(true)}>📋 Request Permission</button>
+          )}
         </div>
         <div className="table-wrapper">
           <table>
@@ -1740,7 +1735,7 @@ function App() {
   };
 
   // ============================================================
-  // RENDER ALERTS - Keep existing
+  // RENDER ALERTS
   // ============================================================
   const renderAlerts = () => {
     return (
@@ -2042,6 +2037,7 @@ function App() {
               screenTime={screenTime}
               leaves={leaves}
               permissions={permissions}
+              citizens={citizens}
               totalReports={totalReports}
               totalRegistrations={totalRegistrations}
               attendanceSummary={attendanceSummary}
@@ -2133,6 +2129,7 @@ function App() {
             <TaskManagement 
               filteredTasks={isSupervisor ? getSupervisorTasks() : filteredTasks}
               tasks={tasks}
+              setTasks={setTasks}
               users={users}
               user={user}
               isManager={isManager}
@@ -2147,7 +2144,7 @@ function App() {
             />
           )}
           
-          {/* LEAVES - Supervisor sees ONLY OWN */}
+          {/* LEAVES - Manager sees all, but NO Request button */}
           {activeTab === 'leaves' && (isManager || isSupervisor || isOfficer) && (
             <LeaveManagement 
               filteredLeaves={isSupervisor ? getSupervisorLeaves() : filteredLeaves}
@@ -2165,7 +2162,7 @@ function App() {
             />
           )}
           
-          {/* PERMISSIONS - Supervisor sees ONLY OWN */}
+          {/* PERMISSIONS - Manager sees all, but NO Request button */}
           {activeTab === 'permissions' && (isManager || isSupervisor || isOfficer) && (
             <PermissionManagement 
               filteredPermissions={isSupervisor ? getSupervisorPermissions() : filteredPermissions}
@@ -2183,7 +2180,7 @@ function App() {
             />
           )}
           
-          {/* Screen Time - Supervisor or Manager ONLY (NOT Officer) */}
+          {/* Screen Time - Supervisor or Manager ONLY */}
           {(activeTab === 'screentime' && (isSupervisor || isManager)) && (
             <ScreenTimeManagement 
               filteredScreenTime={isSupervisor ? getSupervisorScreenTime() : filteredScreenTime}
@@ -2239,6 +2236,7 @@ function App() {
               employeePerformance={employeePerformance}
               selectedOfficer={selectedOfficer}
               setSelectedOfficer={setSelectedOfficer}
+              citizens={citizens}
             />
           )}
           

@@ -447,7 +447,7 @@ function LeaveManagement({
             </div>
             <div style={{display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap'}}>
               <span className="form-badge" style={{background: '#fef3c7', color: '#92400e'}}>{pendingLeaves.length} Pending</span>
-              <button onClick={() => setShowModal(true)} style={{background: '#1e3a5f', color: 'white', padding: '8px 16px', border: 'none', borderRadius: '6px', cursor: 'pointer', fontSize: '14px', fontWeight: '500', display: 'inline-flex', alignItems: 'center', gap: '6px', opacity: 1, visibility: 'visible'}}>📋 Request Leave</button>
+              {/* ✅ REMOVED: Request Leave button for Manager - Manager only approves/rejects */}
             </div>
           </div>
 
@@ -486,7 +486,7 @@ function LeaveManagement({
             </table>
           </div>
         </div>
-        {showModal && renderModal()}
+        {/* ✅ Modal removed for Manager - Manager does not request leave */}
       </div>
     );
   };
