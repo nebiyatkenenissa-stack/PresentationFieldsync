@@ -29,6 +29,9 @@ import AllReports from './components/reports/AllReports';
 import AlertManagement from './components/alerts/AlertManagement';
 import TeamManagement from './components/team/TeamManagement';
 
+// ===== LANGUAGE IMPORTS =====
+import { UserLanguageProvider } from './components/context/UserLanguageContext';
+
 function App() {
   // ===== STATE =====
   const [user, setUser] = useState(null);
@@ -1996,345 +1999,347 @@ function App() {
   }
 
   // ============================================================
-  // MAIN APP RETURN
+  // MAIN APP RETURN - WRAPPED WITH UserLanguageProvider
   // ============================================================
   return (
-    <div className="app">
-      <Sidebar 
-        activeTab={activeTab} 
-        setActiveTab={setActiveTab} 
-        user={user} 
-        pendingSync={pendingSync}
-        isManager={isManager}
-        isSupervisor={isSupervisor}
-        isOfficer={isOfficer}
-        onLogout={handleLogout}
-      />
-      <div className="main-content">
-        <Header 
-          user={user}
-          isOnline={isOnline}
-          syncing={syncing}
+    <UserLanguageProvider>
+      <div className="app">
+        <Sidebar 
+          activeTab={activeTab} 
+          setActiveTab={setActiveTab} 
+          user={user} 
           pendingSync={pendingSync}
-          screenTimeDisplay={screenTimeDisplay}
-          activeTab={activeTab}
-          notifications={appNotifications}
-          setNotifications={setAppNotifications}
-          markNotificationRead={markNotificationRead}
-          markAllNotificationsRead={markAllNotificationsRead}
+          isManager={isManager}
+          isSupervisor={isSupervisor}
+          isOfficer={isOfficer}
+          onLogout={handleLogout}
         />
-        <div className="content">
-          {/* Dashboard */}
-          {activeTab === 'dashboard' && (
-            <Dashboard 
-              isManager={isManager}
-              isSupervisor={isSupervisor}
-              isOfficer={isOfficer}
-              user={user}
-              reports={reports}
-              users={users}
-              attendance={attendance}
-              screenTime={screenTime}
-              leaves={leaves}
-              permissions={permissions}
-              citizens={citizens}
-              totalReports={totalReports}
-              totalRegistrations={totalRegistrations}
-              attendanceSummary={attendanceSummary}
-              teamMembers={teamMembers}
-              pendingLeaves={pendingLeaves}
-              pendingPermissions={pendingPermissions}
-              topPerformers={topPerformers}
-              teamPerformance={teamPerformance}
-              employeePerformance={employeePerformance}
-              renderTrendChart={renderTrendChart}
-            />
-          )}
-          
-          {/* Register - Officer only */}
-          {activeTab === 'register' && isOfficer && (
-            <CitizenRegistration 
-              citizenForm={citizenForm}
-              setCitizenForm={setCitizenForm}
-              handleCitizenRegister={handleCitizenRegister}
-              user={user}
-              citizens={citizens}
-              addNotification={addNotification}
-            />
-          )}
-          
-          {/* Reports - Officer or Supervisor (Supervisor sees Team + Self) */}
-          {activeTab === 'reports' && (isOfficer || isSupervisor) && (
-            <ReportList 
-              reports={isSupervisor ? getSupervisorReports() : filteredReports}
-              filteredReports={filteredReports}
-              isOfficer={isOfficer}
-              isSupervisor={isSupervisor}
-              user={user}
-              selectedRegion={selectedRegion}
-              setSelectedRegion={setSelectedRegion}
-              searchTerm={searchTerm}
-              setSearchTerm={setSearchTerm}
-              dateRange={dateRange}
-              setDateRange={setDateRange}
-              exportCSV={exportCSVWithNotification}
-            />
-          )}
-          
-          {/* Report New - Officer only */}
-          {activeTab === 'report_new' && isOfficer && (
-            <ReportForm 
-              form={form}
-              setForm={setForm}
-              handleSubmit={handleSubmit}
-              user={user}
-              isOfficer={isOfficer}
-            />
-          )}
-          
-          {/* Attendance - Supervisor or Officer (Supervisor sees Team only) */}
-          {activeTab === 'attendance' && (isSupervisor || isOfficer) && (
-            <AttendanceManagement 
-              filteredAttendance={isSupervisor ? getSupervisorAttendance() : filteredAttendance}
-              attendance={attendance}
-              setAttendance={setAttendance}
-              users={users}
-              user={user}
-              isSupervisor={isSupervisor}
-              isOfficer={isOfficer}
-              teamMembers={teamMembers}
-              selectedDate={selectedDate}
-              setSelectedDate={setSelectedDate}
-              attendanceFilter={attendanceFilter}
-              setAttendanceFilter={setAttendanceFilter}
-              attendanceSummary={attendanceSummary}
-              handleOpenAttendanceModal={handleOpenAttendanceModal}
-              renderAttendanceModal={renderAttendanceModal}
-              addNotification={addNotification}
-            />
-          )}
-          
-          {/* Manager Attendance - Manager only */}
-          {activeTab === 'manager_attendance' && isManager && (
-            <ManagerAttendance 
-              attendance={attendance}
-              users={users}
-              setAttendance={setAttendance}
-              addNotification={addNotification}
-            />
-          )}
-          
-          {/* Tasks - All roles (Supervisor sees Team tasks) */}
-          {activeTab === 'tasks' && (isManager || isSupervisor || isOfficer) && (
-            <TaskManagement 
-              filteredTasks={isSupervisor ? getSupervisorTasks() : filteredTasks}
-              tasks={tasks}
-              setTasks={setTasks}
-              users={users}
-              user={user}
-              isManager={isManager}
-              isSupervisor={isSupervisor}
-              isOfficer={isOfficer}
-              teamMembers={teamMembers}
-              taskFilter={taskFilter}
-              setTaskFilter={setTaskFilter}
-              renderTasks={renderTasks}
-              renderTaskModal={renderTaskModal}
-              addNotification={addNotification}
-            />
-          )}
-          
-          {/* LEAVES - Manager sees all, but NO Request button */}
-          {activeTab === 'leaves' && (isManager || isSupervisor || isOfficer) && (
-            <LeaveManagement 
-              filteredLeaves={isSupervisor ? getSupervisorLeaves() : filteredLeaves}
-              leaves={leaves}
-              setLeaves={setLeaves}
-              users={users}
-              user={user}
-              isManager={isManager}
-              isSupervisor={isSupervisor}
-              isOfficer={isOfficer}
-              teamMembers={teamMembers}
-              addNotification={addNotification}
-              renderLeaves={renderLeaves}
-              renderLeaveModal={renderLeaveModal}
-            />
-          )}
-          
-          {/* PERMISSIONS - Manager sees all, but NO Request button */}
-          {activeTab === 'permissions' && (isManager || isSupervisor || isOfficer) && (
-            <PermissionManagement 
-              filteredPermissions={isSupervisor ? getSupervisorPermissions() : filteredPermissions}
-              permissions={permissions}
-              setPermissions={setPermissions}
-              users={users}
-              user={user}
-              isManager={isManager}
-              isSupervisor={isSupervisor}
-              isOfficer={isOfficer}
-              teamMembers={teamMembers}
-              addNotification={addNotification}
-              renderPermissions={renderPermissions}
-              renderPermissionRequestModal={renderPermissionRequestModal}
-            />
-          )}
-          
-          {/* Screen Time - Supervisor or Manager ONLY */}
-          {(activeTab === 'screentime' && (isSupervisor || isManager)) && (
-            <ScreenTimeManagement 
-              filteredScreenTime={isSupervisor ? getSupervisorScreenTime() : filteredScreenTime}
-              screenTime={screenTime}
-              setScreenTime={setScreenTime}
-              user={user}
-              isManager={isManager}
-              isSupervisor={isSupervisor}
-              isOfficer={isOfficer}
-              teamMembers={teamMembers}
-              selectedDate={selectedDate}
-              setSelectedDate={setSelectedDate}
-              trustFilter={trustFilter}
-              setTrustFilter={setTrustFilter}
-              renderScreenTimeTable={renderScreenTimeTable}
-              addNotification={addNotification}
-            />
-          )}
-          
-          {/* Supervisor Reports - Supervisor only */}
-          {activeTab === 'supervisor_reports' && isSupervisor && (
-            <SupervisorReports 
-              supervisorReports={supervisorReports}
-              users={users}
-              user={user}
-              teamMembers={teamMembers}
-              supervisorReportForm={supervisorReportForm}
-              setSupervisorReportForm={setSupervisorReportForm}
-              supervisorSelfReportForm={supervisorSelfReportForm}
-              setSupervisorSelfReportForm={setSupervisorSelfReportForm}
-              showSupervisorReportModal={showSupervisorReportModal}
-              setShowSupervisorReportModal={setShowSupervisorReportModal}
-              showSupervisorSelfReportModal={showSupervisorSelfReportModal}
-              setShowSupervisorSelfReportModal={setShowSupervisorSelfReportModal}
-              handleSupervisorReportSubmit={handleSupervisorReportSubmit}
-              handleSupervisorSelfReportSubmit={handleSupervisorSelfReportSubmit}
-              addNotification={addNotification}
-            />
-          )}
-          
-          {/* Team - Manager or Supervisor */}
-          {activeTab === 'team' && (isManager || isSupervisor) && (
-            <TeamManagement 
-              users={users}
-              user={user}
-              isManager={isManager}
-              isSupervisor={isSupervisor}
-              teamMembers={teamMembers}
-              reports={reports}
-              attendance={attendance}
-              screenTime={screenTime}
-              liveStatus={liveStatus}
-              employeePerformance={employeePerformance}
-              selectedOfficer={selectedOfficer}
-              setSelectedOfficer={setSelectedOfficer}
-              citizens={citizens}
-            />
-          )}
-          
-          {/* Users - Manager only */}
-          {activeTab === 'users' && isManager && (
-            <UserManagement 
-              users={users}
-              setUsers={setUsers}
-              newUser={newUser}
-              setNewUser={setNewUser}
-              handleCreateUser={handleCreateUser}
-              toggleUserStatus={toggleUserStatus}
-              deleteUser={deleteUser}
-              addNotification={addNotification}
-            />
-          )}
-          
-          {/* Analytics - Manager only */}
-          {activeTab === 'analytics' && isManager && (
-            <Analytics 
-              reports={reports}
-              users={users}
-              attendance={attendance}
-              screenTime={screenTime}
-              liveStatus={liveStatus}
-              totalReports={totalReports}
-              totalRegistrations={totalRegistrations}
-              regionStats={regionStats}
-              employeePerformance={employeePerformance}
-              renderBarChart={renderBarChart}
-            />
-          )}
-          
-          {/* Citizens - Manager only */}
-          {activeTab === 'citizens' && isManager && (
-            <CitizensDatabase 
-              citizens={citizens}
-            />
-          )}
-          
-          {/* Audit - Manager only */}
-          {activeTab === 'audit' && isManager && (
-            <AuditLog 
-              auditLog={auditLog}
-              exportCSV={exportCSVWithNotification}
-              exportJSON={exportJSONWithNotification}
-            />
-          )}
-          
-          {/* All Reports - Manager only */}
-          {activeTab === 'all_reports' && isManager && (
-            <AllReports 
-              reports={reports}
-              filteredReports={filteredReports}
-              users={users}
-              supervisorReports={supervisorReports}
-              selectedRegion={selectedRegion}
-              setSelectedRegion={setSelectedRegion}
-              searchTerm={searchTerm}
-              setSearchTerm={setSearchTerm}
-              dateRange={dateRange}
-              setDateRange={setDateRange}
-              exportCSV={exportCSVWithNotification}
-              exportJSON={exportJSONWithNotification}
-            />
-          )}
-          
-          {/* Alerts - Manager only */}
-          {activeTab === 'alerts' && isManager && (
-            <AlertManagement 
-              alerts={alerts}
-              setAlerts={setAlerts}
-              users={users}
-              user={user}
-              newAlert={newAlert}
-              setNewAlert={setNewAlert}
-              addNotification={addNotification}
-              showAlertModal={showAlertModal}
-              setShowAlertModal={setShowAlertModal}
-              renderAlerts={renderAlerts}
-              renderAlertModal={renderAlertModal}
-            />
-          )}
-          
-          {/* Sync Log */}
-          {showSyncLog && (
-            <div className="sync-log-overlay" onClick={() => setShowSyncLog(false)}>
-              <div className="sync-log-modal" onClick={(e) => e.stopPropagation()}>
-                <div className="modal-header"><h3>🔄 Sync Activity Log</h3><button className="modal-close" onClick={() => setShowSyncLog(false)}>✕</button></div>
-                <div className="modal-body">
-                  {syncLog.length === 0 ? <div className="empty-log">No sync activity yet</div> : syncLog.map((log, i) => <div key={i} className="log-entry">{log}</div>)}
+        <div className="main-content">
+          <Header 
+            user={user}
+            isOnline={isOnline}
+            syncing={syncing}
+            pendingSync={pendingSync}
+            screenTimeDisplay={screenTimeDisplay}
+            activeTab={activeTab}
+            notifications={appNotifications}
+            setNotifications={setAppNotifications}
+            markNotificationRead={markNotificationRead}
+            markAllNotificationsRead={markAllNotificationsRead}
+          />
+          <div className="content">
+            {/* Dashboard */}
+            {activeTab === 'dashboard' && (
+              <Dashboard 
+                isManager={isManager}
+                isSupervisor={isSupervisor}
+                isOfficer={isOfficer}
+                user={user}
+                reports={reports}
+                users={users}
+                attendance={attendance}
+                screenTime={screenTime}
+                leaves={leaves}
+                permissions={permissions}
+                citizens={citizens}
+                totalReports={totalReports}
+                totalRegistrations={totalRegistrations}
+                attendanceSummary={attendanceSummary}
+                teamMembers={teamMembers}
+                pendingLeaves={pendingLeaves}
+                pendingPermissions={pendingPermissions}
+                topPerformers={topPerformers}
+                teamPerformance={teamPerformance}
+                employeePerformance={employeePerformance}
+                renderTrendChart={renderTrendChart}
+              />
+            )}
+            
+            {/* Register - Officer only */}
+            {activeTab === 'register' && isOfficer && (
+              <CitizenRegistration 
+                citizenForm={citizenForm}
+                setCitizenForm={setCitizenForm}
+                handleCitizenRegister={handleCitizenRegister}
+                user={user}
+                citizens={citizens}
+                addNotification={addNotification}
+              />
+            )}
+            
+            {/* Reports - Officer or Supervisor (Supervisor sees Team + Self) */}
+            {activeTab === 'reports' && (isOfficer || isSupervisor) && (
+              <ReportList 
+                reports={isSupervisor ? getSupervisorReports() : filteredReports}
+                filteredReports={filteredReports}
+                isOfficer={isOfficer}
+                isSupervisor={isSupervisor}
+                user={user}
+                selectedRegion={selectedRegion}
+                setSelectedRegion={setSelectedRegion}
+                searchTerm={searchTerm}
+                setSearchTerm={setSearchTerm}
+                dateRange={dateRange}
+                setDateRange={setDateRange}
+                exportCSV={exportCSVWithNotification}
+              />
+            )}
+            
+            {/* Report New - Officer only */}
+            {activeTab === 'report_new' && isOfficer && (
+              <ReportForm 
+                form={form}
+                setForm={setForm}
+                handleSubmit={handleSubmit}
+                user={user}
+                isOfficer={isOfficer}
+              />
+            )}
+            
+            {/* Attendance - Supervisor or Officer (Supervisor sees Team only) */}
+            {activeTab === 'attendance' && (isSupervisor || isOfficer) && (
+              <AttendanceManagement 
+                filteredAttendance={isSupervisor ? getSupervisorAttendance() : filteredAttendance}
+                attendance={attendance}
+                setAttendance={setAttendance}
+                users={users}
+                user={user}
+                isSupervisor={isSupervisor}
+                isOfficer={isOfficer}
+                teamMembers={teamMembers}
+                selectedDate={selectedDate}
+                setSelectedDate={setSelectedDate}
+                attendanceFilter={attendanceFilter}
+                setAttendanceFilter={setAttendanceFilter}
+                attendanceSummary={attendanceSummary}
+                handleOpenAttendanceModal={handleOpenAttendanceModal}
+                renderAttendanceModal={renderAttendanceModal}
+                addNotification={addNotification}
+              />
+            )}
+            
+            {/* Manager Attendance - Manager only */}
+            {activeTab === 'manager_attendance' && isManager && (
+              <ManagerAttendance 
+                attendance={attendance}
+                users={users}
+                setAttendance={setAttendance}
+                addNotification={addNotification}
+              />
+            )}
+            
+            {/* Tasks - All roles (Supervisor sees Team tasks) */}
+            {activeTab === 'tasks' && (isManager || isSupervisor || isOfficer) && (
+              <TaskManagement 
+                filteredTasks={isSupervisor ? getSupervisorTasks() : filteredTasks}
+                tasks={tasks}
+                setTasks={setTasks}
+                users={users}
+                user={user}
+                isManager={isManager}
+                isSupervisor={isSupervisor}
+                isOfficer={isOfficer}
+                teamMembers={teamMembers}
+                taskFilter={taskFilter}
+                setTaskFilter={setTaskFilter}
+                renderTasks={renderTasks}
+                renderTaskModal={renderTaskModal}
+                addNotification={addNotification}
+              />
+            )}
+            
+            {/* LEAVES - Manager sees all, but NO Request button */}
+            {activeTab === 'leaves' && (isManager || isSupervisor || isOfficer) && (
+              <LeaveManagement 
+                filteredLeaves={isSupervisor ? getSupervisorLeaves() : filteredLeaves}
+                leaves={leaves}
+                setLeaves={setLeaves}
+                users={users}
+                user={user}
+                isManager={isManager}
+                isSupervisor={isSupervisor}
+                isOfficer={isOfficer}
+                teamMembers={teamMembers}
+                addNotification={addNotification}
+                renderLeaves={renderLeaves}
+                renderLeaveModal={renderLeaveModal}
+              />
+            )}
+            
+            {/* PERMISSIONS - Manager sees all, but NO Request button */}
+            {activeTab === 'permissions' && (isManager || isSupervisor || isOfficer) && (
+              <PermissionManagement 
+                filteredPermissions={isSupervisor ? getSupervisorPermissions() : filteredPermissions}
+                permissions={permissions}
+                setPermissions={setPermissions}
+                users={users}
+                user={user}
+                isManager={isManager}
+                isSupervisor={isSupervisor}
+                isOfficer={isOfficer}
+                teamMembers={teamMembers}
+                addNotification={addNotification}
+                renderPermissions={renderPermissions}
+                renderPermissionRequestModal={renderPermissionRequestModal}
+              />
+            )}
+            
+            {/* Screen Time - Supervisor or Manager ONLY */}
+            {(activeTab === 'screentime' && (isSupervisor || isManager)) && (
+              <ScreenTimeManagement 
+                filteredScreenTime={isSupervisor ? getSupervisorScreenTime() : filteredScreenTime}
+                screenTime={screenTime}
+                setScreenTime={setScreenTime}
+                user={user}
+                isManager={isManager}
+                isSupervisor={isSupervisor}
+                isOfficer={isOfficer}
+                teamMembers={teamMembers}
+                selectedDate={selectedDate}
+                setSelectedDate={setSelectedDate}
+                trustFilter={trustFilter}
+                setTrustFilter={setTrustFilter}
+                renderScreenTimeTable={renderScreenTimeTable}
+                addNotification={addNotification}
+              />
+            )}
+            
+            {/* Supervisor Reports - Supervisor only */}
+            {activeTab === 'supervisor_reports' && isSupervisor && (
+              <SupervisorReports 
+                supervisorReports={supervisorReports}
+                users={users}
+                user={user}
+                teamMembers={teamMembers}
+                supervisorReportForm={supervisorReportForm}
+                setSupervisorReportForm={setSupervisorReportForm}
+                supervisorSelfReportForm={supervisorSelfReportForm}
+                setSupervisorSelfReportForm={setSupervisorSelfReportForm}
+                showSupervisorReportModal={showSupervisorReportModal}
+                setShowSupervisorReportModal={setShowSupervisorReportModal}
+                showSupervisorSelfReportModal={showSupervisorSelfReportModal}
+                setShowSupervisorSelfReportModal={setShowSupervisorSelfReportModal}
+                handleSupervisorReportSubmit={handleSupervisorReportSubmit}
+                handleSupervisorSelfReportSubmit={handleSupervisorSelfReportSubmit}
+                addNotification={addNotification}
+              />
+            )}
+            
+            {/* Team - Manager or Supervisor */}
+            {activeTab === 'team' && (isManager || isSupervisor) && (
+              <TeamManagement 
+                users={users}
+                user={user}
+                isManager={isManager}
+                isSupervisor={isSupervisor}
+                teamMembers={teamMembers}
+                reports={reports}
+                attendance={attendance}
+                screenTime={screenTime}
+                liveStatus={liveStatus}
+                employeePerformance={employeePerformance}
+                selectedOfficer={selectedOfficer}
+                setSelectedOfficer={setSelectedOfficer}
+                citizens={citizens}
+              />
+            )}
+            
+            {/* Users - Manager only */}
+            {activeTab === 'users' && isManager && (
+              <UserManagement 
+                users={users}
+                setUsers={setUsers}
+                newUser={newUser}
+                setNewUser={setNewUser}
+                handleCreateUser={handleCreateUser}
+                toggleUserStatus={toggleUserStatus}
+                deleteUser={deleteUser}
+                addNotification={addNotification}
+              />
+            )}
+            
+            {/* Analytics - Manager only */}
+            {activeTab === 'analytics' && isManager && (
+              <Analytics 
+                reports={reports}
+                users={users}
+                attendance={attendance}
+                screenTime={screenTime}
+                liveStatus={liveStatus}
+                totalReports={totalReports}
+                totalRegistrations={totalRegistrations}
+                regionStats={regionStats}
+                employeePerformance={employeePerformance}
+                renderBarChart={renderBarChart}
+              />
+            )}
+            
+            {/* Citizens - Manager only */}
+            {activeTab === 'citizens' && isManager && (
+              <CitizensDatabase 
+                citizens={citizens}
+              />
+            )}
+            
+            {/* Audit - Manager only */}
+            {activeTab === 'audit' && isManager && (
+              <AuditLog 
+                auditLog={auditLog}
+                exportCSV={exportCSVWithNotification}
+                exportJSON={exportJSONWithNotification}
+              />
+            )}
+            
+            {/* All Reports - Manager only */}
+            {activeTab === 'all_reports' && isManager && (
+              <AllReports 
+                reports={reports}
+                filteredReports={filteredReports}
+                users={users}
+                supervisorReports={supervisorReports}
+                selectedRegion={selectedRegion}
+                setSelectedRegion={setSelectedRegion}
+                searchTerm={searchTerm}
+                setSearchTerm={setSearchTerm}
+                dateRange={dateRange}
+                setDateRange={setDateRange}
+                exportCSV={exportCSVWithNotification}
+                exportJSON={exportJSONWithNotification}
+              />
+            )}
+            
+            {/* Alerts - Manager only */}
+            {activeTab === 'alerts' && isManager && (
+              <AlertManagement 
+                alerts={alerts}
+                setAlerts={setAlerts}
+                users={users}
+                user={user}
+                newAlert={newAlert}
+                setNewAlert={setNewAlert}
+                addNotification={addNotification}
+                showAlertModal={showAlertModal}
+                setShowAlertModal={setShowAlertModal}
+                renderAlerts={renderAlerts}
+                renderAlertModal={renderAlertModal}
+              />
+            )}
+            
+            {/* Sync Log */}
+            {showSyncLog && (
+              <div className="sync-log-overlay" onClick={() => setShowSyncLog(false)}>
+                <div className="sync-log-modal" onClick={(e) => e.stopPropagation()}>
+                  <div className="modal-header"><h3>🔄 Sync Activity Log</h3><button className="modal-close" onClick={() => setShowSyncLog(false)}>✕</button></div>
+                  <div className="modal-body">
+                    {syncLog.length === 0 ? <div className="empty-log">No sync activity yet</div> : syncLog.map((log, i) => <div key={i} className="log-entry">{log}</div>)}
+                  </div>
                 </div>
               </div>
-            </div>
-          )}
+            )}
+          </div>
         </div>
       </div>
-    </div>
+    </UserLanguageProvider>
   );
 }
 

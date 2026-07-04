@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import { db } from '../../services/database';
 import { uid } from '../../utils/helpers';
+import { useUserLanguage } from '../context/UserLanguageContext';
+import UserLanguageSelector from './UserLanguageSelector';
 
 function UserManagement({ 
   users, 
@@ -12,6 +14,7 @@ function UserManagement({
   deleteUser,
   addNotification 
 }) {
+  const { userT } = useUserLanguage();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [localNewUser, setLocalNewUser] = useState({
     name: '',
@@ -33,13 +36,13 @@ function UserManagement({
     try {
       const userExists = users.some(u => u.email === localNewUser.email);
       if (userExists) {
-        alert('User with this email already exists!');
+        alert(userT('userManagement.userExists'));
         setIsSubmitting(false);
         return;
       }
 
       if (!localNewUser.name || !localNewUser.email || !localNewUser.password || !localNewUser.role || !localNewUser.region) {
-        alert('Please fill all required fields');
+        alert(userT('userManagement.fillRequired'));
         setIsSubmitting(false);
         return;
       }
@@ -71,7 +74,7 @@ function UserManagement({
         addNotification(newUserObj.id, 'Account Created', `Welcome ${newUserObj.name}! Your account has been created.`, 'success');
       }
       
-      alert(`✅ User ${newUserObj.name} created successfully!`);
+      alert(userT('userManagement.createSuccess', { name: newUserObj.name }));
 
       setLocalNewUser({
         name: '',
@@ -87,7 +90,7 @@ function UserManagement({
       });
     } catch (error) {
       console.error('Error creating user:', error);
-      alert('❌ Error creating user: ' + error.message);
+      alert(userT('userManagement.createError', { error: error.message }));
     } finally {
       setIsSubmitting(false);
     }
@@ -95,6 +98,15 @@ function UserManagement({
 
   return (
     <div className="user-management" style={{padding: '0'}}>
+      {/* Language Selector */}
+      <div style={{
+        display: 'flex',
+        justifyContent: 'flex-end',
+        marginBottom: '20px'
+      }}>
+        <UserLanguageSelector />
+      </div>
+
       {/* Create User Form */}
       <div style={{
         background: 'white',
@@ -112,8 +124,8 @@ function UserManagement({
           gap: '10px'
         }}>
           <div>
-            <h3 style={{fontSize: '18px', fontWeight: '600', margin: 0}}>👤 Create New User</h3>
-            <p style={{fontSize: '14px', color: '#64748b', margin: '4px 0 0 0'}}>Add new Field Officer or Supervisor</p>
+            <h3 style={{fontSize: '18px', fontWeight: '600', margin: 0}}>👤 {userT('userManagement.createUser')}</h3>
+            <p style={{fontSize: '14px', color: '#64748b', margin: '4px 0 0 0'}}>{userT('userManagement.createUserSub')}</p>
           </div>
           <span style={{
             background: '#d1fae5',
@@ -123,7 +135,7 @@ function UserManagement({
             fontSize: '12px',
             fontWeight: '500'
           }}>
-            Total: {users.length} users
+            {userT('userManagement.totalUsers', { count: users.length })}
           </span>
         </div>
 
@@ -134,23 +146,23 @@ function UserManagement({
             gap: '16px'
           }}>
             <div style={{display: 'flex', flexDirection: 'column', gap: '4px'}}>
-              <label style={{fontSize: '13px', fontWeight: '500', color: '#374151'}}>Full Name *</label>
+              <label style={{fontSize: '13px', fontWeight: '500', color: '#374151'}}>{userT('userManagement.fullName')}</label>
               <input 
                 type="text" 
                 value={localNewUser.name} 
                 onChange={e => setLocalNewUser({...localNewUser, name: e.target.value})}
-                placeholder="Enter full name" 
+                placeholder={userT('userManagement.enterName')} 
                 required
                 style={{padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '14px'}}
               />
             </div>
             <div style={{display: 'flex', flexDirection: 'column', gap: '4px'}}>
-              <label style={{fontSize: '13px', fontWeight: '500', color: '#374151'}}>Email *</label>
+              <label style={{fontSize: '13px', fontWeight: '500', color: '#374151'}}>{userT('userManagement.email')}</label>
               <input 
                 type="email" 
                 value={localNewUser.email} 
                 onChange={e => setLocalNewUser({...localNewUser, email: e.target.value})}
-                placeholder="Enter email" 
+                placeholder={userT('userManagement.enterEmail')} 
                 required
                 style={{padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '14px'}}
               />
@@ -164,23 +176,23 @@ function UserManagement({
             marginTop: '16px'
           }}>
             <div style={{display: 'flex', flexDirection: 'column', gap: '4px'}}>
-              <label style={{fontSize: '13px', fontWeight: '500', color: '#374151'}}>Password *</label>
+              <label style={{fontSize: '13px', fontWeight: '500', color: '#374151'}}>{userT('userManagement.password')}</label>
               <input 
                 type="password" 
                 value={localNewUser.password} 
                 onChange={e => setLocalNewUser({...localNewUser, password: e.target.value})}
-                placeholder="Min 6 characters" 
+                placeholder={userT('userManagement.enterPassword')} 
                 required
                 style={{padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '14px'}}
               />
             </div>
             <div style={{display: 'flex', flexDirection: 'column', gap: '4px'}}>
-              <label style={{fontSize: '13px', fontWeight: '500', color: '#374151'}}>Phone</label>
+              <label style={{fontSize: '13px', fontWeight: '500', color: '#374151'}}>{userT('userManagement.phone')}</label>
               <input 
                 type="tel" 
                 value={localNewUser.phone} 
                 onChange={e => setLocalNewUser({...localNewUser, phone: e.target.value})}
-                placeholder="Enter phone number"
+                placeholder={userT('userManagement.enterPhone')}
                 style={{padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '14px'}}
               />
             </div>
@@ -193,32 +205,32 @@ function UserManagement({
             marginTop: '16px'
           }}>
             <div style={{display: 'flex', flexDirection: 'column', gap: '4px'}}>
-              <label style={{fontSize: '13px', fontWeight: '500', color: '#374151'}}>Role *</label>
+              <label style={{fontSize: '13px', fontWeight: '500', color: '#374151'}}>{userT('userManagement.role')}</label>
               <select 
                 value={localNewUser.role} 
                 onChange={e => setLocalNewUser({...localNewUser, role: e.target.value})}
                 required
                 style={{padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '14px'}}
               >
-                <option value="">Select Role</option>
-                <option value="field_officer">Field Officer</option>
-                <option value="supervisor">Supervisor</option>
+                <option value="">{userT('userManagement.selectRole')}</option>
+                <option value="field_officer">{userT('userManagement.fieldOfficer')}</option>
+                <option value="supervisor">{userT('userManagement.supervisor')}</option>
               </select>
             </div>
             <div style={{display: 'flex', flexDirection: 'column', gap: '4px'}}>
-              <label style={{fontSize: '13px', fontWeight: '500', color: '#374151'}}>Region *</label>
+              <label style={{fontSize: '13px', fontWeight: '500', color: '#374151'}}>{userT('userManagement.region')}</label>
               <select 
                 value={localNewUser.region} 
                 onChange={e => setLocalNewUser({...localNewUser, region: e.target.value})}
                 required
                 style={{padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '14px'}}
               >
-                <option value="">Select Region</option>
-                <option value="North">North</option>
-                <option value="South">South</option>
-                <option value="East">East</option>
-                <option value="West">West</option>
-                <option value="Central">Central</option>
+                <option value="">{userT('userManagement.selectRegion')}</option>
+                <option value="North">{userT('userManagement.north')}</option>
+                <option value="South">{userT('userManagement.south')}</option>
+                <option value="East">{userT('userManagement.east')}</option>
+                <option value="West">{userT('userManagement.west')}</option>
+                <option value="Central">{userT('userManagement.central')}</option>
               </select>
             </div>
           </div>
@@ -230,24 +242,24 @@ function UserManagement({
             marginTop: '16px'
           }}>
             <div style={{display: 'flex', flexDirection: 'column', gap: '4px'}}>
-              <label style={{fontSize: '13px', fontWeight: '500', color: '#374151'}}>Shift</label>
+              <label style={{fontSize: '13px', fontWeight: '500', color: '#374151'}}>{userT('userManagement.shift')}</label>
               <select 
                 value={localNewUser.shift} 
                 onChange={e => setLocalNewUser({...localNewUser, shift: e.target.value})}
                 style={{padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '14px'}}
               >
-                <option value="Day">Day</option>
-                <option value="Night">Night</option>
-                <option value="Flexible">Flexible</option>
+                <option value="Day">{userT('userManagement.day')}</option>
+                <option value="Night">{userT('userManagement.night')}</option>
+                <option value="Flexible">{userT('userManagement.flexible')}</option>
               </select>
             </div>
             <div style={{display: 'flex', flexDirection: 'column', gap: '4px'}}>
-              <label style={{fontSize: '13px', fontWeight: '500', color: '#374151'}}>Department</label>
+              <label style={{fontSize: '13px', fontWeight: '500', color: '#374151'}}>{userT('userManagement.department')}</label>
               <input 
                 type="text" 
                 value={localNewUser.department} 
                 onChange={e => setLocalNewUser({...localNewUser, department: e.target.value})}
-                placeholder="Department"
+                placeholder={userT('userManagement.department')}
                 style={{padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '14px'}}
               />
             </div>
@@ -261,25 +273,25 @@ function UserManagement({
               marginTop: '16px'
             }}>
               <div style={{display: 'flex', flexDirection: 'column', gap: '4px'}}>
-                <label style={{fontSize: '13px', fontWeight: '500', color: '#374151'}}>Supervisor</label>
+                <label style={{fontSize: '13px', fontWeight: '500', color: '#374151'}}>{userT('userManagement.supervisor')}</label>
                 <select 
                   value={localNewUser.supervisorId} 
                   onChange={e => setLocalNewUser({...localNewUser, supervisorId: e.target.value})}
                   style={{padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '14px'}}
                 >
-                  <option value="">Select Supervisor</option>
+                  <option value="">{userT('userManagement.selectSupervisor')}</option>
                   {users.filter(u => u.role === 'supervisor').map(s => (
                     <option key={s.id} value={s.id}>{s.name} ({s.region})</option>
                   ))}
                 </select>
               </div>
               <div style={{display: 'flex', flexDirection: 'column', gap: '4px'}}>
-                <label style={{fontSize: '13px', fontWeight: '500', color: '#374151'}}>Assigned Sites</label>
+                <label style={{fontSize: '13px', fontWeight: '500', color: '#374151'}}>{userT('userManagement.assignedSites')}</label>
                 <input 
                   type="text" 
                   value={localNewUser.assignedSites} 
                   onChange={e => setLocalNewUser({...localNewUser, assignedSites: e.target.value})}
-                  placeholder="Site A, Site B"
+                  placeholder={userT('userManagement.sitePlaceholder')}
                   style={{padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '14px'}}
                 />
               </div>
@@ -306,7 +318,7 @@ function UserManagement({
                 gap: '6px'
               }}
             >
-              {isSubmitting ? 'Creating...' : '➕ Create User'}
+              {isSubmitting ? userT('userManagement.creating') : userT('userManagement.create')}
             </button>
           </div>
         </form>
@@ -329,8 +341,8 @@ function UserManagement({
           gap: '12px'
         }}>
           <div>
-            <h3 style={{fontSize: '16px', fontWeight: '600', margin: 0}}>All Users</h3>
-            <p style={{fontSize: '13px', color: '#64748b', margin: '4px 0 0 0'}}>{users.length} total users</p>
+            <h3 style={{fontSize: '16px', fontWeight: '600', margin: 0}}>{userT('userManagement.allUsers')}</h3>
+            <p style={{fontSize: '13px', color: '#64748b', margin: '4px 0 0 0'}}>{userT('userManagement.totalUsers', { count: users.length })}</p>
           </div>
         </div>
 
@@ -338,14 +350,14 @@ function UserManagement({
           <table style={{width: '100%', borderCollapse: 'collapse', fontSize: '14px'}}>
             <thead>
               <tr style={{background: '#f8fafc'}}>
-                <th style={{padding: '12px 16px', textAlign: 'left', fontWeight: '600', color: '#374151', borderBottom: '2px solid #e5e7eb'}}>Employee ID</th>
-                <th style={{padding: '12px 16px', textAlign: 'left', fontWeight: '600', color: '#374151', borderBottom: '2px solid #e5e7eb'}}>Name</th>
-                <th style={{padding: '12px 16px', textAlign: 'left', fontWeight: '600', color: '#374151', borderBottom: '2px solid #e5e7eb'}}>Email</th>
-                <th style={{padding: '12px 16px', textAlign: 'left', fontWeight: '600', color: '#374151', borderBottom: '2px solid #e5e7eb'}}>Role</th>
-                <th style={{padding: '12px 16px', textAlign: 'left', fontWeight: '600', color: '#374151', borderBottom: '2px solid #e5e7eb'}}>Region</th>
-                <th style={{padding: '12px 16px', textAlign: 'left', fontWeight: '600', color: '#374151', borderBottom: '2px solid #e5e7eb'}}>Shift</th>
-                <th style={{padding: '12px 16px', textAlign: 'left', fontWeight: '600', color: '#374151', borderBottom: '2px solid #e5e7eb'}}>Status</th>
-                <th style={{padding: '12px 16px', textAlign: 'left', fontWeight: '600', color: '#374151', borderBottom: '2px solid #e5e7eb'}}>Actions</th>
+                <th style={{padding: '12px 16px', textAlign: 'left', fontWeight: '600', color: '#374151', borderBottom: '2px solid #e5e7eb'}}>{userT('userManagement.employeeId')}</th>
+                <th style={{padding: '12px 16px', textAlign: 'left', fontWeight: '600', color: '#374151', borderBottom: '2px solid #e5e7eb'}}>{userT('userManagement.name')}</th>
+                <th style={{padding: '12px 16px', textAlign: 'left', fontWeight: '600', color: '#374151', borderBottom: '2px solid #e5e7eb'}}>{userT('userManagement.email')}</th>
+                <th style={{padding: '12px 16px', textAlign: 'left', fontWeight: '600', color: '#374151', borderBottom: '2px solid #e5e7eb'}}>{userT('userManagement.role')}</th>
+                <th style={{padding: '12px 16px', textAlign: 'left', fontWeight: '600', color: '#374151', borderBottom: '2px solid #e5e7eb'}}>{userT('userManagement.region')}</th>
+                <th style={{padding: '12px 16px', textAlign: 'left', fontWeight: '600', color: '#374151', borderBottom: '2px solid #e5e7eb'}}>{userT('userManagement.shift')}</th>
+                <th style={{padding: '12px 16px', textAlign: 'left', fontWeight: '600', color: '#374151', borderBottom: '2px solid #e5e7eb'}}>{userT('userManagement.status')}</th>
+                <th style={{padding: '12px 16px', textAlign: 'left', fontWeight: '600', color: '#374151', borderBottom: '2px solid #e5e7eb'}}>{userT('userManagement.actions')}</th>
               </tr>
             </thead>
             <tbody>
@@ -353,7 +365,7 @@ function UserManagement({
                 <tr>
                   <td colSpan="8" style={{textAlign: 'center', padding: '40px 20px', color: '#64748b'}}>
                     <div style={{fontSize: '48px', marginBottom: '8px'}}>👤</div>
-                    <div>No users found</div>
+                    <div>{userT('userManagement.noUsers')}</div>
                   </td>
                 </tr>
               )}
@@ -371,7 +383,9 @@ function UserManagement({
                       background: u.role === 'manager' ? '#dbeafe' : u.role === 'supervisor' ? '#d1fae5' : '#fef3c7',
                       color: u.role === 'manager' ? '#1e40af' : u.role === 'supervisor' ? '#065f37' : '#92400e'
                     }}>
-                      {u.role}
+                      {u.role === 'field_officer' && userT('userManagement.fieldOfficer')}
+                      {u.role === 'supervisor' && userT('userManagement.supervisor')}
+                      {u.role === 'manager' && userT('userManagement.manager')}
                     </span>
                   </td>
                   <td style={{padding: '12px 16px'}}>{u.region}</td>
@@ -385,7 +399,7 @@ function UserManagement({
                       background: u.status === 'active' ? '#d1fae5' : '#fee2e2',
                       color: u.status === 'active' ? '#065f37' : '#991b1b'
                     }}>
-                      {u.status}
+                      {u.status === 'active' ? userT('userManagement.active') : userT('userManagement.inactive')}
                     </span>
                   </td>
                   <td style={{padding: '12px 16px'}}>
@@ -405,7 +419,7 @@ function UserManagement({
                         display: 'inline-flex'
                       }}
                     >
-                      {u.status === 'active' ? '🔴 Deactivate' : '🟢 Activate'}
+                      {u.status === 'active' ? userT('userManagement.deactivate') : userT('userManagement.activate')}
                     </button>
                     <button 
                       onClick={() => deleteUser(u.id)}
@@ -422,7 +436,7 @@ function UserManagement({
                         display: 'inline-flex'
                       }}
                     >
-                      🗑️ Delete
+                      {userT('userManagement.delete')}
                     </button>
                   </td>
                 </tr>
