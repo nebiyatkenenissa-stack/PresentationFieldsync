@@ -1,5 +1,6 @@
 import React, { useMemo } from 'react';
 import { getToday } from '../../utils/helpers';
+import PerformanceChart from './PerformanceChart';
 
 function Dashboard({ 
   isManager, isSupervisor, isOfficer, user, reports, users, 
@@ -37,10 +38,17 @@ function Dashboard({
     return Object.entries(map).map(([region, data]) => ({ region, ...data }));
   }, [reports, citizens]);
 
-  // Performance distribution for pie chart
+  // Performance distribution for pie chart - REAL DATA
   const performanceData = useMemo(() => {
-    const total = reports.length || 1;
-    const approved = reports.filter(r => r.reviewed).length;
+    if (!reports || reports.length === 0) {
+      return [
+        { name: 'Approved', value: 0 },
+        { name: 'Pending', value: 0 },
+        { name: 'Rejected', value: 0 }
+      ];
+    }
+    const total = reports.length;
+    const approved = reports.filter(r => r.reviewed && r.status !== 'rejected').length;
     const pending = reports.filter(r => !r.reviewed && r.status !== 'rejected').length;
     const rejected = reports.filter(r => r.status === 'rejected').length;
     return [
@@ -49,6 +57,103 @@ function Dashboard({
       { name: 'Rejected', value: Math.round((rejected / total) * 100) }
     ];
   }, [reports]);
+
+  // ===== NEW: User Status Distribution (Manager) =====
+  const userStatusData = useMemo(() => {
+    if (!users || users.length === 0) return [];
+    const statuses = { 'Active': 0, 'Inactive': 0 };
+    users.forEach(u => {
+      if (u.status === 'active') statuses['Active']++;
+      else statuses['Inactive']++;
+    });
+    return Object.entries(statuses)
+      .filter(([_, value]) => value > 0)
+      .map(([name, value]) => ({ name, value }));
+  }, [users]);
+
+  // ===== NEW: Role Distribution (Manager) =====
+  const roleDistributionData = useMemo(() => {
+    if (!users || users.length === 0) return [];
+    const roles = {};
+    users.forEach(u => {
+      const role = u.role === 'field_officer' ? 'Field Officer' : 
+                   u.role === 'supervisor' ? 'Supervisor' : 
+                   u.role === 'manager' ? 'Manager' : u.role || 'Unknown';
+      roles[role] = (roles[role] || 0) + 1;
+    });
+    return Object.entries(roles).map(([name, value]) => ({ name, value }));
+  }, [users]);
+
+  // ===== NEW: Region Distribution (Manager) =====
+  const regionDistributionData = useMemo(() => {
+    if (!users || users.length === 0) return [];
+    const regions = {};
+    users.forEach(u => {
+      const region = u.region || 'Unknown';
+      regions[region] = (regions[region] || 0) + 1;
+    });
+    return Object.entries(regions).map(([name, value]) => ({ name, value }));
+  }, [users]);
+
+  // ===== NEW: Report Status Distribution (Manager) =====
+  const reportStatusData = useMemo(() => {
+    if (!reports || reports.length === 0) return [];
+    const statuses = { 'Approved': 0, 'Pending': 0, 'Rejected': 0 };
+    reports.forEach(r => {
+      if (r.reviewed && r.status !== 'rejected') statuses['Approved']++;
+      else if (r.status === 'rejected') statuses['Rejected']++;
+      else statuses['Pending']++;
+    });
+    return Object.entries(statuses)
+      .filter(([_, value]) => value > 0)
+      .map(([name, value]) => ({ name, value }));
+  }, [reports]);
+
+  // ===== NEW: Today's Attendance Status (Manager) =====
+  const todayAttendanceData = useMemo(() => {
+    if (!attendance || attendance.length === 0) return [];
+    const today = getToday();
+    const todayAtt = attendance.filter(a => a.date === today);
+    if (todayAtt.length === 0) return [];
+    const statuses = { 'Present': 0, 'Late': 0, 'Absent': 0, 'Half Day': 0 };
+    todayAtt.forEach(a => {
+      if (a.status === 'present') statuses['Present']++;
+      else if (a.status === 'late') statuses['Late']++;
+      else if (a.status === 'absent') statuses['Absent']++;
+      else if (a.status === 'half_day') statuses['Half Day']++;
+    });
+    return Object.entries(statuses)
+      .filter(([_, value]) => value > 0)
+      .map(([name, value]) => ({ name, value }));
+  }, [attendance]);
+
+  // ===== NEW: Leave Status Distribution =====
+  const leaveStatusData = useMemo(() => {
+    if (!leaves || leaves.length === 0) return [];
+    const statuses = { 'Approved': 0, 'Pending': 0, 'Rejected': 0 };
+    leaves.forEach(l => {
+      if (l.status === 'approved') statuses['Approved']++;
+      else if (l.status === 'rejected') statuses['Rejected']++;
+      else statuses['Pending']++;
+    });
+    return Object.entries(statuses)
+      .filter(([_, value]) => value > 0)
+      .map(([name, value]) => ({ name, value }));
+  }, [leaves]);
+
+  // ===== NEW: Permission Status Distribution =====
+  const permissionStatusData = useMemo(() => {
+    if (!permissions || permissions.length === 0) return [];
+    const statuses = { 'Approved': 0, 'Pending': 0, 'Rejected': 0 };
+    permissions.forEach(p => {
+      if (p.status === 'approved') statuses['Approved']++;
+      else if (p.status === 'rejected') statuses['Rejected']++;
+      else statuses['Pending']++;
+    });
+    return Object.entries(statuses)
+      .filter(([_, value]) => value > 0)
+      .map(([name, value]) => ({ name, value }));
+  }, [permissions]);
 
   const fieldOfficers = users.filter(u => u.role === 'field_officer').length;
   const supervisors = users.filter(u => u.role === 'supervisor').length;
@@ -297,7 +402,127 @@ function Dashboard({
             </div>
           </div>
 
-          {/* Charts Row - Colorful */}
+          {/* ===== NEW: Performance Chart Row - Using PerformanceChart Component ===== */}
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))',
+            gap: '20px',
+            marginBottom: '24px'
+          }}>
+            {/* User Status Distribution */}
+            {userStatusData.length > 0 && (
+              <div style={{
+                background: 'white',
+                padding: '16px',
+                borderRadius: '12px',
+                boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
+                border: '1px solid #f1f5f9'
+              }}>
+                <PerformanceChart 
+                  data={userStatusData} 
+                  title="👥 User Status Distribution" 
+                />
+              </div>
+            )}
+            
+            {/* Role Distribution */}
+            {roleDistributionData.length > 0 && (
+              <div style={{
+                background: 'white',
+                padding: '16px',
+                borderRadius: '12px',
+                boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
+                border: '1px solid #f1f5f9'
+              }}>
+                <PerformanceChart 
+                  data={roleDistributionData} 
+                  title="👤 Users by Role" 
+                />
+              </div>
+            )}
+            
+            {/* Region Distribution */}
+            {regionDistributionData.length > 0 && (
+              <div style={{
+                background: 'white',
+                padding: '16px',
+                borderRadius: '12px',
+                boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
+                border: '1px solid #f1f5f9'
+              }}>
+                <PerformanceChart 
+                  data={regionDistributionData} 
+                  title="📍 Users by Region" 
+                />
+              </div>
+            )}
+            
+            {/* Report Status Distribution */}
+            {reportStatusData.length > 0 && (
+              <div style={{
+                background: 'white',
+                padding: '16px',
+                borderRadius: '12px',
+                boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
+                border: '1px solid #f1f5f9'
+              }}>
+                <PerformanceChart 
+                  data={reportStatusData} 
+                  title="📊 Report Status" 
+                />
+              </div>
+            )}
+            
+            {/* Today's Attendance */}
+            {todayAttendanceData.length > 0 && (
+              <div style={{
+                background: 'white',
+                padding: '16px',
+                borderRadius: '12px',
+                boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
+                border: '1px solid #f1f5f9'
+              }}>
+                <PerformanceChart 
+                  data={todayAttendanceData} 
+                  title="📋 Today's Attendance" 
+                />
+              </div>
+            )}
+            
+            {/* Leave Status */}
+            {leaveStatusData.length > 0 && (
+              <div style={{
+                background: 'white',
+                padding: '16px',
+                borderRadius: '12px',
+                boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
+                border: '1px solid #f1f5f9'
+              }}>
+                <PerformanceChart 
+                  data={leaveStatusData} 
+                  title="📅 Leave Status" 
+                />
+              </div>
+            )}
+            
+            {/* Permission Status */}
+            {permissionStatusData.length > 0 && (
+              <div style={{
+                background: 'white',
+                padding: '16px',
+                borderRadius: '12px',
+                boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
+                border: '1px solid #f1f5f9'
+              }}>
+                <PerformanceChart 
+                  data={permissionStatusData} 
+                  title="📋 Permission Status" 
+                />
+              </div>
+            )}
+          </div>
+
+          {/* Charts Row - Existing Charts */}
           <div className="charts-row" style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', marginBottom: '24px'}}>
             {/* Registration Trend Chart */}
             <div style={{
@@ -361,7 +586,7 @@ function Dashboard({
               </div>
             </div>
 
-            {/* Performance Distribution Chart */}
+            {/* Performance Distribution Chart - Using REAL DATA */}
             <div style={{
               background: 'white',
               padding: '24px',
@@ -667,6 +892,46 @@ function Dashboard({
               <div style={{fontSize: '28px', fontWeight: '700'}}>{pendingLeaves}</div>
               <div style={{fontSize: '13px', opacity: 0.8}}>📅 Pending Leaves</div>
             </div>
+          </div>
+
+          {/* ===== NEW: Supervisor Performance Charts ===== */}
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
+            gap: '20px',
+            marginBottom: '24px'
+          }}>
+            {/* Team Report Status */}
+            {reportStatusData.length > 0 && (
+              <div style={{
+                background: 'white',
+                padding: '16px',
+                borderRadius: '12px',
+                boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
+                border: '1px solid #f1f5f9'
+              }}>
+                <PerformanceChart 
+                  data={reportStatusData} 
+                  title="📊 Team Report Status" 
+                />
+              </div>
+            )}
+            
+            {/* Team Leave Status */}
+            {leaveStatusData.length > 0 && (
+              <div style={{
+                background: 'white',
+                padding: '16px',
+                borderRadius: '12px',
+                boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
+                border: '1px solid #f1f5f9'
+              }}>
+                <PerformanceChart 
+                  data={leaveStatusData} 
+                  title="📅 Team Leave Status" 
+                />
+              </div>
+            )}
           </div>
 
           {/* Charts Row */}
@@ -1070,12 +1335,13 @@ function Dashboard({
               <div className="css-trend-bars" style={{display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '8px', height: '180px', alignItems: 'end'}}>
                 {chartData.data.map((d, i) => {
                   const officerValue = citizens.filter(c => c.registeredBy === user.employeeId && c.registrationDate?.slice(0, 10) === d.date).length;
+                  const maxVal = Math.max(...chartData.data.map(d => citizens.filter(c => c.registeredBy === user.employeeId && c.registrationDate?.slice(0, 10) === d.date).length)) || 1;
                   return (
                     <div key={i} style={{display: 'flex', flexDirection: 'column', alignItems: 'center', height: '100%', justifyContent: 'flex-end'}}>
                       <div 
                         style={{ 
                           width: '100%',
-                          height: `${(officerValue / chartData.max) * 100}%`,
+                          height: `${(officerValue / maxVal) * 100}%`,
                           background: officerValue > 0 ? 'linear-gradient(180deg, #0b7e4b, #4ade80)' : '#E5E7EB',
                           minHeight: officerValue > 0 ? '20px' : '4px',
                           borderRadius: '4px 4px 0 0',
