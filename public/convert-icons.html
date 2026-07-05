@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Convert SVG to PNG</title>
+  <style>
+    body { font-family: Arial; padding: 20px; text-align: center; background: #f0f4f8; }
+    .container { max-width: 600px; margin: 0 auto; background: white; padding: 30px; border-radius: 12px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+    button { background: #1e3a5f; color: white; border: none; padding: 12px 24px; border-radius: 6px; font-size: 16px; cursor: pointer; margin: 10px; }
+    button:hover { background: #2a4a7a; }
+    .success { color: #0b7e4b; }
+    .error { color: #dc2626; }
+    .log { text-align: left; background: #f8fafc; padding: 10px; border-radius: 6px; margin-top: 10px; font-size: 13px; max-height: 200px; overflow-y: auto; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h2>📱 Generate PWA Icons</h2>
+    <p>This will create the required PNG icons for your PWA</p>
+    
+    <div>
+      <button onclick="generateIcon(192)">Generate 192x192</button>
+      <button onclick="generateIcon(512)">Generate 512x512</button>
+      <button onclick="generateBoth()">Generate Both</button>
+    </div>
+    
+    <div id="log" class="log"></div>
+    
+    <div id="status"></div>
+  </div>
+
+  <script>
+    function log(message, isError = false) {
+      const logDiv = document.getElementById('log');
+      const entry = document.createElement('div');
+      entry.textContent = message;
+      entry.style.color = isError ? '#dc2626' : '#0b7e4b';
+      logDiv.appendChild(entry);
+    }
+
+    function generateIcon(size) {
+      const canvas = document.createElement('canvas');
+      canvas.width = size;
+      canvas.height = size;
+      const ctx = canvas.getContext('2d');
+      
+      // Background - FieldSync blue
+      ctx.fillStyle = '#1e3a5f';
+      ctx.fillRect(0, 0, size, size);
+      
+      // Draw a subtle gradient
+      const gradient = ctx.createRadialGradient(size/2, size/2, 0, size/2, size/2, size/2);
+      gradient.addColorStop(0, '#2a4a7a');
+      gradient.addColorStop(1, '#1e3a5f');
+      ctx.fillStyle = gradient;
+      ctx.fillRect(0, 0, size, size);
+      
+      // Draw a circle in the background
+      ctx.beginPath();
+      ctx.arc(size/2, size/2, size * 0.35, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(255,255,255,0.05)';
+      ctx.fill();
+      
+      // Text "FS"
+      ctx.fillStyle = 'white';
+      ctx.font = `bold ${size * 0.45}px Arial, sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.shadowColor = 'rgba(0,0,0,0.2)';
+      ctx.shadowBlur = 10;
+      ctx.fillText('FS', size/2, size/2 + 5);
+      
+      // Add a small subtitle
+      ctx.shadowBlur = 0;
+      ctx.fillStyle = 'rgba(255,255,255,0.6)';
+      ctx.font = `${size * 0.08}px Arial, sans-serif`;
+      ctx.fillText('FieldSync', size/2, size/2 + size * 0.3);
+      
+      // Download
+      const link = document.createElement('a');
+      link.download = `pwa-${size}x${size}.png`;
+      link.href = canvas.toDataURL('image/png');
+      link.click();
+      
+      log(`✅ Generated pwa-${size}x${size}.png`);
+      return canvas;
+    }
+
+    function generateBoth() {
+      log('🔄 Generating both icons...');
+      setTimeout(() => generateIcon(192), 100);
+      setTimeout(() => generateIcon(512), 500);
+      log('📥 Check your downloads folder for the icons');
+    }
+
+    // Check if icons already exist
+    async function checkExisting() {
+      const sizes = [192, 512];
+      let allExist = true;
+      
+      for (const size of sizes) {
+        try {
+          const response = await fetch(`/pwa-${size}x${size}.png`);
+          if (response.ok) {
+            log(`✅ pwa-${size}x${size}.png exists`);
+          } else {
+            log(`❌ pwa-${size}x${size}.png missing`, true);
+            allExist = false;
+          }
+        } catch {
+          log(`❌ pwa-${size}x${size}.png missing`, true);
+          allExist = false;
+        }
+      }
+      
+      if (allExist) {
+        document.getElementById('status').innerHTML = '<p class="success">✅ All icons are present!</p>';
+      } else {
+        document.getElementById('status').innerHTML = '<p class="error">⚠️ Some icons are missing. Click the buttons above to generate them.</p>';
+      }
+    }
+
+    // Check on load
+    checkExisting();
+  </script>
+</body>
+</html>

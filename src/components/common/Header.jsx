@@ -1,11 +1,13 @@
-import React, { useState, useMemo } from 'react';
-import { db } from '../../services/database';
+// components/common/Header.js - Complete updated version
+
+import React, { useState, useMemo, useEffect } from 'react';
+import { db, syncQueue, checkRealInternet } from '../../services/database';
 
 function Header({ 
   user, 
-  isOnline, 
-  syncing, 
-  pendingSync, 
+  isOnline: propIsOnline, 
+  syncing: propSyncing, 
+  pendingSync: propPendingSync, 
   screenTimeDisplay, 
   activeTab,
   notifications,
@@ -14,8 +16,114 @@ function Header({
   markAllNotificationsRead
 }) {
   const [showDropdown, setShowDropdown] = useState(false);
+  const [isOnline, setIsOnline] = useState(propIsOnline || navigator.onLine);
+  const [syncing, setSyncing] = useState(propSyncing || false);
+  const [pendingSync, setPendingSync] = useState(propPendingSync || 0);
+  const [syncProgress, setSyncProgress] = useState(0);
+  const [showSyncDetails, setShowSyncDetails] = useState(false);
 
-  // Get user notifications
+  // ===== CHECK NETWORK EVERY 3 SECONDS =====
+  useEffect(() => {
+    const checkNetwork = async () => {
+      const online = await checkRealInternet();
+      if (online !== isOnline) {
+        console.log(`🔄 Header: Network changed to: ${online ? 'Online' : 'Offline'}`);
+        setIsOnline(online);
+        
+        // If back online, trigger sync
+        if (online) {
+          const queueCount = syncQueue.count();
+          if (queueCount > 0) {
+            console.log(`📤 Back online with ${queueCount} pending items`);
+            setTimeout(() => {
+              window.dispatchEvent(new CustomEvent('force-sync'));
+            }, 1000);
+          }
+        }
+      }
+    };
+
+    checkNetwork();
+    const interval = setInterval(checkNetwork, 3000);
+
+    const handleOnline = () => checkNetwork();
+    const handleOffline = () => checkNetwork();
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, [isOnline]);
+
+  // ===== LISTEN FOR SYNC EVENTS =====
+  useEffect(() => {
+    const handleSyncStart = () => {
+      setSyncing(true);
+      setSyncProgress(0);
+    };
+
+    const handleSyncProgress = (event) => {
+      if (event.detail) {
+        setSyncProgress(event.detail.progress || 0);
+      }
+    };
+
+    const handleSyncComplete = (event) => {
+      setSyncing(false);
+      const queueCount = syncQueue.count();
+      setPendingSync(queueCount);
+      
+      // Show notification
+      if (event.detail && event.detail.synced > 0) {
+        console.log(`✅ Sync complete: ${event.detail.synced} items synced`);
+      }
+    };
+
+    const handleQueueUpdated = () => {
+      const queueCount = syncQueue.count();
+      setPendingSync(queueCount);
+      
+      // Check for pending citizens
+      db.citizens.filter(c => c.synced === false).count().then(count => {
+        if (count > 0) {
+          console.log(`📋 ${count} offline citizens pending sync`);
+        }
+      });
+    };
+
+    window.addEventListener('sync-start', handleSyncStart);
+    window.addEventListener('sync-progress', handleSyncProgress);
+    window.addEventListener('sync-complete', handleSyncComplete);
+    window.addEventListener('sync-queue-updated', handleQueueUpdated);
+
+    // Initial check
+    handleQueueUpdated();
+
+    return () => {
+      window.removeEventListener('sync-start', handleSyncStart);
+      window.removeEventListener('sync-progress', handleSyncProgress);
+      window.removeEventListener('sync-complete', handleSyncComplete);
+      window.removeEventListener('sync-queue-updated', handleQueueUpdated);
+    };
+  }, []);
+
+  // ===== UPDATE PENDING SYNC FROM PROPS =====
+  useEffect(() => {
+    if (propPendingSync !== undefined && propPendingSync !== pendingSync) {
+      setPendingSync(propPendingSync);
+    }
+  }, [propPendingSync]);
+
+  useEffect(() => {
+    if (propSyncing !== undefined && propSyncing !== syncing) {
+      setSyncing(propSyncing);
+    }
+  }, [propSyncing]);
+
   const userNotifications = useMemo(() => {
     if (!notifications || !user) return [];
     return notifications
@@ -37,6 +145,7 @@ function Header({
       leaves: 'Leave Management',
       permissions: 'Permission Management',
       attendance: 'Attendance Management',
+      manager_attendance: 'Manager Attendance',
       screentime: 'Screen Time Control',
       supervisor_reports: 'Supervisor Reports',
       alerts: 'Alerts',
@@ -54,7 +163,6 @@ function Header({
     if (markNotificationRead) {
       await markNotificationRead(id);
     } else {
-      // Fallback
       try {
         await db.notifications.update(id, { read: true });
         if (setNotifications) {
@@ -73,7 +181,6 @@ function Header({
     if (markAllNotificationsRead) {
       await markAllNotificationsRead();
     } else {
-      // Fallback
       try {
         const userNotifs = notifications.filter(n => n.userId === user?.id);
         for (const n of userNotifs) {
@@ -91,10 +198,148 @@ function Header({
     }
   };
 
+  // ===== FORCE SYNC BUTTON =====
+  const handleForceSync = async () => {
+    const online = await checkRealInternet();
+    if (online) {
+      const queueCount = syncQueue.count();
+      if (queueCount === 0) {
+        alert('✅ All data is synced! No pending items.');
+        return;
+      }
+      alert(`🔄 Syncing ${queueCount} items...`);
+      window.dispatchEvent(new CustomEvent('force-sync'));
+    } else {
+      alert('❌ You are offline! Please connect to the internet to sync.');
+    }
+  };
+
+  // ===== CHECK OFFLINE CITIZENS =====
+  const [offlineCitizenCount, setOfflineCitizenCount] = useState(0);
+  
+  useEffect(() => {
+    const countOfflineCitizens = async () => {
+      try {
+        const count = await db.citizens.filter(c => c.synced === false).count();
+        setOfflineCitizenCount(count);
+      } catch (error) {
+        console.error('Error counting offline citizens:', error);
+      }
+    };
+    
+    countOfflineCitizens();
+    
+    const handleQueueUpdate = () => {
+      countOfflineCitizens();
+    };
+    
+    window.addEventListener('sync-queue-updated', handleQueueUpdate);
+    window.addEventListener('sync-complete', handleQueueUpdate);
+    
+    return () => {
+      window.removeEventListener('sync-queue-updated', handleQueueUpdate);
+      window.removeEventListener('sync-complete', handleQueueUpdate);
+    };
+  }, []);
+
+  // ===== SYNC DETAILS POPUP =====
+  const SyncDetailsPopup = () => {
+    if (!showSyncDetails) return null;
+    
+    return (
+      <div style={{
+        position: 'fixed',
+        top: '60px',
+        right: '20px',
+        background: 'white',
+        borderRadius: '12px',
+        boxShadow: '0 10px 40px rgba(0,0,0,0.2)',
+        padding: '16px 20px',
+        zIndex: 1000,
+        minWidth: '280px',
+        maxWidth: '350px',
+        border: '1px solid #e5e7eb'
+      }}>
+        <div style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          marginBottom: '12px'
+        }}>
+          <strong style={{ fontSize: '14px' }}>🔄 Sync Status</strong>
+          <button
+            onClick={() => setShowSyncDetails(false)}
+            style={{
+              background: 'transparent',
+              border: 'none',
+              fontSize: '18px',
+              cursor: 'pointer',
+              color: '#64748b'
+            }}
+          >
+            ✕
+          </button>
+        </div>
+        
+        <div style={{ fontSize: '13px', color: '#64748b' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0' }}>
+            <span>Status:</span>
+            <span style={{ fontWeight: '500', color: isOnline ? '#065f37' : '#991b1b' }}>
+              {isOnline ? '✅ Online' : '❌ Offline'}
+            </span>
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0' }}>
+            <span>Pending Items:</span>
+            <span style={{ fontWeight: '500', color: pendingSync > 0 ? '#92400e' : '#065f37' }}>
+              {pendingSync > 0 ? `${pendingSync} items` : '✅ All synced'}
+            </span>
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0' }}>
+            <span>Offline Citizens:</span>
+            <span style={{ fontWeight: '500', color: offlineCitizenCount > 0 ? '#92400e' : '#065f37' }}>
+              {offlineCitizenCount > 0 ? `${offlineCitizenCount} pending` : '✅ All synced'}
+            </span>
+          </div>
+          {syncing && (
+            <div style={{ 
+              marginTop: '8px',
+              padding: '8px',
+              background: '#eff6ff',
+              borderRadius: '6px',
+              fontSize: '12px',
+              color: '#1e40af'
+            }}>
+              🔄 Syncing in progress... {syncProgress > 0 && `${syncProgress}%`}
+            </div>
+          )}
+        </div>
+        
+        <button
+          onClick={handleForceSync}
+          style={{
+            width: '100%',
+            marginTop: '12px',
+            padding: '8px',
+            background: isOnline ? '#0b7e4b' : '#9ca3af',
+            color: 'white',
+            border: 'none',
+            borderRadius: '6px',
+            cursor: isOnline ? 'pointer' : 'not-allowed',
+            fontSize: '13px',
+            fontWeight: '500'
+          }}
+          disabled={!isOnline}
+        >
+          {isOnline ? '🔄 Sync Now' : '📡 Offline - Cannot Sync'}
+        </button>
+      </div>
+    );
+  };
+
   return (
     <header className="main-header" style={{
       background: 'white',
-      padding: '16px 32px',
+      padding: '12px 24px',
       display: 'flex',
       justifyContent: 'space-between',
       alignItems: 'center',
@@ -103,16 +348,16 @@ function Header({
       top: 0,
       zIndex: 50,
       flexWrap: 'wrap',
-      gap: '12px'
+      gap: '8px'
     }}>
       <div className="header-left">
-        <h1 style={{fontSize: '20px', fontWeight: '600', margin: 0}}>{getTitle()}</h1>
+        <h1 style={{fontSize: '18px', fontWeight: '600', margin: 0}}>{getTitle()}</h1>
       </div>
 
       <div className="header-right" style={{
         display: 'flex',
         alignItems: 'center',
-        gap: '16px',
+        gap: '12px',
         flexWrap: 'wrap'
       }}>
         {/* Notification Bell */}
@@ -123,7 +368,7 @@ function Header({
             style={{
               background: 'transparent',
               border: 'none',
-              fontSize: '24px',
+              fontSize: '20px',
               cursor: 'pointer',
               position: 'relative',
               padding: '4px'
@@ -137,16 +382,16 @@ function Header({
                 right: '-4px',
                 background: '#dc2626',
                 color: 'white',
-                fontSize: '11px',
+                fontSize: '10px',
                 fontWeight: '700',
-                width: '20px',
-                height: '20px',
+                width: '18px',
+                height: '18px',
                 borderRadius: '50%',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center'
               }}>
-                {unreadCount}
+                {unreadCount > 9 ? '9+' : unreadCount}
               </span>
             )}
           </button>
@@ -156,8 +401,8 @@ function Header({
               position: 'absolute',
               top: '100%',
               right: 0,
-              width: '380px',
-              maxHeight: '460px',
+              width: '360px',
+              maxHeight: '440px',
               background: 'white',
               borderRadius: '12px',
               boxShadow: '0 10px 40px rgba(0,0,0,0.15)',
@@ -166,12 +411,13 @@ function Header({
               marginTop: '8px'
             }}>
               <div style={{
-                padding: '12px 16px',
+                padding: '10px 16px',
                 display: 'flex',
                 justifyContent: 'space-between',
                 alignItems: 'center',
                 borderBottom: '1px solid #e5e7eb',
-                fontWeight: '600'
+                fontWeight: '600',
+                fontSize: '14px'
               }}>
                 <span>Notifications ({unreadCount} unread)</span>
                 {unreadCount > 0 && (
@@ -181,7 +427,7 @@ function Header({
                       background: 'transparent',
                       border: 'none',
                       color: '#2563eb',
-                      fontSize: '13px',
+                      fontSize: '12px',
                       cursor: 'pointer'
                     }}
                   >
@@ -191,16 +437,17 @@ function Header({
               </div>
 
               <div style={{
-                maxHeight: '380px',
+                maxHeight: '360px',
                 overflowY: 'auto'
               }}>
                 {userNotifications.length === 0 && (
                   <div style={{
                     padding: '32px',
                     textAlign: 'center',
-                    color: '#64748b'
+                    color: '#64748b',
+                    fontSize: '14px'
                   }}>
-                    No notifications
+                    📭 No notifications
                   </div>
                 )}
                 {userNotifications.slice(0, 15).map(n => (
@@ -208,7 +455,7 @@ function Header({
                     key={n.id} 
                     onClick={() => handleMarkRead(n.id)}
                     style={{
-                      padding: '12px 16px',
+                      padding: '10px 16px',
                       borderBottom: '1px solid #f3f4f6',
                       cursor: 'pointer',
                       transition: 'background 0.2s',
@@ -218,9 +465,9 @@ function Header({
                     onMouseEnter={(e) => e.currentTarget.style.background = '#f8fafc'}
                     onMouseLeave={(e) => e.currentTarget.style.background = !n.read ? '#eff6ff' : 'white'}
                   >
-                    <div style={{fontWeight: '500', fontSize: '14px'}}>{n.title}</div>
-                    <div style={{fontSize: '13px', color: '#64748b', marginTop: '2px'}}>{n.message}</div>
-                    <div style={{fontSize: '11px', color: '#9ca3af', marginTop: '4px'}}>
+                    <div style={{fontWeight: '500', fontSize: '13px'}}>{n.title}</div>
+                    <div style={{fontSize: '12px', color: '#64748b', marginTop: '2px'}}>{n.message}</div>
+                    <div style={{fontSize: '10px', color: '#9ca3af', marginTop: '4px'}}>
                       {new Date(n.timestamp).toLocaleString()}
                     </div>
                   </div>
@@ -230,44 +477,89 @@ function Header({
           )}
         </div>
 
-        {/* Online Status */}
-        <div style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: '6px',
-          fontSize: '13px',
-          color: '#64748b'
-        }}>
-          <span style={{
-            width: '10px',
-            height: '10px',
-            borderRadius: '50%',
-            display: 'inline-block',
-            background: isOnline ? '#0b7e4b' : '#b45309'
-          }}></span>
-          <span>{isOnline ? '🟢 Online' : '🔴 Offline'}</span>
-        </div>
-
-        {/* Syncing */}
-        {syncing && (
-          <div style={{
-            color: '#2563eb',
-            fontSize: '14px',
-            animation: 'pulse 1.5s ease-in-out infinite'
-          }}>🔄 Syncing...</div>
-        )}
-
-        {/* Pending Sync */}
-        {pendingSync > 0 && (
-          <span style={{
+        {/* ===== ONLINE STATUS ===== */}
+        <div 
+          onClick={() => setShowSyncDetails(!showSyncDetails)}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
             padding: '4px 12px',
             borderRadius: '20px',
-            color: 'white',
+            background: isOnline ? '#d1fae5' : '#fee2e2',
+            border: isOnline ? '1px solid #0b7e4b' : '1px solid #dc2626',
+            cursor: 'pointer'
+          }}
+          title="Click for sync details"
+        >
+          <span style={{
+            width: '8px',
+            height: '8px',
+            borderRadius: '50%',
+            display: 'inline-block',
+            background: isOnline ? '#0b7e4b' : '#dc2626',
+            animation: isOnline ? 'none' : 'pulse 1.5s ease-in-out infinite'
+          }}></span>
+          <span style={{ 
+            fontWeight: '600', 
             fontSize: '12px',
-            fontWeight: '500',
-            background: isOnline ? '#0b7e4b' : '#b45309'
+            color: isOnline ? '#065f37' : '#991b1b'
           }}>
-            {isOnline ? '🔄' : '⏳'} {pendingSync} pending
+            {isOnline ? 'Online' : 'Offline'}
+          </span>
+        </div>
+
+        {/* Syncing Indicator */}
+        {syncing && (
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+            color: '#2563eb',
+            fontSize: '12px',
+            fontWeight: '500'
+          }}>
+            <span style={{
+              display: 'inline-block',
+              width: '8px',
+              height: '8px',
+              borderRadius: '50%',
+              background: '#2563eb',
+              animation: 'pulse 0.8s ease-in-out infinite'
+            }}></span>
+            Syncing...
+          </div>
+        )}
+
+        {/* Pending Sync Badge */}
+        {pendingSync > 0 && (
+          <span 
+            onClick={() => setShowSyncDetails(!showSyncDetails)}
+            style={{
+              padding: '2px 10px',
+              borderRadius: '16px',
+              color: 'white',
+              fontSize: '11px',
+              fontWeight: '600',
+              background: isOnline ? '#0b7e4b' : '#dc2626',
+              cursor: 'pointer'
+            }}
+          >
+            {isOnline ? '🔄' : '⏳'} {pendingSync}
+          </span>
+        )}
+
+        {/* Offline Citizens Badge */}
+        {offlineCitizenCount > 0 && (
+          <span style={{
+            padding: '2px 10px',
+            borderRadius: '16px',
+            background: '#fef3c7',
+            color: '#92400e',
+            fontSize: '11px',
+            fontWeight: '500'
+          }}>
+            📋 {offlineCitizenCount} offline
           </span>
         )}
 
@@ -284,7 +576,30 @@ function Header({
             ⏱️ {screenTimeDisplay}
           </span>
         )}
+
+        {/* Manual Sync Button */}
+        <button
+          onClick={handleForceSync}
+          disabled={!isOnline}
+          style={{
+            background: isOnline ? '#1e3a5f' : '#9ca3af',
+            color: 'white',
+            border: 'none',
+            padding: '4px 12px',
+            borderRadius: '6px',
+            cursor: isOnline ? 'pointer' : 'not-allowed',
+            fontSize: '12px',
+            fontWeight: '500',
+            transition: 'background 0.2s',
+            opacity: isOnline ? 1 : 0.6
+          }}
+        >
+          🔄 Sync
+        </button>
       </div>
+
+      {/* Sync Details Popup */}
+      <SyncDetailsPopup />
     </header>
   );
 }

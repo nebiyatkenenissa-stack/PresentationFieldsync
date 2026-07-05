@@ -1,3 +1,5 @@
+// services/database.js - YOUR ORIGINAL VERSION
+
 import Dexie from 'dexie';
 import { SAMPLE_USERS } from '../utils/constants';
 import { uid, getToday } from '../utils/helpers';
@@ -8,21 +10,181 @@ const db = new Dexie('FieldSyncDB');
 db.version(1).stores({
   users: 'id, employeeId, email, role, region, status',
   reports: 'id, reportId, employeeId, region, reportDate, synced',
-  attendance: 'id, employeeId, date, status, region',
-  citizens: 'id, nationalId, firstName, lastName, region, phone',
+  attendance: 'id, employeeId, date, status, region, synced',
+  citizens: 'id, nationalId, firstName, lastName, region, phone, synced',
   audit: 'id, userId, action, timestamp',
-  supervisor_reports: 'id, supervisorId, officerId, reportDate',
+  supervisor_reports: 'id, supervisorId, officerId, reportDate, synced',
   screen_time: 'id, employeeId, date, trustScore',
   notifications: 'id, userId, read, timestamp',
   status: 'id, employeeId, status, lastActive',
-  tasks: 'id, employeeId, status, deadline, priority',
-  leaves: 'id, employeeId, status, startDate, endDate',
+  tasks: 'id, employeeId, status, deadline, priority, synced',
+  leaves: 'id, employeeId, status, startDate, endDate, synced',
   alerts: 'id, targetEmployeeId, targetAll, read, timestamp',
   auth: 'id',
-  permissions: 'id, employeeId, status, startDate, endDate'
+  permissions: 'id, employeeId, status, startDate, endDate, synced'
 });
 
 export { db };
+
+// ===== OFFLINE SYNC QUEUE =====
+export const syncQueue = {
+  pending: [],
+  
+  load: () => {
+    try {
+      const saved = localStorage.getItem('offlineSyncQueue');
+      if (saved) {
+        syncQueue.pending = JSON.parse(saved);
+        console.log(`📥 Loaded ${syncQueue.pending.length} pending items from queue`);
+      }
+    } catch (e) {
+      console.error('Error loading sync queue:', e);
+      syncQueue.pending = [];
+    }
+  },
+  
+  save: () => {
+    try {
+      localStorage.setItem('offlineSyncQueue', JSON.stringify(syncQueue.pending));
+    } catch (e) {
+      console.error('Error saving sync queue:', e);
+    }
+  },
+  
+  add: (item) => {
+    syncQueue.pending.push({
+      ...item,
+      queuedAt: new Date().toISOString(),
+      attempts: 0
+    });
+    syncQueue.save();
+    console.log(`📥 Added to sync queue: ${item.type} - ${item.id} (Total: ${syncQueue.pending.length})`);
+  },
+  
+  getAll: () => {
+    return syncQueue.pending;
+  },
+  
+  remove: (id) => {
+    syncQueue.pending = syncQueue.pending.filter(item => item.id !== id);
+    syncQueue.save();
+    console.log(`✅ Removed from sync queue: ${id} (Remaining: ${syncQueue.pending.length})`);
+  },
+  
+  clear: () => {
+    syncQueue.pending = [];
+    syncQueue.save();
+    console.log('🗑️ Sync queue cleared');
+  },
+  
+  count: () => {
+    return syncQueue.pending.length;
+  }
+};
+
+// Load queue on initialization
+syncQueue.load();
+
+// ===== CHECK INTERNET =====
+export const checkRealInternet = async () => {
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 3000);
+    const response = await fetch('https://cdn.jsdelivr.net/npm/axios/package.json', {
+      method: 'HEAD',
+      signal: controller.signal,
+      cache: 'no-store'
+    });
+    clearTimeout(timeoutId);
+    return response.ok;
+  } catch {
+    return false;
+  }
+};
+
+// ===== PROCESS SYNC QUEUE =====
+export const processSyncQueue = async (isOnline) => {
+  if (!isOnline) {
+    console.log('📡 Offline - Cannot process sync queue');
+    return { synced: 0, failed: 0, pending: syncQueue.count() };
+  }
+
+  const pending = syncQueue.getAll();
+  if (pending.length === 0) {
+    console.log('✅ No pending items to sync');
+    return { synced: 0, failed: 0, pending: 0 };
+  }
+
+  console.log(`📤 Processing ${pending.length} sync queue items...`);
+  
+  let synced = 0;
+  let failed = 0;
+
+  for (const item of pending) {
+    try {
+      // Update local record to synced
+      const storeMap = {
+        'citizen': 'citizens',
+        'report': 'reports',
+        'attendance': 'attendance',
+        'task': 'tasks',
+        'leave_request': 'leaves',
+        'permission_request': 'permissions',
+        'supervisor_report': 'supervisor_reports'
+      };
+      const store = storeMap[item.type];
+      if (store && db[store]) {
+        await db[store].update(item.id, { synced: true });
+      }
+
+      syncQueue.remove(item.id);
+      synced++;
+      console.log(`✅ Synced: ${item.type} - ${item.id}`);
+    } catch (error) {
+      console.error(`❌ Failed to sync: ${item.type} - ${item.id}`, error);
+      item.attempts = (item.attempts || 0) + 1;
+      if (item.attempts > 5) {
+        console.warn(`⚠️ Max attempts reached for ${item.id}, removing from queue`);
+        syncQueue.remove(item.id);
+      }
+      failed++;
+    }
+  }
+
+  syncQueue.save();
+  
+  return {
+    synced,
+    failed,
+    pending: syncQueue.count()
+  };
+};
+
+// ===== SYNC ENGINE =====
+export const syncPendingData = async (isOnline) => {
+  if (!isOnline) {
+    console.log('📡 Offline - Sync paused');
+    return { synced: 0, failed: 0, pending: syncQueue.count() };
+  }
+  
+  return await processSyncQueue(isOnline);
+};
+
+// ===== EVENT LISTENERS FOR ONLINE/OFFLINE =====
+if (typeof window !== 'undefined') {
+  window.addEventListener('online', async () => {
+    console.log('🔄 Back online! Starting sync...');
+    const online = await checkRealInternet();
+    const result = await processSyncQueue(online);
+    if (result.synced > 0) {
+      if (window.dispatchEvent) {
+        window.dispatchEvent(new CustomEvent('sync-complete', { 
+          detail: result 
+        }));
+      }
+    }
+  });
+}
 
 export const initializeAllData = async () => {
   try {
@@ -54,7 +216,8 @@ export const initializeAllData = async () => {
       approved: true,
       updatedBy: 'system',
       overtime: 0,
-      submittedToManager: true
+      submittedToManager: true,
+      synced: true
     }));
     await db.attendance.bulkAdd(attendance);
 
@@ -112,8 +275,8 @@ export const initializeAllData = async () => {
     await db.notifications.bulkAdd(notifications);
 
     const leaves = [
-      { id: uid(), employeeId: 'FO001', employeeName: 'መሠረት አለሙ', startDate: '2024-02-15', endDate: '2024-02-17', reason: 'Family event', type: 'annual', status: 'pending', createdAt: new Date().toISOString(), approvedBy: null, approvedAt: null },
-      { id: uid(), employeeId: 'FO004', employeeName: 'መለስ ዘነበ', startDate: '2024-02-20', endDate: '2024-02-22', reason: 'Sick', type: 'sick', status: 'pending', createdAt: new Date().toISOString(), approvedBy: null, approvedAt: null }
+      { id: uid(), employeeId: 'FO001', employeeName: 'መሠረት አለሙ', startDate: '2024-02-15', endDate: '2024-02-17', reason: 'Family event', type: 'annual', status: 'pending', createdAt: new Date().toISOString(), approvedBy: null, approvedAt: null, synced: true },
+      { id: uid(), employeeId: 'FO004', employeeName: 'መለስ ዘነበ', startDate: '2024-02-20', endDate: '2024-02-22', reason: 'Sick', type: 'sick', status: 'pending', createdAt: new Date().toISOString(), approvedBy: null, approvedAt: null, synced: true }
     ];
     await db.leaves.bulkAdd(leaves);
 
@@ -125,9 +288,9 @@ export const initializeAllData = async () => {
     await db.reports.bulkAdd(reports);
 
     const citizens = [
-      { id: uid(), nationalId: 'NID-001', firstName: 'አበበ', lastName: 'ከበደ', dateOfBirth: '1990-01-01', gender: 'Male', phone: '+251-911-000001', email: 'abebe@test.com', address: 'Addis Ababa', region: 'North', district: 'District 1', village: 'Village 1', occupation: 'Teacher', maritalStatus: 'Married', registrationDate: new Date().toISOString(), registeredBy: 'FO001', registeredByName: 'መሠረት አለሙ', idType: 'National ID', idNumber: 'NID-001', biometrics: false, status: 'active' },
-      { id: uid(), nationalId: 'NID-002', firstName: 'ሣህለ', lastName: 'ወርቅ', dateOfBirth: '1985-06-15', gender: 'Female', phone: '+251-911-000002', email: 'sahle@test.com', address: 'Addis Ababa', region: 'South', district: 'District 2', village: 'Village 2', occupation: 'Nurse', maritalStatus: 'Single', registrationDate: new Date().toISOString(), registeredBy: 'FO004', registeredByName: 'መለስ ዘነበ', idType: 'National ID', idNumber: 'NID-002', biometrics: false, status: 'active' },
-      { id: uid(), nationalId: 'NID-003', firstName: 'ኪዳን', lastName: 'ተሰማ', dateOfBirth: '1992-03-20', gender: 'Male', phone: '+251-911-000003', email: 'kidan@test.com', address: 'Addis Ababa', region: 'East', district: 'District 3', village: 'Village 3', occupation: 'Engineer', maritalStatus: 'Single', registrationDate: new Date().toISOString(), registeredBy: 'FO007', registeredByName: 'ፍቅሬ ገብረእግዚአብሔር', idType: 'National ID', idNumber: 'NID-003', biometrics: false, status: 'active' }
+      { id: uid(), nationalId: 'NID-001', firstName: 'አበበ', lastName: 'ከበደ', dateOfBirth: '1990-01-01', gender: 'Male', phone: '+251-911-000001', email: 'abebe@test.com', address: 'Addis Ababa', region: 'North', district: 'District 1', village: 'Village 1', occupation: 'Teacher', maritalStatus: 'Married', registrationDate: new Date().toISOString(), registeredBy: 'FO001', registeredByName: 'መሠረት አለሙ', idType: 'National ID', idNumber: 'NID-001', biometrics: false, status: 'active', synced: true },
+      { id: uid(), nationalId: 'NID-002', firstName: 'ሣህለ', lastName: 'ወርቅ', dateOfBirth: '1985-06-15', gender: 'Female', phone: '+251-911-000002', email: 'sahle@test.com', address: 'Addis Ababa', region: 'South', district: 'District 2', village: 'Village 2', occupation: 'Nurse', maritalStatus: 'Single', registrationDate: new Date().toISOString(), registeredBy: 'FO004', registeredByName: 'መለስ ዘነበ', idType: 'National ID', idNumber: 'NID-002', biometrics: false, status: 'active', synced: true },
+      { id: uid(), nationalId: 'NID-003', firstName: 'ኪዳን', lastName: 'ተሰማ', dateOfBirth: '1992-03-20', gender: 'Male', phone: '+251-911-000003', email: 'kidan@test.com', address: 'Addis Ababa', region: 'East', district: 'District 3', village: 'Village 3', occupation: 'Engineer', maritalStatus: 'Single', registrationDate: new Date().toISOString(), registeredBy: 'FO007', registeredByName: 'ፍቅሬ ገብረእግዚአብሔር', idType: 'National ID', idNumber: 'NID-003', biometrics: false, status: 'active', synced: true }
     ];
     await db.citizens.bulkAdd(citizens);
 
@@ -151,7 +314,8 @@ export const initializeAllData = async () => {
       status: 'submitted',
       submittedAt: new Date().toISOString(),
       region: 'North',
-      type: 'officer_report'
+      type: 'officer_report',
+      synced: true
     }];
     await db.supervisor_reports.bulkAdd(supervisorReports);
 
@@ -187,7 +351,8 @@ export const initializeAllData = async () => {
       status: 'pending',
       requestedAt: new Date().toISOString(),
       approvedBy: null,
-      approvedAt: null
+      approvedAt: null,
+      synced: true
     }];
     await db.permissions.bulkAdd(permissions);
 

@@ -1,5 +1,7 @@
+// App.js - Complete updated version with offline support
+
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { db, initializeAllData } from './services/database';
+import { db, initializeAllData, syncPendingData, syncQueue, processSyncQueue } from './services/database';
 import { useScreenTime } from './hooks/useScreenTime';
 import { getToday, formatTime, exportCSV, exportJSON, fakeSyncApi } from './utils/helpers';
 import { uid } from './utils/helpers';
@@ -11,6 +13,8 @@ import Dashboard from './components/dashboard/Dashboard';
 import Sidebar from './components/common/Sidebar';
 import Header from './components/common/Header';
 import LoadingScreen from './components/common/LoadingScreen';
+import OfflineIndicator from './components/common/OfflineIndicator';
+import SyncStatus from './components/common/SyncStatus';
 import CitizenRegistration from './components/register/CitizenRegistration';
 import ReportForm from './components/reports/ReportForm';
 import ReportList from './components/reports/ReportList';
@@ -32,6 +36,93 @@ import TeamManagement from './components/team/TeamManagement';
 // ===== LANGUAGE IMPORTS =====
 import { UserLanguageProvider } from './components/context/UserLanguageContext';
 
+// ===== REAL NETWORK CHECK =====
+const checkRealInternet = async () => {
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 3000);
+    const response = await fetch('https://cdn.jsdelivr.net/npm/axios/package.json', {
+      method: 'HEAD',
+      signal: controller.signal,
+      cache: 'no-store'
+    });
+    clearTimeout(timeoutId);
+    return response.ok;
+  } catch {
+    return false;
+  }
+};
+
+// ===== OFFLINE QUEUE PROCESSOR =====
+const processOfflineQueue = async (queueItems) => {
+  const results = { synced: 0, failed: 0 };
+  
+  for (const item of queueItems) {
+    try {
+      switch (item.type) {
+        case 'report':
+          const reportResult = await fakeSyncApi(item.data);
+          await db.reports.update(item.id, { ...reportResult, synced: true });
+          results.synced++;
+          break;
+        case 'citizen':
+          await db.citizens.update(item.id, { synced: true });
+          results.synced++;
+          break;
+        case 'attendance':
+          await db.attendance.update(item.id, { synced: true });
+          results.synced++;
+          break;
+        case 'task':
+          await db.tasks.update(item.id, { synced: true });
+          results.synced++;
+          break;
+        case 'task_update':
+          const task = await db.tasks.get(item.data.taskId);
+          if (task) {
+            await db.tasks.update(item.data.taskId, { status: item.data.status, synced: true });
+          }
+          results.synced++;
+          break;
+        case 'leave_request':
+          await db.leaves.update(item.id, { synced: true });
+          results.synced++;
+          break;
+        case 'leave_update':
+          await db.leaves.update(item.data.leaveId, { status: item.data.status, synced: true });
+          results.synced++;
+          break;
+        case 'permission_request':
+          await db.permissions.update(item.id, { synced: true });
+          results.synced++;
+          break;
+        case 'permission_update':
+          await db.permissions.update(item.data.permissionId, { status: item.data.status, synced: true });
+          results.synced++;
+          break;
+        case 'supervisor_report':
+          await db.supervisor_reports.update(item.id, { synced: true });
+          results.synced++;
+          break;
+        default:
+          results.failed++;
+      }
+    } catch (error) {
+      console.error(`❌ Failed to sync ${item.type}:`, error);
+      results.failed++;
+      // Retry logic - increment retry count
+      if (!item.retries) item.retries = 0;
+      item.retries++;
+      if (item.retries < 5) {
+        // Re-add to queue for retry
+        syncQueue.add(item);
+      }
+    }
+  }
+  
+  return results;
+};
+
 function App() {
   // ===== STATE =====
   const [user, setUser] = useState(null);
@@ -49,7 +140,7 @@ function App() {
   const [liveStatus, setLiveStatus] = useState([]);
   const [appNotifications, setAppNotifications] = useState([]);
   const [permissions, setPermissions] = useState([]);
-  const [isOnline, setIsOnline] = useState(navigator.onLine);
+  const [isOnline, setIsOnline] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [syncLog, setSyncLog] = useState([]);
   const [showSyncLog, setShowSyncLog] = useState(false);
@@ -199,7 +290,7 @@ function App() {
     reason: ''
   });
 
-  const { screenTimeDisplay, isScreenTimeRunning, stopScreenTime } = useScreenTime(user);
+  const { screenTimeDisplay, isScreenTimeRunning, startScreenTime, stopScreenTime } = useScreenTime(user);
 
   // ===== ROLE CHECKS =====
   const isManager = user?.role === 'manager';
@@ -274,7 +365,7 @@ function App() {
   }, [getUserNotifications]);
 
   // ============================================================
-  // DATA LOADING - DISABLE AUTO-LOGIN
+  // DATA LOADING
   // ============================================================
   useEffect(() => {
     const loadAllData = async () => {
@@ -317,11 +408,14 @@ function App() {
         setAppNotifications(notificationsData);
         setPermissions(permissionsData);
 
-        // ===== DISABLE AUTO-LOGIN =====
-        // Clear any existing session to force login
         await db.auth.clear();
         
-        // The auto-login is now disabled - user must login manually
+        // Check for pending sync items and process them
+        const queueItems = syncQueue.getAll();
+        if (queueItems.length > 0) {
+          console.log(`📋 Found ${queueItems.length} pending items in queue`);
+          setTimeout(() => runSync(), 2000);
+        }
         
       } catch (error) {
         console.error('Error loading data:', error);
@@ -333,77 +427,172 @@ function App() {
   }, []);
 
   // ============================================================
-  // AUTO-SYNC
+  // AUTO-SYNC - UPDATED WITH BETTER OFFLINE SUPPORT
   // ============================================================
   const runSync = useCallback(async () => {
-    if (!isOnline || syncing) return;
-    const pending = reports.filter(r => !r.synced);
-    if (pending.length === 0) return;
+    const online = await checkRealInternet();
+    
+    if (!online) {
+      console.log('📡 Sync skipped - Device is offline');
+      return;
+    }
+    
+    if (syncing) {
+      console.log('⏳ Sync already in progress');
+      return;
+    }
+    
+    // Get all pending items from queue
+    const queueItems = syncQueue.getAll();
+    const pendingReports = reports.filter(r => !r.synced);
+    
+    if (pendingReports.length === 0 && queueItems.length === 0) {
+      console.log('✅ No pending items to sync');
+      return;
+    }
 
+    console.log(`📤 Syncing ${pendingReports.length} reports and ${queueItems.length} queue items...`);
+    
     setSyncing(true);
+    let logEntries = [];
     let updated = [...reports];
-    const logEntries = [];
+    
+    try {
+      // Process queue items first
+      if (queueItems.length > 0) {
+        console.log(`🔄 Processing ${queueItems.length} items from sync queue...`);
+        const results = await processOfflineQueue(queueItems);
+        
+        if (results.synced > 0) {
+          logEntries.push(`✅ Synced ${results.synced} items from queue`);
+          // Clear synced items from queue
+          const remainingItems = syncQueue.getAll().filter(item => 
+            !queueItems.find(q => q.id === item.id && q.type === item.type)
+          );
+          syncQueue.clear();
+          remainingItems.forEach(item => syncQueue.add(item));
+        }
+        
+        if (results.failed > 0) {
+          logEntries.push(`❌ ${results.failed} items failed to sync (will retry)`);
+        }
+        
+        // Refresh data after queue processing
+        const [
+          updatedReports, updatedCitizens, updatedAttendance, 
+          updatedTasks, updatedLeaves, updatedPermissions, 
+          updatedSupervisorReports
+        ] = await Promise.all([
+          db.reports.toArray(),
+          db.citizens.toArray(),
+          db.attendance.toArray(),
+          db.tasks.toArray(),
+          db.leaves.toArray(),
+          db.permissions.toArray(),
+          db.supervisor_reports.toArray()
+        ]);
+        
+        setReports(updatedReports);
+        setCitizens(updatedCitizens);
+        setAttendance(updatedAttendance);
+        setTasks(updatedTasks);
+        setLeaves(updatedLeaves);
+        setPermissions(updatedPermissions);
+        setSupervisorReports(updatedSupervisorReports);
+      }
+      
+      // Sync pending reports
+      if (pendingReports.length > 0) {
+        for (const report of pendingReports) {
+          try {
+            const syncResult = await fakeSyncApi(report);
+            const idx = updated.findIndex(r => r.id === report.id);
+            if (idx !== -1) {
+              updated[idx] = { ...syncResult, synced: true, syncAttempts: (report.syncAttempts || 0) + 1 };
+              updated[idx] = { ...updated[idx], reviewed: true, reviewedBy: 'System Auto-Review', reviewDate: new Date().toISOString() };
+            }
+            logEntries.push(`✅ ${report.employeeName} - ${report.siteName} synced`);
+          } catch (err) {
+            const idx = updated.findIndex(r => r.id === report.id);
+            if (idx !== -1) {
+              updated[idx] = { ...updated[idx], syncAttempts: (updated[idx].syncAttempts || 0) + 1, syncError: err.message };
+            }
+            logEntries.push(`❌ ${report.employeeName} - ${report.siteName} failed: ${err.message}`);
+          }
+        }
 
-    for (const report of pending) {
-      try {
-        const result = await fakeSyncApi(report);
-        const idx = updated.findIndex(r => r.id === report.id);
-        if (idx !== -1) {
-          updated[idx] = { ...result, synced: true, syncAttempts: (report.syncAttempts || 0) + 1 };
-          updated[idx] = { ...updated[idx], reviewed: true, reviewedBy: 'System Auto-Review', reviewDate: new Date().toISOString() };
-        }
-        logEntries.push(`✅ ${report.employeeName} - ${report.siteName} synced`);
-        if (user) addNotification(user.id, 'Sync Complete', `Report from ${report.siteName} synced successfully`, 'success');
-        addAuditLog('SYNC_COMPLETE', { reportId: report.reportId, site: report.siteName });
-      } catch (err) {
-        const idx = updated.findIndex(r => r.id === report.id);
-        if (idx !== -1) {
-          updated[idx] = { ...updated[idx], syncAttempts: (updated[idx].syncAttempts || 0) + 1, syncError: err.message };
-        }
-        logEntries.push(`❌ ${report.employeeName} - ${report.siteName} failed: ${err.message}`);
-        if (user) addNotification(user.id, 'Sync Failed', `Report from ${report.siteName} failed to sync`, 'error');
+        setReports(updated);
+        await db.reports.bulkPut(updated);
+      }
+      
+      if (user && (logEntries.length > 0)) {
+        addNotification(user.id, '🔄 Sync Complete', `Synced ${logEntries.filter(l => l.includes('✅')).length} items`, 'success');
+      }
+      
+    } catch (error) {
+      console.error('Sync error:', error);
+      logEntries.push(`❌ Sync error: ${error.message}`);
+    } finally {
+      setSyncLog(prev => [...logEntries, ...prev].slice(0, 20));
+      setSyncing(false);
+      
+      // Check if there are still pending items
+      const remainingQueue = syncQueue.count();
+      const remainingReports = updated.filter(r => !r.synced).length;
+      if (remainingQueue > 0 || remainingReports > 0) {
+        console.log(`⏳ ${remainingQueue + remainingReports} items still pending, will retry...`);
+        // Schedule another sync attempt after delay
+        setTimeout(() => runSync(), 10000);
       }
     }
-
-    setReports(updated);
-    await db.reports.bulkPut(updated);
-    setSyncLog(prev => [...logEntries, ...prev].slice(0, 20));
-    setSyncing(false);
-  }, [reports, isOnline, syncing, user, addNotification, addAuditLog]);
-
-  useEffect(() => {
-    const handleOnline = () => {
-      setIsOnline(true);
-      setTimeout(() => {
-        if (reports.some(r => !r.synced)) runSync();
-      }, 2000);
-    };
-    const handleOffline = () => setIsOnline(false);
-    window.addEventListener('online', handleOnline);
-    window.addEventListener('offline', handleOffline);
-    return () => {
-      window.removeEventListener('online', handleOnline);
-      window.removeEventListener('offline', handleOffline);
-    };
-  }, [reports, runSync]);
-
-  useEffect(() => {
-    let intervalId = null;
-    if (isOnline) {
-      intervalId = setInterval(() => {
-        if (reports.some(r => !r.synced) && !syncing) runSync();
-      }, 30000);
-    }
-    return () => {
-      if (intervalId) clearInterval(intervalId);
-    };
-  }, [isOnline, reports, syncing, runSync]);
+  }, [reports, syncing, user, addNotification]);
 
   // ============================================================
-  // COMPUTED VALUES - ORDER MATTERS!
+  // NETWORK STATUS MONITORING - UPDATED
+  // ============================================================
+  useEffect(() => {
+    const checkNetwork = async () => {
+      const online = await checkRealInternet();
+      if (online !== isOnline) {
+        setIsOnline(online);
+        if (online) {
+          console.log('🔄 Back online! Checking for pending items...');
+          const queueItems = syncQueue.getAll();
+          const pendingReports = reports.filter(r => !r.synced);
+          if (queueItems.length > 0 || pendingReports.length > 0) {
+            console.log(`📤 Found ${queueItems.length} queue items and ${pendingReports.length} pending reports`);
+            setTimeout(() => runSync(), 1000);
+          }
+        }
+      }
+    };
+    
+    // Check immediately
+    checkNetwork();
+    
+    // Check every 5 seconds
+    const interval = setInterval(checkNetwork, 5000);
+    
+    // Listen for manual sync triggers
+    const handleForceSync = () => {
+      if (navigator.onLine) {
+        runSync();
+      } else {
+        alert('📡 You are offline. Please connect to the internet.');
+      }
+    };
+    window.addEventListener('force-sync', handleForceSync);
+    
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('force-sync', handleForceSync);
+    };
+  }, [reports, runSync, isOnline]);
+
+  // ============================================================
+  // COMPUTED VALUES
   // ============================================================
   
-  // 1. First define teamMembers
   const teamMembers = useMemo(() => {
     if (isSupervisor && user) {
       return users.filter(u => u.supervisorId === user.id);
@@ -411,7 +600,6 @@ function App() {
     return [];
   }, [users, user, isSupervisor]);
 
-  // 2. Then define filtered values that use teamMembers
   const filteredReports = useMemo(() => {
     if (isOfficer && user) {
       return reports.filter(r => r.employeeId === user.employeeId);
@@ -461,7 +649,6 @@ function App() {
       return leaves.filter(l => l.employeeId === user.employeeId);
     }
     if (isSupervisor && user) {
-      // Supervisor sees ONLY their OWN leaves (not team)
       return leaves.filter(l => l.employeeId === user.employeeId);
     }
     return leaves;
@@ -472,7 +659,6 @@ function App() {
       return permissions.filter(p => p.employeeId === user.employeeId);
     }
     if (isSupervisor && user) {
-      // Supervisor sees ONLY their OWN permissions (not team)
       return permissions.filter(p => p.employeeId === user.employeeId);
     }
     return permissions;
@@ -489,7 +675,6 @@ function App() {
     return alerts;
   }, [alerts, isOfficer, isSupervisor, user, teamMembers]);
 
-  // 3. Then computed values
   const employeePerformance = useMemo(() => {
     const map = {};
     reports.forEach(r => {
@@ -499,7 +684,6 @@ function App() {
           employeeName: r.employeeName,
           region: r.region,
           totalReports: 0,
-          // FIX: Use ACTUAL registered citizens count from citizens array
           totalRegistrations: citizens.filter(c => c.registeredBy === r.employeeId).length,
           avgEfficiency: 0,
           attendanceRate: 0,
@@ -548,16 +732,15 @@ function App() {
   }, [reports, attendance, screenTime, liveStatus, citizens]);
 
   const totalReports = reports.length;
-  const totalRegistrations = citizens.length; // FIX: Use actual citizen count
+  const totalRegistrations = citizens.length;
   const totalCitizens = citizens.length;
-  const pendingSync = reports.filter(r => !r.synced).length;
+  const pendingSync = reports.filter(r => !r.synced).length + syncQueue.count();
 
   const regionStats = useMemo(() => {
     const map = {};
     reports.forEach(r => {
       if (!map[r.region]) map[r.region] = { reports: 0, registrations: 0, employees: new Set() };
       map[r.region].reports += 1;
-      // FIX: Use actual registered citizens by region
       map[r.region].registrations += citizens.filter(c => c.region === r.region).length;
       map[r.region].employees.add(r.employeeId);
     });
@@ -594,43 +777,36 @@ function App() {
   const pendingLeaves = useMemo(() => leaves.filter(l => l.status === 'pending').length, [leaves]);
 
   // ============================================================
-  // SUPERVISOR FILTERS - DIRECT FILTERING IN RENDER FUNCTIONS
+  // SUPERVISOR FILTERS
   // ============================================================
-  
-  // REPORTS: Supervisor sees Team + Self only
   const getSupervisorReports = () => {
     if (!isSupervisor || !user) return reports;
     const teamIds = teamMembers.map(m => m.employeeId);
     return reports.filter(r => teamIds.includes(r.employeeId) || r.employeeId === user.employeeId);
   };
 
-  // LEAVES: Supervisor sees ONLY own leaves
   const getSupervisorLeaves = () => {
     if (!isSupervisor || !user) return leaves;
     return leaves.filter(l => l.employeeId === user.employeeId);
   };
 
-  // PERMISSIONS: Supervisor sees ONLY own permissions
   const getSupervisorPermissions = () => {
     if (!isSupervisor || !user) return permissions;
     return permissions.filter(p => p.employeeId === user.employeeId);
   };
 
-  // ATTENDANCE: Supervisor sees Team only
   const getSupervisorAttendance = () => {
     if (!isSupervisor || !user) return attendance;
     const teamIds = teamMembers.map(m => m.employeeId);
     return attendance.filter(a => teamIds.includes(a.employeeId));
   };
 
-  // SCREEN TIME: Supervisor sees Team only
   const getSupervisorScreenTime = () => {
     if (!isSupervisor || !user) return screenTime;
     const teamIds = teamMembers.map(m => m.employeeId);
     return screenTime.filter(s => teamIds.includes(s.employeeId));
   };
 
-  // TASKS: Supervisor sees Team tasks
   const getSupervisorTasks = () => {
     if (!isSupervisor || !user) return tasks;
     const teamIds = teamMembers.map(m => m.employeeId);
@@ -655,9 +831,15 @@ function App() {
   };
 
   const handleLogout = async () => {
-    if (isScreenTimeRunning) await stopScreenTime();
-    if (user) addNotification(user.id, 'Goodbye', 'You have been logged out successfully', 'info');
-    if (user) addAuditLog('LOGOUT', { email: user.email, name: user.name });
+    if (isScreenTimeRunning) {
+      await stopScreenTime();
+    }
+    
+    if (user) {
+      addNotification(user.id, 'Goodbye', 'You have been logged out successfully', 'info');
+      addAuditLog('LOGOUT', { email: user.email, name: user.name });
+    }
+    
     setUser(null);
     await db.auth.clear();
     window.location.reload();
@@ -739,10 +921,12 @@ function App() {
   };
 
   // ============================================================
-  // TASK MANAGEMENT
+  // TASK MANAGEMENT - WITH OFFLINE SUPPORT
   // ============================================================
   const handleCreateTask = async (e) => {
     e.preventDefault();
+    const online = await checkRealInternet();
+
     const task = {
       id: uid(),
       employeeId: newTask.employeeId,
@@ -754,34 +938,58 @@ function App() {
       priority: newTask.priority,
       status: 'pending',
       createdAt: new Date().toISOString(),
-      completedAt: null
+      completedAt: null,
+      synced: online ? true : false
     };
 
     setTasks(prev => { const updated = [...prev, task]; db.tasks.bulkPut(updated); return updated; });
-    const assignedUser = users.find(u => u.employeeId === task.employeeId);
-    if (assignedUser) {
-      addNotification(assignedUser.id, 'New Task Assigned', `Task "${task.title}" has been assigned to you`, 'info');
+    
+    if (!online) {
+      syncQueue.add({
+        type: 'task',
+        id: task.id,
+        data: task
+      });
+      alert('📋 Task saved offline! Will sync when online.');
+    } else {
+      const assignedUser = users.find(u => u.employeeId === task.employeeId);
+      if (assignedUser) {
+        addNotification(assignedUser.id, 'New Task Assigned', `Task "${task.title}" has been assigned to you`, 'info');
+      }
+      const manager = users.find(u => u.role === 'manager');
+      if (manager) {
+        addNotification(manager.id, '📋 Task Assigned', `Task "${task.title}" assigned to ${assignedUser?.name}`, 'info');
+      }
+      alert('✅ Task assigned successfully!');
     }
+    
     addAuditLog('CREATE_TASK', { task: task.title, assignedTo: task.employeeId });
-    const manager = users.find(u => u.role === 'manager');
-    if (manager) {
-      addNotification(manager.id, '📋 Task Assigned', `Task "${task.title}" assigned to ${assignedUser?.name}`, 'info');
-    }
     setLiveStatus(prev => {
       const updated = prev.map(l => l.employeeId === task.employeeId ? { ...l, tasksInProgress: (l.tasksInProgress || 0) + 1 } : l);
       db.status.bulkPut(updated);
       return updated;
     });
     setShowTaskModal(false);
-    alert('✅ Task assigned successfully!');
   };
 
   const updateTaskStatus = async (taskId, status) => {
+    const online = await checkRealInternet();
+    
     setTasks(prev => {
-      const updated = prev.map(t => t.id === taskId ? { ...t, status, completedAt: status === 'completed' ? new Date().toISOString() : t.completedAt } : t);
+      const updated = prev.map(t => t.id === taskId ? { ...t, status, completedAt: status === 'completed' ? new Date().toISOString() : t.completedAt, synced: online ? true : false } : t);
       db.tasks.bulkPut(updated);
       return updated;
     });
+    
+    if (!online) {
+      syncQueue.add({
+        type: 'task_update',
+        id: taskId,
+        data: { taskId, status }
+      });
+      alert('📋 Task update saved offline! Will sync when online.');
+    }
+    
     const task = tasks.find(t => t.id === taskId);
     if (task) {
       const assignedUser = users.find(u => u.employeeId === task.employeeId);
@@ -804,7 +1012,7 @@ function App() {
   };
 
   // ============================================================
-  // LEAVE MANAGEMENT - Supervisor sees ONLY own, Manager sees all but NO Request button
+  // LEAVE MANAGEMENT - WITH OFFLINE SUPPORT
   // ============================================================
   const handleRequestLeave = async (e) => {
     e.preventDefault();
@@ -812,6 +1020,8 @@ function App() {
       alert('Please fill all required fields');
       return;
     }
+
+    const online = await checkRealInternet();
 
     const leave = {
       id: uid(),
@@ -824,26 +1034,38 @@ function App() {
       status: 'pending',
       createdAt: new Date().toISOString(),
       approvedBy: null,
-      approvedAt: null
+      approvedAt: null,
+      synced: online ? true : false
     };
 
     try {
       await db.leaves.add(leave);
       setLeaves(prev => [leave, ...prev]);
-      if (isOfficer && user) {
-        const supervisor = users.find(u => u.id === user.supervisorId);
-        if (supervisor) {
-          addNotification(supervisor.id, '📅 Leave Request', `${user.name} has requested leave`, 'info');
+      
+      if (!online) {
+        syncQueue.add({
+          type: 'leave_request',
+          id: leave.id,
+          data: leave
+        });
+        alert('📅 Leave request saved offline! Will sync when online.');
+      } else {
+        if (isOfficer && user) {
+          const supervisor = users.find(u => u.id === user.supervisorId);
+          if (supervisor) {
+            addNotification(supervisor.id, '📅 Leave Request', `${user.name} has requested leave`, 'info');
+          }
+          const manager = users.find(u => u.role === 'manager');
+          if (manager) {
+            addNotification(manager.id, '📅 Leave Request', `${user.name} requested leave`, 'info');
+          }
         }
-        const manager = users.find(u => u.role === 'manager');
-        if (manager) {
-          addNotification(manager.id, '📅 Leave Request', `${user.name} requested leave`, 'info');
-        }
+        alert('✅ Leave request submitted successfully!');
       }
+      
       addAuditLog('REQUEST_LEAVE', { employee: leave.employeeName, type: leave.type });
       setShowLeaveModal(false);
       setNewLeave({ employeeId: '', startDate: '', endDate: '', reason: '', type: 'annual' });
-      alert('✅ Leave request submitted successfully!');
     } catch (error) {
       console.error('Error submitting leave:', error);
       alert('❌ Error submitting leave request');
@@ -858,21 +1080,36 @@ function App() {
         return;
       }
 
+      const online = await checkRealInternet();
+      const status = approve ? 'approved' : 'rejected';
+
       const updatedLeave = {
         ...leave,
-        status: approve ? 'approved' : 'rejected',
+        status,
         approvedBy: user.employeeId,
-        approvedAt: new Date().toISOString()
+        approvedAt: new Date().toISOString(),
+        synced: online ? true : false
       };
 
       await db.leaves.update(leaveId, updatedLeave);
       setLeaves(prev => prev.map(l => l.id === leaveId ? updatedLeave : l));
-      const officer = users.find(u => u.employeeId === leave.employeeId);
-      if (officer) {
-        addNotification(officer.id, 'Leave Request Update', `Your leave request has been ${approve ? 'approved ✅' : 'rejected ❌'}`, approve ? 'success' : 'error');
+      
+      if (!online) {
+        syncQueue.add({
+          type: 'leave_update',
+          id: leaveId,
+          data: { leaveId, status }
+        });
+        alert(`📋 Leave ${approve ? 'approved' : 'rejected'} offline! Will sync when online.`);
+      } else {
+        const officer = users.find(u => u.employeeId === leave.employeeId);
+        if (officer) {
+          addNotification(officer.id, 'Leave Request Update', `Your leave request has been ${approve ? 'approved ✅' : 'rejected ❌'}`, approve ? 'success' : 'error');
+        }
+        alert(`✅ Leave ${approve ? 'approved' : 'rejected'} successfully!`);
       }
-      addAuditLog('APPROVE_LEAVE', { leaveId, status: approve ? 'approved' : 'rejected' });
-      alert(`✅ Leave ${approve ? 'approved' : 'rejected'} successfully!`);
+      
+      addAuditLog('APPROVE_LEAVE', { leaveId, status });
     } catch (error) {
       console.error('Error updating leave:', error);
       alert('❌ Error updating leave');
@@ -880,7 +1117,7 @@ function App() {
   };
 
   // ============================================================
-  // PERMISSION MANAGEMENT - Supervisor sees ONLY own, Manager sees all but NO Request button
+  // PERMISSION MANAGEMENT - WITH OFFLINE SUPPORT
   // ============================================================
   const handleRequestPermission = async (e) => {
     e.preventDefault();
@@ -888,6 +1125,8 @@ function App() {
       alert('Please fill all required fields');
       return;
     }
+
+    const online = await checkRealInternet();
 
     const permission = {
       id: uid(),
@@ -900,26 +1139,38 @@ function App() {
       status: 'pending',
       requestedAt: new Date().toISOString(),
       approvedBy: null,
-      approvedAt: null
+      approvedAt: null,
+      synced: online ? true : false
     };
 
     try {
       await db.permissions.add(permission);
       setPermissions(prev => [permission, ...prev]);
-      if (isOfficer && user) {
-        const supervisor = users.find(u => u.id === user.supervisorId);
-        if (supervisor) {
-          addNotification(supervisor.id, '📋 Permission Request', `${user.name} has requested permission for ${permission.permissionType}`, 'info');
+      
+      if (!online) {
+        syncQueue.add({
+          type: 'permission_request',
+          id: permission.id,
+          data: permission
+        });
+        alert('📋 Permission request saved offline! Will sync when online.');
+      } else {
+        if (isOfficer && user) {
+          const supervisor = users.find(u => u.id === user.supervisorId);
+          if (supervisor) {
+            addNotification(supervisor.id, '📋 Permission Request', `${user.name} has requested permission for ${permission.permissionType}`, 'info');
+          }
+          const manager = users.find(u => u.role === 'manager');
+          if (manager) {
+            addNotification(manager.id, '📋 Permission Request', `${user.name} requested permission`, 'info');
+          }
         }
-        const manager = users.find(u => u.role === 'manager');
-        if (manager) {
-          addNotification(manager.id, '📋 Permission Request', `${user.name} requested permission`, 'info');
-        }
+        alert('✅ Permission request submitted successfully!');
       }
+      
       addAuditLog('REQUEST_PERMISSION', { employee: permission.employeeName, type: permission.permissionType });
       setShowPermissionRequestModal(false);
       setPermissionRequest({ permissionType: '', startDate: '', endDate: '', reason: '' });
-      alert('✅ Permission request submitted successfully!');
     } catch (error) {
       console.error('Error submitting permission:', error);
       alert('❌ Error submitting permission request');
@@ -934,21 +1185,36 @@ function App() {
         return;
       }
 
+      const online = await checkRealInternet();
+      const status = approve ? 'approved' : 'rejected';
+
       const updatedPermission = {
         ...permission,
-        status: approve ? 'approved' : 'rejected',
+        status,
         approvedBy: user.employeeId,
-        approvedAt: new Date().toISOString()
+        approvedAt: new Date().toISOString(),
+        synced: online ? true : false
       };
 
       await db.permissions.update(permissionId, updatedPermission);
       setPermissions(prev => prev.map(p => p.id === permissionId ? updatedPermission : p));
-      const officer = users.find(u => u.employeeId === permission.employeeId);
-      if (officer) {
-        addNotification(officer.id, 'Permission Request Update', `Your permission request has been ${approve ? 'approved ✅' : 'rejected ❌'}`, approve ? 'success' : 'error');
+      
+      if (!online) {
+        syncQueue.add({
+          type: 'permission_update',
+          id: permissionId,
+          data: { permissionId, status }
+        });
+        alert(`📋 Permission ${approve ? 'approved' : 'rejected'} offline! Will sync when online.`);
+      } else {
+        const officer = users.find(u => u.employeeId === permission.employeeId);
+        if (officer) {
+          addNotification(officer.id, 'Permission Request Update', `Your permission request has been ${approve ? 'approved ✅' : 'rejected ❌'}`, approve ? 'success' : 'error');
+        }
+        alert(`✅ Permission ${approve ? 'approved' : 'rejected'} successfully!`);
       }
-      addAuditLog('APPROVE_PERMISSION', { permissionId, status: approve ? 'approved' : 'rejected' });
-      alert(`✅ Permission ${approve ? 'approved' : 'rejected'} successfully!`);
+      
+      addAuditLog('APPROVE_PERMISSION', { permissionId, status });
     } catch (error) {
       console.error('Error updating permission:', error);
       alert('❌ Error updating permission');
@@ -1025,7 +1291,7 @@ function App() {
   };
 
   // ============================================================
-  // ATTENDANCE MANAGEMENT
+  // ATTENDANCE MANAGEMENT - WITH OFFLINE SUPPORT
   // ============================================================
   const handleOpenAttendanceModal = (officer) => {
     setSelectedAttendanceOfficer(officer);
@@ -1043,6 +1309,7 @@ function App() {
   const handleSubmitAttendance = async () => {
     if (!selectedAttendanceOfficer) return;
     const today = getToday();
+    const online = await checkRealInternet();
 
     let workHours = 0;
     if (attendanceForm.checkIn && attendanceForm.checkOut) {
@@ -1069,7 +1336,8 @@ function App() {
         notes: attendanceForm.notes || '',
         approved: true,
         updatedBy: user.employeeId,
-        submittedToManager: true
+        submittedToManager: true,
+        synced: online ? true : false
       };
 
       if (existingRecord) {
@@ -1090,6 +1358,18 @@ function App() {
         setAttendance(prev => [newRecord, ...prev]);
       }
 
+      if (!online) {
+        syncQueue.add({
+          type: 'attendance',
+          id: existingRecord ? existingRecord.id : uid(),
+          data: attendanceData
+        });
+        alert('📋 Attendance saved offline! Will sync when online.');
+        setShowAttendanceModal(false);
+        setSelectedAttendanceOfficer(null);
+        return;
+      }
+
       const manager = users.find(u => u.role === 'manager');
       if (manager) {
         addNotification(manager.id, '📋 Attendance Submitted', `Attendance for ${selectedAttendanceOfficer.name} has been submitted by ${user.name}`, 'info');
@@ -1106,7 +1386,7 @@ function App() {
   };
 
   // ============================================================
-  // CITIZEN REGISTRATION
+  // CITIZEN REGISTRATION - WITH OFFLINE SUPPORT
   // ============================================================
   const handleCitizenRegister = async (e) => {
     e.preventDefault();
@@ -1123,6 +1403,8 @@ function App() {
       alert('Phone number is required');
       return;
     }
+
+    const online = await checkRealInternet();
 
     const newCitizen = {
       id: uid(),
@@ -1145,19 +1427,31 @@ function App() {
       idType: citizenForm.idType,
       idNumber: citizenForm.idNumber.trim(),
       biometrics: citizenForm.biometrics,
-      status: 'active'
+      status: 'active',
+      synced: online ? true : false
     };
 
     setCitizens(prev => { const updated = [newCitizen, ...prev]; db.citizens.bulkPut(updated); return updated; });
-    if (isOfficer && user) {
-      const supervisor = users.find(u => u.id === user.supervisorId);
-      if (supervisor) {
-        addNotification(supervisor.id, '🆔 New Citizen Registered', `${user.name} registered ${newCitizen.firstName} ${newCitizen.lastName}`, 'success');
+
+    if (!online) {
+      syncQueue.add({
+        type: 'citizen',
+        id: newCitizen.id,
+        data: newCitizen
+      });
+      alert('🆔 Citizen saved offline! Will sync when online.');
+    } else {
+      if (isOfficer && user) {
+        const supervisor = users.find(u => u.id === user.supervisorId);
+        if (supervisor) {
+          addNotification(supervisor.id, '🆔 New Citizen Registered', `${user.name} registered ${newCitizen.firstName} ${newCitizen.lastName}`, 'success');
+        }
+        const manager = users.find(u => u.role === 'manager');
+        if (manager) {
+          addNotification(manager.id, '🆔 New Citizen Registered', `${user.name} registered ${newCitizen.firstName} ${newCitizen.lastName}`, 'success');
+        }
       }
-      const manager = users.find(u => u.role === 'manager');
-      if (manager) {
-        addNotification(manager.id, '🆔 New Citizen Registered', `${user.name} registered ${newCitizen.firstName} ${newCitizen.lastName}`, 'success');
-      }
+      alert('✅ Citizen registered successfully!');
     }
     addAuditLog('REGISTER_CITIZEN', { nationalId: newCitizen.nationalId, name: `${newCitizen.firstName} ${newCitizen.lastName}` });
 
@@ -1179,12 +1473,10 @@ function App() {
       idNumber: '',
       biometrics: false
     });
-
-    alert('✅ Citizen registered successfully!');
   };
 
   // ============================================================
-  // REPORT SUBMISSION
+  // REPORT SUBMISSION - WITH OFFLINE SUPPORT
   // ============================================================
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -1198,6 +1490,8 @@ function App() {
       alert('Registrations cannot be negative');
       return;
     }
+
+    const online = await checkRealInternet();
 
     const newReport = {
       id: uid(),
@@ -1223,7 +1517,7 @@ function App() {
       weatherConditions: form.weatherConditions.trim() || '',
       communityFeedback: form.communityFeedback.trim() || '',
       submittedAt: new Date().toISOString(),
-      synced: isOnline ? true : false,
+      synced: online ? true : false,
       syncAttempts: 0,
       syncError: null,
       reviewed: false,
@@ -1232,20 +1526,30 @@ function App() {
 
     setReports(prev => { const updated = [newReport, ...prev]; db.reports.bulkPut(updated); return updated; });
 
-    if (isOfficer && user) {
-      const supervisor = users.find(u => u.id === user.supervisorId);
-      if (supervisor) {
-        addNotification(supervisor.id, '📋 Report Submitted', `${user.name} submitted report for ${form.siteName}`, 'success');
+    if (!online) {
+      syncQueue.add({
+        type: 'report',
+        id: newReport.id,
+        data: newReport
+      });
+      alert('📋 Report saved offline! It will sync when you\'re back online.');
+    } else {
+      if (isOfficer && user) {
+        const supervisor = users.find(u => u.id === user.supervisorId);
+        if (supervisor) {
+          addNotification(supervisor.id, '📋 Report Submitted', `${user.name} submitted report for ${form.siteName}`, 'success');
+        }
+        const manager = users.find(u => u.role === 'manager');
+        if (manager) {
+          addNotification(manager.id, '📋 Report Submitted', `${user.name} submitted report for ${form.siteName}`, 'info');
+        }
+      } else if (isSupervisor && user) {
+        const manager = users.find(u => u.role === 'manager');
+        if (manager) {
+          addNotification(manager.id, '📋 Report Submitted', `${user.name} submitted report for ${form.siteName}`, 'info');
+        }
       }
-      const manager = users.find(u => u.role === 'manager');
-      if (manager) {
-        addNotification(manager.id, '📋 Report Submitted', `${user.name} submitted report for ${form.siteName}`, 'info');
-      }
-    } else if (isSupervisor && user) {
-      const manager = users.find(u => u.role === 'manager');
-      if (manager) {
-        addNotification(manager.id, '📋 Report Submitted', `${user.name} submitted report for ${form.siteName}`, 'info');
-      }
+      alert('📋 Report submitted and synced successfully!');
     }
     addAuditLog('SUBMIT_REPORT', { site: form.siteName, registrations: form.registrations });
 
@@ -1296,12 +1600,10 @@ function App() {
       weatherConditions: '',
       communityFeedback: ''
     });
-
-    alert(isOnline ? '📋 Report submitted and synced successfully!' : '📋 Report submitted offline! It will sync when internet is back.');
   };
 
   // ============================================================
-  // SUPERVISOR REPORTS
+  // SUPERVISOR REPORTS - WITH OFFLINE SUPPORT
   // ============================================================
   const handleSupervisorReportSubmit = async (e) => {
     e.preventDefault();
@@ -1310,6 +1612,8 @@ function App() {
       alert('Please select an officer');
       return;
     }
+
+    const online = await checkRealInternet();
 
     const newReport = {
       id: uid(),
@@ -1331,7 +1635,8 @@ function App() {
       status: 'submitted',
       submittedAt: new Date().toISOString(),
       region: officer.region,
-      type: 'officer_report'
+      type: 'officer_report',
+      synced: online ? true : false
     };
 
     setSupervisorReports(prev => { const updated = [newReport, ...prev]; db.supervisor_reports.bulkPut(updated); return updated; });
@@ -1342,14 +1647,23 @@ function App() {
       return updated;
     });
 
-    const manager = users.find(u => u.role === 'manager');
-    if (manager) {
-      addNotification(manager.id, '📋 Supervisor Report', `${user.name} submitted a report about ${officer.name}`, 'info');
+    if (!online) {
+      syncQueue.add({
+        type: 'supervisor_report',
+        id: newReport.id,
+        data: newReport
+      });
+      alert('📋 Supervisor report saved offline! Will sync when online.');
+    } else {
+      const manager = users.find(u => u.role === 'manager');
+      if (manager) {
+        addNotification(manager.id, '📋 Supervisor Report', `${user.name} submitted a report about ${officer.name}`, 'info');
+      }
+      addNotification(officer.id, '📋 Supervisor Report', `${user.name} submitted a report about you`, 'info');
+      alert('✅ Supervisor report submitted successfully!');
     }
-    addNotification(officer.id, '📋 Supervisor Report', `${user.name} submitted a report about you`, 'info');
     addAuditLog('SUPERVISOR_REPORT', { officer: officer.name, rating: supervisorReportForm.overallRating });
     setShowSupervisorReportModal(false);
-    alert('✅ Supervisor report submitted successfully!');
   };
 
   const handleSupervisorSelfReportSubmit = async (e) => {
@@ -1407,60 +1721,10 @@ function App() {
   };
 
   // ============================================================
-  // RENDER FUNCTIONS
+  // RENDER FUNCTIONS - All functions must be defined before use
   // ============================================================
-  const renderBarChart = () => {
-    if (regionStats.length === 0) return <div className="chart-empty">No data available</div>;
-    const maxValue = Math.max(...regionStats.map(r => r.registrations)) || 1;
-    return (
-      <div className="css-chart">
-        {regionStats.map((region, index) => (
-          <div key={region.region} className="css-chart-bar-wrapper">
-            <div className="css-chart-label">{region.region}</div>
-            <div className="css-chart-bar-container">
-              <div className="css-chart-bar" style={{ width: `${(region.registrations / maxValue) * 100}%`, background: ['#1e3a5f', '#2b4c7a', '#4a7a9c', '#6b9ec4', '#2d6a4f', '#1a3a5f'][index % 6] }}>
-                <span className="css-chart-value">{region.registrations}</span>
-              </div>
-            </div>
-          </div>
-        ))}
-      </div>
-    );
-  };
-
-  const renderTrendChart = () => {
-    const today = new Date();
-    const dates = [];
-    const registrations = [];
-    let maxTrend = 0;
-    for (let i = 6; i >= 0; i--) {
-      const d = new Date(today);
-      d.setDate(d.getDate() - i);
-      const dateStr = d.toISOString().slice(0, 10);
-      dates.push(dateStr);
-      const dailyTotal = reports.filter(r => r.reportDate === dateStr).reduce((sum, r) => sum + (r.registrations || 0), 0);
-      registrations.push(dailyTotal);
-      if (dailyTotal > maxTrend) maxTrend = dailyTotal;
-    }
-    if (maxTrend === 0) maxTrend = 1;
-    return (
-      <div className="css-trend-chart">
-        <div className="css-trend-labels">
-          {dates.map((date, i) => <div key={i} className="css-trend-label">{date}</div>)}
-        </div>
-        <div className="css-trend-bars">
-          {registrations.map((value, i) => (
-            <div key={i} className="css-trend-bar-wrapper">
-              <div className="css-trend-bar" style={{ height: `${(value / maxTrend) * 100}%`, background: value > 0 ? '#1e3a5f' : '#E5E7EB' }}>
-                <span className="css-trend-value">{value}</span>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-    );
-  };
-
+  
+  // 1. RENDER SCREEN TIME TABLE
   const renderScreenTimeTable = () => {
     const dateOptions = [];
     for (let i = 0; i < 7; i++) {
@@ -1546,7 +1810,7 @@ function App() {
                   <>
                     <div style={{display: 'flex', gap: '12px', alignItems: 'center'}}>
                       {!isActive ? (
-                        <button className="btn-primary" onClick={() => {}} style={{padding: '10px 24px', fontSize: '16px'}}>🟢 Start Work</button>
+                        <button className="btn-primary" onClick={startScreenTime} style={{padding: '10px 24px', fontSize: '16px'}}>🟢 Start Work</button>
                       ) : (
                         <button className="btn-primary btn-danger" onClick={stopScreenTime} style={{padding: '10px 24px', fontSize: '16px'}}>🔴 End Work</button>
                       )}
@@ -1567,6 +1831,7 @@ function App() {
     );
   };
 
+  // 2. RENDER NOTIFICATION BELL
   const renderNotificationBell = () => {
     return (
       <div className="notification-container">
@@ -1596,9 +1861,7 @@ function App() {
     );
   };
 
-  // ============================================================
-  // RENDER TASKS
-  // ============================================================
+  // 3. RENDER TASKS
   const renderTasks = () => {
     const displayTasks = isSupervisor ? getSupervisorTasks() : filteredTasks;
     
@@ -1651,15 +1914,12 @@ function App() {
     );
   };
 
-  // ============================================================
-  // RENDER LEAVES - Manager has NO Request button
-  // ============================================================
+  // 4. RENDER LEAVES
   const renderLeaves = () => {
     const displayLeaves = isSupervisor 
       ? leaves.filter(l => l.employeeId === user.employeeId)
       : filteredLeaves;
     
-    // Manager does NOT see Request button
     const showRequestButton = isOfficer || isSupervisor;
     
     return (
@@ -1694,15 +1954,12 @@ function App() {
     );
   };
 
-  // ============================================================
-  // RENDER PERMISSIONS - Manager has NO Request button
-  // ============================================================
+  // 5. RENDER PERMISSIONS
   const renderPermissions = () => {
     const displayPermissions = isSupervisor 
       ? permissions.filter(p => p.employeeId === user.employeeId)
       : filteredPermissions;
     
-    // Manager does NOT see Request button
     const showRequestButton = isOfficer || isSupervisor;
     
     return (
@@ -1737,9 +1994,7 @@ function App() {
     );
   };
 
-  // ============================================================
-  // RENDER ALERTS
-  // ============================================================
+  // 6. RENDER ALERTS
   const renderAlerts = () => {
     return (
       <div className="alerts-management">
@@ -1770,9 +2025,7 @@ function App() {
     );
   };
 
-  // ============================================================
-  // MODALS
-  // ============================================================
+  // 7. RENDER TASK MODAL
   const renderTaskModal = () => {
     if (!showTaskModal) return null;
     return (
@@ -1821,6 +2074,7 @@ function App() {
     );
   };
 
+  // 8. RENDER LEAVE MODAL
   const renderLeaveModal = () => {
     if (!showLeaveModal) return null;
     return (
@@ -1861,6 +2115,7 @@ function App() {
     );
   };
 
+  // 9. RENDER PERMISSION REQUEST MODAL
   const renderPermissionRequestModal = () => {
     if (!showPermissionRequestModal) return null;
     return (
@@ -1902,6 +2157,7 @@ function App() {
     );
   };
 
+  // 10. RENDER ALERT MODAL
   const renderAlertModal = () => {
     if (!showAlertModal) return null;
     return (
@@ -1954,6 +2210,7 @@ function App() {
     );
   };
 
+  // 11. RENDER ATTENDANCE MODAL
   const renderAttendanceModal = () => {
     if (!showAttendanceModal || !selectedAttendanceOfficer) return null;
     return (
@@ -1987,6 +2244,60 @@ function App() {
     );
   };
 
+  // 12. RENDER BAR CHART
+  const renderBarChart = () => {
+    if (regionStats.length === 0) return <div className="chart-empty">No data available</div>;
+    const maxValue = Math.max(...regionStats.map(r => r.registrations)) || 1;
+    return (
+      <div className="css-chart">
+        {regionStats.map((region, index) => (
+          <div key={region.region} className="css-chart-bar-wrapper">
+            <div className="css-chart-label">{region.region}</div>
+            <div className="css-chart-bar-container">
+              <div className="css-chart-bar" style={{ width: `${(region.registrations / maxValue) * 100}%`, background: ['#1e3a5f', '#2b4c7a', '#4a7a9c', '#6b9ec4', '#2d6a4f', '#1a3a5f'][index % 6] }}>
+                <span className="css-chart-value">{region.registrations}</span>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+  };
+
+  // 13. RENDER TREND CHART
+  const renderTrendChart = () => {
+    const today = new Date();
+    const dates = [];
+    const registrations = [];
+    let maxTrend = 0;
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date(today);
+      d.setDate(d.getDate() - i);
+      const dateStr = d.toISOString().slice(0, 10);
+      dates.push(dateStr);
+      const dailyTotal = reports.filter(r => r.reportDate === dateStr).reduce((sum, r) => sum + (r.registrations || 0), 0);
+      registrations.push(dailyTotal);
+      if (dailyTotal > maxTrend) maxTrend = dailyTotal;
+    }
+    if (maxTrend === 0) maxTrend = 1;
+    return (
+      <div className="css-trend-chart">
+        <div className="css-trend-labels">
+          {dates.map((date, i) => <div key={i} className="css-trend-label">{date}</div>)}
+        </div>
+        <div className="css-trend-bars">
+          {registrations.map((value, i) => (
+            <div key={i} className="css-trend-bar-wrapper">
+              <div className="css-trend-bar" style={{ height: `${(value / maxTrend) * 100}%`, background: value > 0 ? '#1e3a5f' : '#E5E7EB' }}>
+                <span className="css-trend-value">{value}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  };
+
   // ============================================================
   // LOGIN PAGE
   // ============================================================
@@ -1999,7 +2310,7 @@ function App() {
   }
 
   // ============================================================
-  // MAIN APP RETURN - WRAPPED WITH UserLanguageProvider
+  // MAIN APP RETURN
   // ============================================================
   return (
     <UserLanguageProvider>
@@ -2021,6 +2332,7 @@ function App() {
             syncing={syncing}
             pendingSync={pendingSync}
             screenTimeDisplay={screenTimeDisplay}
+            isScreenTimeRunning={isScreenTimeRunning}
             activeTab={activeTab}
             notifications={appNotifications}
             setNotifications={setAppNotifications}
@@ -2067,7 +2379,7 @@ function App() {
               />
             )}
             
-            {/* Reports - Officer or Supervisor (Supervisor sees Team + Self) */}
+            {/* Reports - Officer or Supervisor */}
             {activeTab === 'reports' && (isOfficer || isSupervisor) && (
               <ReportList 
                 reports={isSupervisor ? getSupervisorReports() : filteredReports}
@@ -2096,7 +2408,7 @@ function App() {
               />
             )}
             
-            {/* Attendance - Supervisor or Officer (Supervisor sees Team only) */}
+            {/* Attendance - Supervisor or Officer */}
             {activeTab === 'attendance' && (isSupervisor || isOfficer) && (
               <AttendanceManagement 
                 filteredAttendance={isSupervisor ? getSupervisorAttendance() : filteredAttendance}
@@ -2128,7 +2440,7 @@ function App() {
               />
             )}
             
-            {/* Tasks - All roles (Supervisor sees Team tasks) */}
+            {/* Tasks - All roles */}
             {activeTab === 'tasks' && (isManager || isSupervisor || isOfficer) && (
               <TaskManagement 
                 filteredTasks={isSupervisor ? getSupervisorTasks() : filteredTasks}
@@ -2148,7 +2460,7 @@ function App() {
               />
             )}
             
-            {/* LEAVES - Manager sees all, but NO Request button */}
+            {/* LEAVES */}
             {activeTab === 'leaves' && (isManager || isSupervisor || isOfficer) && (
               <LeaveManagement 
                 filteredLeaves={isSupervisor ? getSupervisorLeaves() : filteredLeaves}
@@ -2166,7 +2478,7 @@ function App() {
               />
             )}
             
-            {/* PERMISSIONS - Manager sees all, but NO Request button */}
+            {/* PERMISSIONS */}
             {activeTab === 'permissions' && (isManager || isSupervisor || isOfficer) && (
               <PermissionManagement 
                 filteredPermissions={isSupervisor ? getSupervisorPermissions() : filteredPermissions}
@@ -2339,6 +2651,8 @@ function App() {
           </div>
         </div>
       </div>
+      <OfflineIndicator />
+      <SyncStatus />
     </UserLanguageProvider>
   );
 }

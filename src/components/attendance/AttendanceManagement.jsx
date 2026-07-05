@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { db } from '../../services/database';
 import { getToday, uid } from '../../utils/helpers';
+import { syncQueue } from '../../services/database';
 
 function AttendanceManagement({ 
   filteredAttendance,
@@ -66,6 +67,7 @@ function AttendanceManagement({
   const handleSubmitAttendance = async () => {
     if (!selectedOfficer) return;
     const today = getToday();
+    const online = navigator.onLine;
 
     let workHours = 0;
     if (form.checkIn && form.checkOut) {
@@ -107,8 +109,11 @@ function AttendanceManagement({
         seenAt: null,
         seenBy: null,
         editedBySupervisor: true,
-        lastEditedAt: new Date().toISOString()
+        lastEditedAt: new Date().toISOString(),
+        synced: online ? true : false
       };
+
+      let recordId;
 
       if (existingRecord) {
         await db.attendance.update(existingRecord.id, attendanceData);
@@ -116,6 +121,7 @@ function AttendanceManagement({
           a.id === existingRecord.id ? { ...a, ...attendanceData } : a
         );
         if (setAttendance) setAttendance(updated);
+        recordId = existingRecord.id;
       } else {
         const newRecord = {
           id: uid(),
@@ -130,6 +136,19 @@ function AttendanceManagement({
         };
         await db.attendance.add(newRecord);
         if (setAttendance) setAttendance([newRecord, ...attendance]);
+        recordId = newRecord.id;
+      }
+
+      if (!online) {
+        syncQueue.add({
+          type: 'attendance',
+          id: recordId,
+          data: attendanceData
+        });
+        alert('📋 Attendance saved offline! Will sync when online.');
+        setShowModal(false);
+        setSelectedOfficer(null);
+        return;
       }
 
       const manager = users.find(u => u.role === 'manager');
@@ -181,6 +200,22 @@ function AttendanceManagement({
   return (
     <div style={{padding: '24px', maxWidth: '1400px', margin: '0 auto', fontFamily: 'Segoe UI, Tahoma, Geneva, Verdana, sans-serif'}}>
       
+      {/* Offline Status Banner */}
+      {!navigator.onLine && (
+        <div style={{
+          background: '#fef3c7',
+          border: '1px solid #f59e0b',
+          padding: '12px 16px',
+          borderRadius: '8px',
+          marginBottom: '16px',
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center'
+        }}>
+          <span>📡 You are offline. Attendance will be saved and synced when online.</span>
+        </div>
+      )}
+
       {/* Header Card */}
       <div style={{
         background: '#ffffff',
@@ -243,8 +278,6 @@ function AttendanceManagement({
                 background: '#ffffff',
                 transition: 'border-color 0.2s'
               }}
-              onMouseEnter={(e) => e.target.style.borderColor = '#3b82f6'}
-              onMouseLeave={(e) => e.target.style.borderColor = '#d1d5db'}
             />
             <select 
               value={attendanceFilter} 
@@ -257,8 +290,6 @@ function AttendanceManagement({
                 background: '#ffffff',
                 transition: 'border-color 0.2s'
               }}
-              onMouseEnter={(e) => e.target.style.borderColor = '#3b82f6'}
-              onMouseLeave={(e) => e.target.style.borderColor = '#d1d5db'}
             >
               <option value="all">All Status</option>
               <option value="present">Present</option>
@@ -288,6 +319,7 @@ function AttendanceManagement({
               const hasSubmitted = todayAtt?.submittedToManager;
               const isApproved = todayAtt?.approved;
               const isSeen = todayAtt?.seenByManager;
+              const isSynced = todayAtt?.synced;
               
               let borderColor = '#e5e7eb';
               let statusText = 'Not Submitted';
@@ -318,14 +350,6 @@ function AttendanceManagement({
                     boxShadow: '0 1px 3px rgba(0,0,0,0.06)',
                     transition: 'all 0.25s ease'
                   }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.1)';
-                    e.currentTarget.style.transform = 'translateY(-2px)';
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.boxShadow = '0 1px 3px rgba(0,0,0,0.06)';
-                    e.currentTarget.style.transform = 'translateY(0)';
-                  }}
                 >
                   <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center'}}>
                     <div>
@@ -333,6 +357,9 @@ function AttendanceManagement({
                       <div style={{fontSize: '12px', color: '#6b7280'}}>{officer.region}</div>
                       <div style={{fontSize: '12px', marginTop: '4px', color: statusColor, fontWeight: '500'}}>
                         {statusText}
+                        {!isSynced && hasSubmitted && (
+                          <span style={{fontSize: '10px', color: '#f59e0b', marginLeft: '4px'}}>📡 Offline</span>
+                        )}
                       </div>
                     </div>
                     <button
@@ -347,14 +374,6 @@ function AttendanceManagement({
                         fontSize: '13px',
                         fontWeight: '500',
                         transition: 'all 0.2s ease'
-                      }}
-                      onMouseEnter={(e) => {
-                        e.target.style.background = '#2d2d44';
-                        e.target.style.transform = 'scale(1.02)';
-                      }}
-                      onMouseLeave={(e) => {
-                        e.target.style.background = '#1a1a2e';
-                        e.target.style.transform = 'scale(1)';
                       }}
                     >
                       {hasSubmitted ? '✏️ Edit' : '📝 Add'}
@@ -395,7 +414,7 @@ function AttendanceManagement({
         </div>
       )}
 
-      {/* Table Card - Clean White Design */}
+      {/* Table Card */}
       <div style={{
         background: '#ffffff',
         borderRadius: '8px',
@@ -451,10 +470,13 @@ function AttendanceManagement({
                       background: isEven ? '#ffffff' : '#fafbfc',
                       transition: 'background 0.15s ease'
                     }}
-                    onMouseEnter={(e) => { e.currentTarget.style.background = '#f0f2f5'; }}
-                    onMouseLeave={(e) => { e.currentTarget.style.background = isEven ? '#ffffff' : '#fafbfc'; }}
                   >
-                    <td style={{padding: '10px 16px', fontWeight: '600', color: '#1a1a2e'}}>{a.employeeName}</td>
+                    <td style={{padding: '10px 16px', fontWeight: '600', color: '#1a1a2e'}}>
+                      {a.employeeName}
+                      {!a.synced && a.submittedToManager && (
+                        <span style={{fontSize: '10px', color: '#f59e0b', marginLeft: '4px'}}>📡</span>
+                      )}
+                    </td>
                     <td style={{padding: '10px 16px', color: '#4a5568'}}>{a.region || 'N/A'}</td>
                     <td style={{padding: '10px 16px', color: '#4a5568'}}>{a.date}</td>
                     <td style={{padding: '10px 16px'}}>
@@ -536,14 +558,6 @@ function AttendanceManagement({
                             transition: 'all 0.2s ease',
                             width: '100%'
                           }}
-                          onMouseEnter={(e) => {
-                            e.target.style.background = '#2d2d44';
-                            e.target.style.transform = 'scale(1.02)';
-                          }}
-                          onMouseLeave={(e) => {
-                            e.target.style.background = '#1a1a2e';
-                            e.target.style.transform = 'scale(1)';
-                          }}
                         >
                           ✏️ Edit
                         </button>
@@ -593,6 +607,7 @@ function AttendanceManagement({
             }}>
               <h3 style={{fontSize: '20px', fontWeight: '600', color: '#1a1a2e', margin: 0}}>
                 ✏️ Edit Attendance - {selectedOfficer.name}
+                {!navigator.onLine && <span style={{fontSize: '12px', color: '#f59e0b', marginLeft: '8px'}}>📡 Offline</span>}
               </h3>
               <button 
                 onClick={() => setShowModal(false)} 
@@ -605,8 +620,6 @@ function AttendanceManagement({
                   transition: 'color 0.2s',
                   padding: '4px 8px'
                 }}
-                onMouseEnter={(e) => e.target.style.color = '#374151'}
-                onMouseLeave={(e) => e.target.style.color = '#9ca3af'}
               >
                 ✕
               </button>
@@ -661,8 +674,6 @@ function AttendanceManagement({
                     background: '#ffffff',
                     transition: 'border-color 0.2s'
                   }}
-                  onMouseEnter={(e) => e.target.style.borderColor = '#3b82f6'}
-                  onMouseLeave={(e) => e.target.style.borderColor = '#d1d5db'}
                 >
                   <option value="present">✅ Present</option>
                   <option value="late">⏰ Late</option>
@@ -686,8 +697,6 @@ function AttendanceManagement({
                       fontSize: '14px',
                       transition: 'border-color 0.2s'
                     }}
-                    onMouseEnter={(e) => e.target.style.borderColor = '#3b82f6'}
-                    onMouseLeave={(e) => e.target.style.borderColor = '#d1d5db'}
                   />
                 </div>
                 <div style={{display: 'flex', flexDirection: 'column', gap: '4px'}}>
@@ -703,8 +712,6 @@ function AttendanceManagement({
                       fontSize: '14px',
                       transition: 'border-color 0.2s'
                     }}
-                    onMouseEnter={(e) => e.target.style.borderColor = '#3b82f6'}
-                    onMouseLeave={(e) => e.target.style.borderColor = '#d1d5db'}
                   />
                 </div>
               </div>
@@ -726,8 +733,6 @@ function AttendanceManagement({
                       fontSize: '14px',
                       transition: 'border-color 0.2s'
                     }}
-                    onMouseEnter={(e) => e.target.style.borderColor = '#3b82f6'}
-                    onMouseLeave={(e) => e.target.style.borderColor = '#d1d5db'}
                   />
                 </div>
                 <div style={{display: 'flex', flexDirection: 'column', gap: '4px'}}>
@@ -746,8 +751,6 @@ function AttendanceManagement({
                       fontSize: '14px',
                       transition: 'border-color 0.2s'
                     }}
-                    onMouseEnter={(e) => e.target.style.borderColor = '#3b82f6'}
-                    onMouseLeave={(e) => e.target.style.borderColor = '#d1d5db'}
                   />
                 </div>
                 <div style={{display: 'flex', flexDirection: 'column', gap: '4px'}}>
@@ -766,8 +769,6 @@ function AttendanceManagement({
                       fontSize: '14px',
                       transition: 'border-color 0.2s'
                     }}
-                    onMouseEnter={(e) => e.target.style.borderColor = '#3b82f6'}
-                    onMouseLeave={(e) => e.target.style.borderColor = '#d1d5db'}
                   />
                 </div>
               </div>
@@ -789,28 +790,28 @@ function AttendanceManagement({
                     fontFamily: 'inherit',
                     transition: 'border-color 0.2s'
                   }}
-                  onMouseEnter={(e) => e.target.style.borderColor = '#3b82f6'}
-                  onMouseLeave={(e) => e.target.style.borderColor = '#d1d5db'}
                 />
               </div>
 
               <div style={{
                 padding: '14px',
-                background: '#dbeafe',
+                background: !navigator.onLine ? '#fef3c7' : '#dbeafe',
                 borderRadius: '8px',
                 fontSize: '13px',
-                color: '#1e40af',
-                border: '1px solid #93c5fd'
+                color: !navigator.onLine ? '#92400e' : '#1e40af',
+                border: !navigator.onLine ? '1px solid #f59e0b' : '1px solid #93c5fd'
               }}>
-                <strong>ℹ️ Note:</strong> This attendance will be sent to the manager for review. 
-                If it was previously approved, the approval will be reset.
+                <strong>ℹ️ {navigator.onLine ? 'Online' : 'Offline'}:</strong> 
+                {navigator.onLine 
+                  ? ' This attendance will be sent to the manager for review.' 
+                  : ' This attendance will be saved offline and synced when back online.'}
               </div>
 
               <div style={{display: 'flex', gap: '12px', marginTop: '8px'}}>
                 <button 
                   onClick={handleSubmitAttendance}
                   style={{
-                    background: '#16a34a',
+                    background: navigator.onLine ? '#16a34a' : '#f59e0b',
                     color: '#ffffff',
                     border: 'none',
                     padding: '12px 24px',
@@ -821,16 +822,8 @@ function AttendanceManagement({
                     transition: 'all 0.2s ease',
                     flex: 1
                   }}
-                  onMouseEnter={(e) => {
-                    e.target.style.background = '#15803d';
-                    e.target.style.transform = 'scale(1.02)';
-                  }}
-                  onMouseLeave={(e) => {
-                    e.target.style.background = '#16a34a';
-                    e.target.style.transform = 'scale(1)';
-                  }}
                 >
-                  📤 Submit to Manager
+                  {navigator.onLine ? '📤 Submit to Manager' : '💾 Save Offline'}
                 </button>
                 <button 
                   onClick={() => setShowModal(false)}
@@ -845,8 +838,6 @@ function AttendanceManagement({
                     fontWeight: '500',
                     transition: 'background 0.2s ease'
                   }}
-                  onMouseEnter={(e) => e.target.style.background = '#d1d5db'}
-                  onMouseLeave={(e) => e.target.style.background = '#e5e7eb'}
                 >
                   Cancel
                 </button>

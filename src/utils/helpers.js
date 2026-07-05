@@ -13,9 +13,14 @@ export const formatTime = (seconds) => {
 
 export const fakeSyncApi = (report) => {
   return new Promise((resolve, reject) => {
+    if (!navigator.onLine) {
+      reject(new Error('You are offline. Please connect to the internet.'));
+      return;
+    }
+    
     const delay = 500 + Math.random() * 1000;
     setTimeout(() => {
-      if (Math.random() < 0.08) {
+      if (Math.random() < 0.1) {
         reject(new Error('Network error - sync failed'));
       } else {
         resolve({ ...report, synced: true, syncDate: new Date().toISOString() });

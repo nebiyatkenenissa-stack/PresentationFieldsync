@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { db } from '../../services/database';
 import { uid } from '../../utils/helpers';
+import { syncQueue } from '../../services/database';
 
 function LeaveManagement({ 
   filteredLeaves,
@@ -27,11 +28,9 @@ function LeaveManagement({
     type: 'annual'
   });
 
-  // ========== FILTER LEAVES BASED ON ROLE ==========
   const getFilteredLeaves = () => {
     if (!leaves) return [];
     
-    // SUPERVISOR: Sees their OWN leaves + their TEAM's leaves (for approval)
     if (isSupervisor && user) {
       const teamIds = teamMembers.map(m => m.employeeId);
       return leaves.filter(l => 
@@ -39,12 +38,10 @@ function LeaveManagement({
       );
     }
     
-    // OFFICER: ONLY their own leaves
     if (isOfficer && user) {
       return leaves.filter(l => l.employeeId === user.employeeId);
     }
     
-    // MANAGER: All leaves
     return leaves;
   };
 
@@ -53,7 +50,6 @@ function LeaveManagement({
   const approvedLeaves = filtered.filter(l => l.status === 'approved');
   const rejectedLeaves = filtered.filter(l => l.status === 'rejected');
 
-  // ========== HANDLE REQUEST LEAVE ==========
   const handleRequestLeave = async (e) => {
     e.preventDefault();
     
@@ -62,6 +58,7 @@ function LeaveManagement({
       return;
     }
 
+    const online = navigator.onLine;
     setIsSubmitting(true);
 
     try {
@@ -76,7 +73,8 @@ function LeaveManagement({
         status: 'pending',
         createdAt: new Date().toISOString(),
         approvedBy: null,
-        approvedAt: null
+        approvedAt: null,
+        synced: online ? true : false
       };
 
       await db.leaves.add(leave);
@@ -84,18 +82,24 @@ function LeaveManagement({
       if (setLeaves && typeof setLeaves === 'function') {
         const updated = [leave, ...leaves];
         setLeaves(updated);
-      } else {
-        const allLeaves = await db.leaves.toArray();
-        if (setLeaves) setLeaves(allLeaves);
       }
       
-      if (addNotification) {
-        addNotification(user.id, '📅 Leave Request', `Leave request submitted from ${leave.startDate} to ${leave.endDate}`, 'info');
+      if (!online) {
+        syncQueue.add({
+          type: 'leave_request',
+          id: leave.id,
+          data: leave
+        });
+        alert('📅 Leave request saved offline! Will sync when online.');
+      } else {
+        if (addNotification) {
+          addNotification(user.id, '📅 Leave Request', `Leave request submitted from ${leave.startDate} to ${leave.endDate}`, 'info');
+        }
+        alert('✅ Leave request submitted successfully!');
       }
       
       setShowModal(false);
       setNewLeave({ employeeId: '', startDate: '', endDate: '', reason: '', type: 'annual' });
-      alert('✅ Leave request submitted successfully!');
     } catch (error) {
       console.error('Error submitting leave:', error);
       alert('❌ Error submitting leave request: ' + error.message);
@@ -104,7 +108,6 @@ function LeaveManagement({
     }
   };
 
-  // ========== APPROVE LEAVE ==========
   const approveLeave = async (leaveId, approve) => {
     try {
       const leave = leaves?.find(l => l.id === leaveId);
@@ -113,14 +116,11 @@ function LeaveManagement({
         return;
       }
 
-      // APPROVAL RULES
       if (isSupervisor) {
-        // Supervisor CANNOT approve their OWN leave
         if (leave.employeeId === user.employeeId) {
           alert('❌ You cannot approve your own leave request. Please wait for Manager approval.');
           return;
         }
-        // Supervisor CAN approve team members' leaves
         const teamIds = teamMembers.map(m => m.employeeId);
         if (!teamIds.includes(leave.employeeId)) {
           alert('❌ You can only approve leave requests from your team members.');
@@ -133,11 +133,15 @@ function LeaveManagement({
         return;
       }
 
+      const online = navigator.onLine;
+      const status = approve ? 'approved' : 'rejected';
+
       const updatedLeave = {
         ...leave,
-        status: approve ? 'approved' : 'rejected',
+        status,
         approvedBy: user.employeeId,
-        approvedAt: new Date().toISOString()
+        approvedAt: new Date().toISOString(),
+        synced: online ? true : false
       };
 
       await db.leaves.update(leaveId, updatedLeave);
@@ -149,17 +153,25 @@ function LeaveManagement({
         setLeaves(updated);
       }
       
-      const officer = users?.find(u => u.employeeId === leave.employeeId);
-      if (officer && addNotification) {
-        addNotification(
-          officer.id, 
-          'Leave Request Update', 
-          `Your leave request has been ${approve ? 'approved ✅' : 'rejected ❌'} by ${user.name}`, 
-          approve ? 'success' : 'error'
-        );
+      if (!online) {
+        syncQueue.add({
+          type: 'leave_update',
+          id: leaveId,
+          data: { leaveId, status }
+        });
+        alert(`📋 Leave ${approve ? 'approved' : 'rejected'} offline! Will sync when online.`);
+      } else {
+        const officer = users?.find(u => u.employeeId === leave.employeeId);
+        if (officer && addNotification) {
+          addNotification(
+            officer.id, 
+            'Leave Request Update', 
+            `Your leave request has been ${approve ? 'approved ✅' : 'rejected ❌'} by ${user.name}`, 
+            approve ? 'success' : 'error'
+          );
+        }
+        alert(`✅ Leave ${approve ? 'approved' : 'rejected'} successfully!`);
       }
-      
-      alert(`✅ Leave ${approve ? 'approved' : 'rejected'} successfully!`);
     } catch (error) {
       console.error('Error updating leave:', error);
       alert('❌ Error updating leave: ' + error.message);
@@ -173,7 +185,6 @@ function LeaveManagement({
     return filtered;
   };
 
-  // ========== MODAL ==========
   const renderModal = () => {
     return (
       <div className="modal-overlay" onClick={() => setShowModal(false)}>
@@ -187,7 +198,10 @@ function LeaveManagement({
           overflowY: 'auto'
         }}>
           <div className="modal-header" style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px'}}>
-            <h3 style={{fontSize: '20px', fontWeight: '600'}}>Request Leave</h3>
+            <h3 style={{fontSize: '20px', fontWeight: '600'}}>
+              Request Leave
+              {!navigator.onLine && <span style={{fontSize: '12px', color: '#f59e0b', marginLeft: '8px'}}>📡 Offline</span>}
+            </h3>
             <button className="modal-close" onClick={() => setShowModal(false)} style={{
               background: 'transparent',
               border: 'none',
@@ -247,9 +261,21 @@ function LeaveManagement({
               <label style={{fontSize: '13px', fontWeight: '500', color: '#374151'}}>Reason *</label>
               <textarea value={newLeave.reason} onChange={e => setNewLeave({...newLeave, reason: e.target.value})} placeholder="Enter reason for leave" rows="3" required style={{padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '14px', resize: 'vertical', minHeight: '60px'}} />
             </div>
+            <div style={{
+              padding: '12px',
+              background: !navigator.onLine ? '#fef3c7' : '#dbeafe',
+              borderRadius: '8px',
+              fontSize: '13px',
+              color: !navigator.onLine ? '#92400e' : '#1e40af'
+            }}>
+              <strong>ℹ️ {navigator.onLine ? 'Online' : 'Offline'}:</strong>
+              {navigator.onLine 
+                ? ' Your leave request will be sent immediately.' 
+                : ' Your leave request will be saved offline and synced when online.'}
+            </div>
             <div className="modal-actions" style={{display: 'flex', gap: '12px', marginTop: '8px'}}>
               <button type="submit" className="btn-submit" disabled={isSubmitting} style={{
-                background: '#0b7e4b',
+                background: navigator.onLine ? '#0b7e4b' : '#f59e0b',
                 color: 'white',
                 border: 'none',
                 padding: '10px 24px',
@@ -261,7 +287,7 @@ function LeaveManagement({
                 visibility: 'visible',
                 display: 'inline-flex'
               }}>
-                {isSubmitting ? 'Submitting...' : 'Submit Request'}
+                {isSubmitting ? 'Submitting...' : navigator.onLine ? 'Submit Request' : '💾 Save Offline'}
               </button>
               <button type="button" className="btn-cancel" onClick={() => setShowModal(false)} style={{
                 background: '#e5e7eb',
@@ -285,7 +311,6 @@ function LeaveManagement({
     );
   };
 
-  // ========== SUPERVISOR VIEW ==========
   const renderSupervisorView = () => {
     const teamIds = teamMembers.map(m => m.employeeId);
     const teamPendingLeaves = pendingLeaves.filter(l => teamIds.includes(l.employeeId));
@@ -293,6 +318,18 @@ function LeaveManagement({
 
     return (
       <div className="leaves-view">
+        {!navigator.onLine && (
+          <div style={{
+            background: '#fef3c7',
+            border: '1px solid #f59e0b',
+            padding: '12px 16px',
+            borderRadius: '8px',
+            marginBottom: '16px'
+          }}>
+            📡 You are offline. Leave actions will be saved and synced when online.
+          </div>
+        )}
+
         <div className="form-card">
           <div className="form-header" style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px'}}>
             <div>
@@ -364,7 +401,12 @@ function LeaveManagement({
                       <td>{l.startDate}</td>
                       <td>{l.endDate}</td>
                       <td>{l.reason}</td>
-                      <td><span style={{padding: '4px 12px', borderRadius: '20px', fontSize: '12px', fontWeight: '500', background: l.status === 'pending' ? '#fef3c7' : l.status === 'approved' ? '#d1fae5' : '#fee2e2', color: l.status === 'pending' ? '#92400e' : l.status === 'approved' ? '#065f37' : '#991b1b'}}>{l.status}</span></td>
+                      <td>
+                        <span style={{padding: '4px 12px', borderRadius: '20px', fontSize: '12px', fontWeight: '500', background: l.status === 'pending' ? '#fef3c7' : l.status === 'approved' ? '#d1fae5' : '#fee2e2', color: l.status === 'pending' ? '#92400e' : l.status === 'approved' ? '#065f37' : '#991b1b'}}>
+                          {l.status}
+                          {!l.synced && l.status !== 'pending' && <span style={{fontSize: '10px', color: '#f59e0b', marginLeft: '4px'}}>📡</span>}
+                        </span>
+                      </td>
                       <td>
                         {l.status === 'pending' && (
                           canApprove ? (
@@ -388,10 +430,21 @@ function LeaveManagement({
     );
   };
 
-  // ========== OFFICER VIEW ==========
   const renderOfficerView = () => {
     return (
       <div className="leaves-view">
+        {!navigator.onLine && (
+          <div style={{
+            background: '#fef3c7',
+            border: '1px solid #f59e0b',
+            padding: '12px 16px',
+            borderRadius: '8px',
+            marginBottom: '16px'
+          }}>
+            📡 You are offline. Leave requests will be saved and synced when online.
+          </div>
+        )}
+
         <div className="form-card">
           <div className="form-header" style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px'}}>
             <div>
@@ -423,7 +476,12 @@ function LeaveManagement({
                     <td>{l.startDate}</td>
                     <td>{l.endDate}</td>
                     <td>{l.reason}</td>
-                    <td><span style={{padding: '4px 12px', borderRadius: '20px', fontSize: '12px', fontWeight: '500', background: l.status === 'pending' ? '#fef3c7' : l.status === 'approved' ? '#d1fae5' : '#fee2e2', color: l.status === 'pending' ? '#92400e' : l.status === 'approved' ? '#065f37' : '#991b1b'}}>{l.status}</span></td>
+                    <td>
+                      <span style={{padding: '4px 12px', borderRadius: '20px', fontSize: '12px', fontWeight: '500', background: l.status === 'pending' ? '#fef3c7' : l.status === 'approved' ? '#d1fae5' : '#fee2e2', color: l.status === 'pending' ? '#92400e' : l.status === 'approved' ? '#065f37' : '#991b1b'}}>
+                        {l.status}
+                        {!l.synced && l.status !== 'pending' && <span style={{fontSize: '10px', color: '#f59e0b', marginLeft: '4px'}}>📡</span>}
+                      </span>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -435,10 +493,21 @@ function LeaveManagement({
     );
   };
 
-  // ========== MANAGER VIEW ==========
   const renderManagerView = () => {
     return (
       <div className="leaves-view">
+        {!navigator.onLine && (
+          <div style={{
+            background: '#fef3c7',
+            border: '1px solid #f59e0b',
+            padding: '12px 16px',
+            borderRadius: '8px',
+            marginBottom: '16px'
+          }}>
+            📡 You are offline. Approvals will be saved and synced when online.
+          </div>
+        )}
+
         <div className="form-card">
           <div className="form-header" style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px'}}>
             <div>
@@ -447,7 +516,6 @@ function LeaveManagement({
             </div>
             <div style={{display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap'}}>
               <span className="form-badge" style={{background: '#fef3c7', color: '#92400e'}}>{pendingLeaves.length} Pending</span>
-              {/* ✅ REMOVED: Request Leave button for Manager - Manager only approves/rejects */}
             </div>
           </div>
 
@@ -470,7 +538,12 @@ function LeaveManagement({
                     <td>{l.startDate}</td>
                     <td>{l.endDate}</td>
                     <td>{l.reason}</td>
-                    <td><span style={{padding: '4px 12px', borderRadius: '20px', fontSize: '12px', fontWeight: '500', background: l.status === 'pending' ? '#fef3c7' : l.status === 'approved' ? '#d1fae5' : '#fee2e2', color: l.status === 'pending' ? '#92400e' : l.status === 'approved' ? '#065f37' : '#991b1b'}}>{l.status}</span></td>
+                    <td>
+                      <span style={{padding: '4px 12px', borderRadius: '20px', fontSize: '12px', fontWeight: '500', background: l.status === 'pending' ? '#fef3c7' : l.status === 'approved' ? '#d1fae5' : '#fee2e2', color: l.status === 'pending' ? '#92400e' : l.status === 'approved' ? '#065f37' : '#991b1b'}}>
+                        {l.status}
+                        {!l.synced && l.status !== 'pending' && <span style={{fontSize: '10px', color: '#f59e0b', marginLeft: '4px'}}>📡</span>}
+                      </span>
+                    </td>
                     <td>
                       {l.status === 'pending' && (
                         <>
@@ -486,12 +559,10 @@ function LeaveManagement({
             </table>
           </div>
         </div>
-        {/* ✅ Modal removed for Manager - Manager does not request leave */}
       </div>
     );
   };
 
-  // ========== MAIN RENDER ==========
   if (isSupervisor) return renderSupervisorView();
   if (isOfficer) return renderOfficerView();
   if (isManager) return renderManagerView();

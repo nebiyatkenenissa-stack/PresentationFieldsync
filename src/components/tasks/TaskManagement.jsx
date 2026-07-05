@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { uid } from '../../utils/helpers';
 import { db } from '../../services/database';
+import { syncQueue } from '../../services/database';
 
 function TaskManagement({ 
   filteredTasks, 
@@ -12,7 +13,7 @@ function TaskManagement({
   isOfficer, 
   teamMembers, 
   addNotification,
-  setTasks // Add this prop to update parent state
+  setTasks
 }) {
   const [showModal, setShowModal] = useState(false);
   const [taskFilter, setTaskFilter] = useState('all');
@@ -25,7 +26,6 @@ function TaskManagement({
   });
   const [isUpdating, setIsUpdating] = useState(false);
 
-  // Filter tasks based on role and filter
   const getFilteredTasks = () => {
     let filtered = tasks;
     
@@ -51,6 +51,8 @@ function TaskManagement({
       return;
     }
 
+    const online = navigator.onLine;
+
     const task = {
       id: uid(),
       employeeId: newTask.employeeId,
@@ -63,43 +65,39 @@ function TaskManagement({
       status: 'pending',
       createdAt: new Date().toISOString(),
       completedAt: null,
-      updatedAt: new Date().toISOString()
+      updatedAt: new Date().toISOString(),
+      synced: online ? true : false
     };
 
     try {
-      // Add to IndexedDB
       await db.tasks.add(task);
       
-      // Update parent state - FIX: Use setTasks from parent
       if (setTasks) {
         setTasks(prev => [task, ...prev]);
       }
-      
-      // Notify assigned user
-      const assignedUser = users.find(u => u.employeeId === task.employeeId);
-      if (assignedUser && addNotification) {
-        await addNotification(
-          assignedUser.id,
-          '📋 New Task Assigned',
-          `Task "${task.title}" has been assigned to you by ${user.name}`,
-          'info'
-        );
-      }
-      
-      // Notify manager
-      const manager = users.find(u => u.role === 'manager');
-      if (manager && manager.id !== user.id && addNotification) {
-        await addNotification(
-          manager.id,
-          '📋 Task Assigned',
-          `${user.name} assigned task "${task.title}" to ${assignedUser?.name || 'an officer'}`,
-          'info'
-        );
+
+      if (!online) {
+        syncQueue.add({
+          type: 'task',
+          id: task.id,
+          data: task
+        });
+        alert('📋 Task saved offline! Will sync when online.');
+      } else {
+        const assignedUser = users.find(u => u.employeeId === task.employeeId);
+        if (assignedUser && addNotification) {
+          await addNotification(
+            assignedUser.id,
+            '📋 New Task Assigned',
+            `Task "${task.title}" has been assigned to you by ${user.name}`,
+            'info'
+          );
+        }
+        alert('✅ Task assigned successfully!');
       }
 
       setShowModal(false);
       setNewTask({ employeeId: '', title: '', description: '', deadline: '', priority: 'medium' });
-      alert('✅ Task assigned successfully!');
     } catch (error) {
       console.error('Error creating task:', error);
       alert('❌ Error creating task: ' + error.message);
@@ -118,7 +116,6 @@ function TaskManagement({
         return;
       }
 
-      // Check permissions
       if (isOfficer && task.employeeId !== user.employeeId) {
         alert('You can only update your own tasks');
         setIsUpdating(false);
@@ -134,25 +131,37 @@ function TaskManagement({
         }
       }
 
+      const online = navigator.onLine;
+
       const updatedTask = {
         ...task,
         status: newStatus,
         completedAt: newStatus === 'completed' ? new Date().toISOString() : task.completedAt,
         updatedAt: new Date().toISOString(),
         updatedBy: user.employeeId,
-        updatedByName: user.name
+        updatedByName: user.name,
+        synced: online ? true : false
       };
 
       await db.tasks.update(taskId, updatedTask);
       
-      // Update parent state - FIX: Use setTasks from parent
       if (setTasks) {
         setTasks(prev => prev.map(t => 
           t.id === taskId ? updatedTask : t
         ));
       }
 
-      // Notify the assigned user
+      if (!online) {
+        syncQueue.add({
+          type: 'task_update',
+          id: taskId,
+          data: { taskId, status: newStatus }
+        });
+        alert(`📋 Task status updated offline! Will sync when online.`);
+        setIsUpdating(false);
+        return;
+      }
+
       const assignedUser = users.find(u => u.employeeId === task.employeeId);
       if (assignedUser && addNotification && assignedUser.id !== user.id) {
         await addNotification(
@@ -163,7 +172,6 @@ function TaskManagement({
         );
       }
 
-      // Notify manager
       const manager = users.find(u => u.role === 'manager');
       if (manager && manager.id !== user.id && addNotification) {
         await addNotification(
@@ -183,7 +191,6 @@ function TaskManagement({
     }
   };
 
-  // Get status badge color
   const getStatusBadgeStyle = (status) => {
     const styles = {
       pending: { background: '#fef3c7', color: '#92400e' },
@@ -193,7 +200,6 @@ function TaskManagement({
     return styles[status] || styles.pending;
   };
 
-  // Get priority badge color
   const getPriorityBadgeStyle = (priority) => {
     const styles = {
       low: { background: '#d1fae5', color: '#065f37' },
@@ -205,7 +211,6 @@ function TaskManagement({
 
   const displayTasks = getFilteredTasks();
 
-  // Count tasks by status
   const taskStats = {
     total: displayTasks.length,
     pending: displayTasks.filter(t => t.status === 'pending').length,
@@ -215,6 +220,19 @@ function TaskManagement({
 
   return (
     <div className="tasks-view">
+      {/* Offline Banner */}
+      {!navigator.onLine && (
+        <div style={{
+          background: '#fef3c7',
+          border: '1px solid #f59e0b',
+          padding: '12px 16px',
+          borderRadius: '8px',
+          marginBottom: '16px'
+        }}>
+          📡 You are offline. Tasks will be saved and synced when online.
+        </div>
+      )}
+
       <div className="form-card">
         <div className="form-header">
           <div>
@@ -332,6 +350,9 @@ function TaskManagement({
                             Assigned by: {t.assignedByName}
                           </div>
                         )}
+                        {!t.synced && (
+                          <span style={{ fontSize: '10px', color: '#f59e0b', marginLeft: '4px' }}>📡 Offline</span>
+                        )}
                       </td>
                       <td>
                         {assignedUser?.name || t.employeeId}
@@ -415,7 +436,10 @@ function TaskManagement({
             overflowY: 'auto'
           }}>
             <div className="modal-header" style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px'}}>
-              <h3 style={{fontSize: '20px', fontWeight: '600'}}>Assign New Task</h3>
+              <h3 style={{fontSize: '20px', fontWeight: '600'}}>
+                Assign New Task
+                {!navigator.onLine && <span style={{fontSize: '12px', color: '#f59e0b', marginLeft: '8px'}}>📡 Offline</span>}
+              </h3>
               <button 
                 className="modal-close" 
                 onClick={() => setShowModal(false)}
@@ -539,6 +563,18 @@ function TaskManagement({
                   </select>
                 </div>
               </div>
+              <div style={{
+                padding: '12px',
+                background: !navigator.onLine ? '#fef3c7' : '#dbeafe',
+                borderRadius: '8px',
+                fontSize: '13px',
+                color: !navigator.onLine ? '#92400e' : '#1e40af'
+              }}>
+                <strong>ℹ️ {navigator.onLine ? 'Online' : 'Offline'}:</strong>
+                {navigator.onLine 
+                  ? ' This task will be assigned immediately.' 
+                  : ' This task will be saved offline and synced when online.'}
+              </div>
               <div className="modal-actions" style={{display: 'flex', gap: '12px', marginTop: '8px'}}>
                 <button 
                   type="submit" 
@@ -549,7 +585,7 @@ function TaskManagement({
                     display: 'inline-flex',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    background: '#0b7e4b',
+                    background: navigator.onLine ? '#0b7e4b' : '#f59e0b',
                     color: 'white',
                     padding: '10px 24px',
                     border: 'none',
@@ -559,7 +595,7 @@ function TaskManagement({
                     fontWeight: '500'
                   }}
                 >
-                  ➕ Assign Task
+                  {navigator.onLine ? '➕ Assign Task' : '💾 Save Offline'}
                 </button>
                 <button 
                   type="button" 
