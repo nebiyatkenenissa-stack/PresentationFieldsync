@@ -1,7 +1,9 @@
-import React, { useState, useMemo } from 'react';
+// components/attendance/AttendanceManagement.js
+
+import React, { useState, useMemo, useEffect } from 'react';
 import { db } from '../../services/database';
 import { getToday, uid } from '../../utils/helpers';
-import { syncQueue } from '../../services/database';
+import { syncQueue, checkRealInternet, isDevToolsOffline, clearStuckSyncItems } from '../../services/database';
 
 function AttendanceManagement({ 
   filteredAttendance,
@@ -23,6 +25,10 @@ function AttendanceManagement({
 }) {
   const [showModal, setShowModal] = useState(false);
   const [selectedOfficer, setSelectedOfficer] = useState(null);
+  const [isOnline, setIsOnline] = useState(navigator.onLine);
+  const [pendingCount, setPendingCount] = useState(0);
+  const [stuckCount, setStuckCount] = useState(0);
+  const [isClearing, setIsClearing] = useState(false);
   const [form, setForm] = useState({
     status: 'present',
     checkIn: '08:00',
@@ -33,20 +39,105 @@ function AttendanceManagement({
     breakTime: 0
   });
 
+  // ===== CHECK ONLINE STATUS & CLEAR STUCK SYNC =====
+  useEffect(() => {
+    const checkNetwork = async () => {
+      // Check DevTools offline first
+      if (isDevToolsOffline()) {
+        setIsOnline(false);
+        return;
+      }
+      
+      const online = await checkRealInternet();
+      setIsOnline(online);
+      
+      // Count pending items
+      const count = syncQueue.count();
+      setPendingCount(count);
+      
+      // Count stuck items in attendance
+      const stuck = attendance.filter(a => a.synced === 'syncing').length;
+      setStuckCount(stuck);
+      
+      // If there are stuck items, clear them automatically
+      if (stuck > 0 || count > 0) {
+        console.log(`🧹 Found ${stuck} stuck items and ${count} pending items. Clearing...`);
+        setIsClearing(true);
+        
+        try {
+          // Clear stuck sync items
+          const result = await clearStuckSyncItems();
+          console.log('✅ Cleared stuck items:', result);
+          
+          // Refresh attendance data after clearing
+          const updatedAttendance = await db.attendance.toArray();
+          if (setAttendance) {
+            setAttendance(updatedAttendance);
+          }
+          
+          // Update stuck count
+          const newStuck = updatedAttendance.filter(a => a.synced === 'syncing').length;
+          setStuckCount(newStuck);
+          
+          // Update pending count
+          const newPending = syncQueue.count();
+          setPendingCount(newPending);
+          
+          // If there are pending items and we're online, trigger sync
+          if (online && newPending > 0) {
+            console.log(`🔄 Auto-syncing ${newPending} items...`);
+            window.dispatchEvent(new CustomEvent('force-sync'));
+          }
+        } catch (error) {
+          console.error('Error clearing stuck items:', error);
+        } finally {
+          setIsClearing(false);
+        }
+      }
+    };
+
+    // Run immediately
+    checkNetwork();
+    
+    // Check every 5 seconds
+    const interval = setInterval(checkNetwork, 5000);
+
+    // Listen for sync events
+    const handleSyncComplete = async () => {
+      const count = syncQueue.count();
+      setPendingCount(count);
+      
+      // Refresh attendance data
+      const updatedAttendance = await db.attendance.toArray();
+      if (setAttendance) {
+        setAttendance(updatedAttendance);
+      }
+      
+      const stuck = updatedAttendance.filter(a => a.synced === 'syncing').length;
+      setStuckCount(stuck);
+    };
+
+    const handleQueueUpdate = () => {
+      const count = syncQueue.count();
+      setPendingCount(count);
+    };
+
+    window.addEventListener('sync-complete', handleSyncComplete);
+    window.addEventListener('sync-queue-updated', handleQueueUpdate);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('sync-complete', handleSyncComplete);
+      window.removeEventListener('sync-queue-updated', handleQueueUpdate);
+    };
+  }, [attendance, setAttendance]);
+
   const supervisorOfficers = useMemo(() => {
     if (isSupervisor && user) {
       return users.filter(u => u.supervisorId === user.id && u.role === 'field_officer');
     }
     return [];
   }, [users, user, isSupervisor]);
-
-  const supervisorAttendance = useMemo(() => {
-    if (isSupervisor && user) {
-      const officerIds = supervisorOfficers.map(o => o.employeeId);
-      return attendance.filter(a => officerIds.includes(a.employeeId));
-    }
-    return [];
-  }, [attendance, supervisorOfficers, isSupervisor, user]);
 
   const handleOpenModal = (officer) => {
     setSelectedOfficer(officer);
@@ -64,10 +155,19 @@ function AttendanceManagement({
     setShowModal(true);
   };
 
+  // ===== HANDLE SUBMIT ATTENDANCE =====
   const handleSubmitAttendance = async () => {
     if (!selectedOfficer) return;
     const today = getToday();
-    const online = navigator.onLine;
+    
+    // Check DevTools offline first
+    if (isDevToolsOffline()) {
+      alert('🔌 You are offline. Please disable offline mode in DevTools.');
+      return;
+    }
+    
+    const online = await checkRealInternet();
+    setIsOnline(online);
 
     let workHours = 0;
     if (form.checkIn && form.checkOut) {
@@ -83,6 +183,7 @@ function AttendanceManagement({
     }
 
     try {
+      // Check for existing record
       const existingRecord = attendance.find(
         a => a.employeeId === selectedOfficer.employeeId && a.date === today
       );
@@ -110,12 +211,15 @@ function AttendanceManagement({
         seenBy: null,
         editedBySupervisor: true,
         lastEditedAt: new Date().toISOString(),
-        synced: online ? true : false
+        // CRITICAL: Set synced based on online status
+        synced: online ? true : false,
+        lastSyncAttempt: Date.now()
       };
 
       let recordId;
 
       if (existingRecord) {
+        // UPDATE existing record
         await db.attendance.update(existingRecord.id, attendanceData);
         const updated = attendance.map(a =>
           a.id === existingRecord.id ? { ...a, ...attendanceData } : a
@@ -123,6 +227,7 @@ function AttendanceManagement({
         if (setAttendance) setAttendance(updated);
         recordId = existingRecord.id;
       } else {
+        // CREATE new record
         const newRecord = {
           id: uid(),
           employeeId: selectedOfficer.employeeId,
@@ -139,18 +244,31 @@ function AttendanceManagement({
         recordId = newRecord.id;
       }
 
+      // If offline, add to sync queue
       if (!online) {
         syncQueue.add({
           type: 'attendance',
           id: recordId,
           data: attendanceData
         });
-        alert('📋 Attendance saved offline! Will sync when online.');
+        setPendingCount(syncQueue.count());
+        alert('📋 Attendance saved OFFLINE! Will sync automatically when online.');
+        
+        if (addNotification) {
+          await addNotification(
+            user.id,
+            '💾 Offline Save',
+            `Attendance for ${selectedOfficer.name} saved offline. Will sync when online.`,
+            'warning'
+          );
+        }
+        
         setShowModal(false);
         setSelectedOfficer(null);
         return;
       }
 
+      // If online, notify users
       const manager = users.find(u => u.role === 'manager');
       if (manager && addNotification) {
         await addNotification(
@@ -172,24 +290,47 @@ function AttendanceManagement({
 
       setShowModal(false);
       setSelectedOfficer(null);
-      alert('✅ Attendance updated and submitted to manager successfully!');
+      alert('✅ Attendance updated successfully!');
     } catch (error) {
       console.error('Error submitting attendance:', error);
       alert('❌ Error submitting attendance: ' + error.message);
     }
   };
 
+  // Manual clear stuck syncs
+  const handleClearStuck = async () => {
+    try {
+      setIsClearing(true);
+      const result = await clearStuckSyncItems();
+      alert(`🧹 Cleared ${result.clearedStore} stuck records and ${result.clearedQueue} stuck queue items`);
+      
+      // Refresh data
+      const updatedAttendance = await db.attendance.toArray();
+      if (setAttendance) setAttendance(updatedAttendance);
+      setStuckCount(updatedAttendance.filter(a => a.synced === 'syncing').length);
+      setPendingCount(syncQueue.count());
+    } catch (error) {
+      console.error('Error clearing stuck items:', error);
+      alert('Error clearing stuck items: ' + error.message);
+    } finally {
+      setIsClearing(false);
+    }
+  };
+
   const today = getToday();
   
-  const pendingApproval = supervisorAttendance.filter(a => 
+  // ONLY count synced attendance
+  const syncedAttendance = attendance.filter(a => a.synced === true);
+  
+  const pendingApproval = syncedAttendance.filter(a => 
     a.approved === false && a.submittedToManager === true
   ).length;
   
-  const notSeenByManager = supervisorAttendance.filter(a => 
+  const notSeenByManager = syncedAttendance.filter(a => 
     a.seenByManager !== true && a.submittedToManager === true
   ).length;
   
-  const seenByManager = supervisorAttendance.filter(a => 
+  const seenByManager = syncedAttendance.filter(a => 
     a.seenByManager === true && a.submittedToManager === true
   ).length;
 
@@ -197,11 +338,150 @@ function AttendanceManagement({
     return attendance.find(a => a.employeeId === officerId && a.date === today);
   };
 
+  // ===== GET FILTERED ATTENDANCE - ONLY SYNCED RECORDS =====
+  const getFilteredDisplayAttendance = () => {
+    let filtered = [...attendance];
+    
+    // Filter by role
+    if (isSupervisor && user) {
+      const officerIds = supervisorOfficers.map(o => o.employeeId);
+      filtered = filtered.filter(a => officerIds.includes(a.employeeId));
+    } else if (isOfficer && user) {
+      filtered = filtered.filter(a => a.employeeId === user.employeeId);
+    }
+    
+    // ⚠️ CRITICAL: ONLY SHOW SYNCED RECORDS
+    filtered = filtered.filter(a => a.synced === true);
+    
+    // Apply date filter
+    if (selectedDate) {
+      filtered = filtered.filter(a => a.date === selectedDate);
+    }
+    
+    // Apply status filter
+    if (attendanceFilter !== 'all') {
+      filtered = filtered.filter(a => a.status === attendanceFilter);
+    }
+    
+    // Sort by date (newest first)
+    filtered.sort((a, b) => new Date(b.date) - new Date(a.date));
+    
+    return filtered;
+  };
+
+  const displayFilteredAttendance = getFilteredDisplayAttendance();
+
   return (
     <div style={{padding: '24px', maxWidth: '1400px', margin: '0 auto', fontFamily: 'Segoe UI, Tahoma, Geneva, Verdana, sans-serif'}}>
       
-      {/* Offline Status Banner */}
-      {!navigator.onLine && (
+      {/* ===== STATUS BAR ===== */}
+      <div style={{
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        padding: '8px 16px',
+        background: isOnline ? '#d1fae5' : '#fee2e2',
+        borderRadius: '8px',
+        marginBottom: '16px',
+        border: isOnline ? '1px solid #0b7e4b' : '1px solid #dc2626',
+        flexWrap: 'wrap',
+        gap: '8px'
+      }}>
+        <span style={{ fontWeight: '500', color: isOnline ? '#065f37' : '#991b1b' }}>
+          {isOnline ? '✅ Online' : '❌ Offline'}
+        </span>
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+          {isClearing && (
+            <span style={{
+              padding: '2px 12px',
+              borderRadius: '12px',
+              background: '#dbeafe',
+              color: '#1e40af',
+              fontSize: '12px',
+              fontWeight: '500'
+            }}>
+              🧹 Clearing stuck...
+            </span>
+          )}
+          {stuckCount > 0 && (
+            <span style={{
+              padding: '2px 12px',
+              borderRadius: '12px',
+              background: '#fee2e2',
+              color: '#991b1b',
+              fontSize: '12px',
+              fontWeight: '500'
+            }}>
+              ⚠️ {stuckCount} stuck
+            </span>
+          )}
+          {isOnline && pendingCount > 0 && (
+            <span style={{
+              padding: '2px 12px',
+              borderRadius: '12px',
+              background: '#fef3c7',
+              color: '#92400e',
+              fontSize: '12px',
+              fontWeight: '500'
+            }}>
+              ⏳ {pendingCount} syncing...
+            </span>
+          )}
+          {!isOnline && pendingCount > 0 && (
+            <span style={{
+              padding: '2px 12px',
+              borderRadius: '12px',
+              background: '#fee2e2',
+              color: '#991b1b',
+              fontSize: '12px',
+              fontWeight: '500'
+            }}>
+              📡 {pendingCount} saved offline
+            </span>
+          )}
+        </div>
+      </div>
+
+      {/* ===== STUCK SYNC BANNER ===== */}
+      {stuckCount > 0 && (
+        <div style={{
+          background: '#fee2e2',
+          border: '1px solid #dc2626',
+          padding: '12px 16px',
+          borderRadius: '8px',
+          marginBottom: '16px',
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          flexWrap: 'wrap',
+          gap: '8px'
+        }}>
+          <span>
+            ⚠️ <strong>{stuckCount} record(s) stuck in 'syncing' state.</strong>
+            {isClearing ? ' Auto-clearing in progress...' : ' Auto-clearing will fix this.'}
+          </span>
+          <button
+            onClick={handleClearStuck}
+            disabled={isClearing}
+            style={{
+              background: '#dc2626',
+              color: 'white',
+              border: 'none',
+              padding: '6px 16px',
+              borderRadius: '6px',
+              cursor: isClearing ? 'not-allowed' : 'pointer',
+              fontSize: '13px',
+              fontWeight: '500',
+              opacity: isClearing ? 0.6 : 1
+            }}
+          >
+            {isClearing ? '🧹 Clearing...' : '🧹 Clear Stuck'}
+          </button>
+        </div>
+      )}
+
+      {/* ===== OFFLINE BANNER ===== */}
+      {!isOnline && pendingCount > 0 && (
         <div style={{
           background: '#fef3c7',
           border: '1px solid #f59e0b',
@@ -210,13 +490,37 @@ function AttendanceManagement({
           marginBottom: '16px',
           display: 'flex',
           justifyContent: 'space-between',
-          alignItems: 'center'
+          alignItems: 'center',
+          flexWrap: 'wrap'
         }}>
-          <span>📡 You are offline. Attendance will be saved and synced when online.</span>
+          <span>📡 <strong>Offline:</strong> {pendingCount} attendance record(s) saved locally. Will sync when online.</span>
+          <span style={{ fontSize: '12px', color: '#92400e' }}>
+            ⏳ Waiting for connection...
+          </span>
         </div>
       )}
 
-      {/* Header Card */}
+      {/* ===== SYNCING BANNER ===== */}
+      {isOnline && pendingCount > 0 && stuckCount === 0 && (
+        <div style={{
+          background: '#dbeafe',
+          border: '1px solid #3b82f6',
+          padding: '12px 16px',
+          borderRadius: '8px',
+          marginBottom: '16px',
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          flexWrap: 'wrap'
+        }}>
+          <span>🔄 <strong>Syncing:</strong> {pendingCount} attendance record(s) being synced...</span>
+          <span style={{ fontSize: '12px', color: '#1e40af' }}>
+            ⏳ Please wait...
+          </span>
+        </div>
+      )}
+
+      {/* ===== HEADER CARD ===== */}
       <div style={{
         background: '#ffffff',
         borderRadius: '8px',
@@ -230,9 +534,17 @@ function AttendanceManagement({
             <h2 style={{margin: 0, fontSize: '20px', fontWeight: '600', color: '#1a1a2e'}}>📋 Attendance Management</h2>
             <p style={{margin: '4px 0 0 0', fontSize: '14px', color: '#6b7280'}}>
               {isSupervisor ? `Manage your team (${supervisorOfficers.length} officers)` : 'Your attendance records'}
+              {displayFilteredAttendance.length > 0 && ` • ${displayFilteredAttendance.length} synced records`}
+              {!isOnline && pendingCount > 0 && ` • ${pendingCount} offline`}
+              {stuckCount > 0 && ` • ⚠️ ${stuckCount} stuck`}
             </p>
           </div>
           <div style={{display: 'flex', gap: '8px', flexWrap: 'wrap'}}>
+            {stuckCount > 0 && (
+              <span style={{background: '#fee2e2', color: '#991b1b', padding: '6px 14px', borderRadius: '20px', fontSize: '12px', fontWeight: '500'}}>
+                ⚠️ {stuckCount} Stuck
+              </span>
+            )}
             {isSupervisor && notSeenByManager > 0 && (
               <span style={{background: '#fee2e2', color: '#991b1b', padding: '6px 14px', borderRadius: '20px', fontSize: '12px', fontWeight: '500'}}>
                 👁️‍🗨️ {notSeenByManager} Not Seen
@@ -251,11 +563,23 @@ function AttendanceManagement({
             <span style={{background: '#d1fae5', color: '#065f37', padding: '6px 14px', borderRadius: '20px', fontSize: '12px', fontWeight: '500'}}>
               ✅ {attendanceSummary.rate}% Present
             </span>
+            {pendingCount > 0 && (
+              <span style={{
+                background: '#fef3c7',
+                color: '#92400e',
+                padding: '6px 14px',
+                borderRadius: '20px',
+                fontSize: '12px',
+                fontWeight: '500'
+              }}>
+                📡 {pendingCount} pending
+              </span>
+            )}
           </div>
         </div>
       </div>
 
-      {/* Filters Card */}
+      {/* ===== FILTERS CARD ===== */}
       <div style={{
         background: '#ffffff',
         borderRadius: '8px',
@@ -298,16 +622,35 @@ function AttendanceManagement({
               <option value="absent">Absent</option>
               <option value="pending">Pending</option>
             </select>
+            {isOnline && pendingCount > 0 && (
+              <button
+                onClick={() => window.dispatchEvent(new Event('force-sync'))}
+                style={{
+                  background: '#0b7e4b',
+                  color: 'white',
+                  border: 'none',
+                  padding: '6px 14px',
+                  borderRadius: '6px',
+                  cursor: 'pointer',
+                  fontSize: '13px',
+                  fontWeight: '500'
+                }}
+              >
+                🔄 Sync Now
+              </button>
+            )}
           </div>
-          <span style={{color: '#6b7280', fontSize: '14px'}}>{filteredAttendance.length} records</span>
+          <span style={{color: '#6b7280', fontSize: '14px'}}>{displayFilteredAttendance.length} records</span>
         </div>
       </div>
 
-      {/* Quick Edit Cards */}
+      {/* ===== QUICK EDIT CARDS ===== */}
       {isSupervisor && supervisorOfficers.length > 0 && (
         <div style={{marginBottom: '20px'}}>
           <h4 style={{fontSize: '15px', fontWeight: '600', color: '#1a1a2e', marginBottom: '14px'}}>
             👤 Officers - Quick Edit Today's Attendance
+            {!isOnline && <span style={{fontSize: '12px', color: '#f59e0b', marginLeft: '8px'}}>📡 Offline</span>}
+            {stuckCount > 0 && <span style={{fontSize: '12px', color: '#dc2626', marginLeft: '8px'}}>⚠️ Stuck syncs clearing...</span>}
           </h4>
           <div style={{
             display: 'grid',
@@ -316,28 +659,8 @@ function AttendanceManagement({
           }}>
             {supervisorOfficers.map(officer => {
               const todayAtt = getOfficerTodayAttendance(officer.employeeId);
-              const hasSubmitted = todayAtt?.submittedToManager;
-              const isApproved = todayAtt?.approved;
-              const isSeen = todayAtt?.seenByManager;
-              const isSynced = todayAtt?.synced;
-              
-              let borderColor = '#e5e7eb';
-              let statusText = 'Not Submitted';
-              let statusColor = '#6b7280';
-
-              if (isApproved) {
-                borderColor = '#22c55e';
-                statusText = '✅ Approved';
-                statusColor = '#16a34a';
-              } else if (isSeen) {
-                borderColor = '#eab308';
-                statusText = '👁️ Seen by Manager';
-                statusColor = '#ca8a04';
-              } else if (hasSubmitted) {
-                borderColor = '#f97316';
-                statusText = '⏳ Pending Review';
-                statusColor = '#dc2626';
-              }
+              const isSynced = todayAtt?.synced === true;
+              const isStuck = todayAtt?.synced === 'syncing';
               
               return (
                 <div 
@@ -346,40 +669,51 @@ function AttendanceManagement({
                     background: '#ffffff',
                     borderRadius: '8px',
                     padding: '16px 18px',
-                    border: `2px solid ${borderColor}`,
+                    border: `2px solid ${
+                      isStuck ? '#dc2626' :
+                      todayAtt && isSynced ? '#22c55e' : 
+                      '#e5e7eb'
+                    }`,
                     boxShadow: '0 1px 3px rgba(0,0,0,0.06)',
-                    transition: 'all 0.25s ease'
+                    transition: 'all 0.25s ease',
+                    opacity: isStuck ? 0.7 : 1
                   }}
                 >
                   <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center'}}>
                     <div>
                       <div style={{fontSize: '15px', fontWeight: '600', color: '#1a1a2e'}}>{officer.name}</div>
                       <div style={{fontSize: '12px', color: '#6b7280'}}>{officer.region}</div>
-                      <div style={{fontSize: '12px', marginTop: '4px', color: statusColor, fontWeight: '500'}}>
-                        {statusText}
-                        {!isSynced && hasSubmitted && (
-                          <span style={{fontSize: '10px', color: '#f59e0b', marginLeft: '4px'}}>📡 Offline</span>
+                      <div style={{fontSize: '12px', marginTop: '4px', fontWeight: '500'}}>
+                        {isStuck ? (
+                          <span style={{color: '#dc2626'}}>⚠️ Stuck - Auto-clearing</span>
+                        ) : todayAtt && isSynced ? (
+                          <span style={{color: '#16a34a'}}>✅ Synced</span>
+                        ) : todayAtt && !isSynced ? (
+                          <span style={{color: '#f59e0b'}}>📡 Waiting to Sync</span>
+                        ) : (
+                          <span style={{color: '#9ca3af'}}>Not Submitted</span>
                         )}
                       </div>
                     </div>
                     <button
                       onClick={() => handleOpenModal(officer)}
+                      disabled={isStuck}
                       style={{
-                        background: '#1a1a2e',
+                        background: isStuck ? '#9ca3af' : '#1a1a2e',
                         color: '#ffffff',
                         border: 'none',
                         padding: '8px 16px',
                         borderRadius: '6px',
-                        cursor: 'pointer',
+                        cursor: isStuck ? 'not-allowed' : 'pointer',
                         fontSize: '13px',
                         fontWeight: '500',
                         transition: 'all 0.2s ease'
                       }}
                     >
-                      {hasSubmitted ? '✏️ Edit' : '📝 Add'}
+                      {isStuck ? '⏳ Fixing...' : todayAtt ? '✏️ Edit' : '📝 Add'}
                     </button>
                   </div>
-                  {todayAtt && (
+                  {todayAtt && isSynced && (
                     <div style={{
                       marginTop: '10px',
                       paddingTop: '10px',
@@ -396,13 +730,41 @@ function AttendanceManagement({
                       <span>Hours: <strong style={{color: '#1a1a2e'}}>{todayAtt.workHours}h</strong></span>
                     </div>
                   )}
-                  {!todayAtt && (
+                  {isStuck && (
                     <div style={{
                       marginTop: '10px',
                       paddingTop: '10px',
                       borderTop: '1px solid #f3f4f6',
                       fontSize: '12px',
-                      color: '#9ca3af'
+                      color: '#dc2626',
+                      textAlign: 'center',
+                      background: '#fee2e2',
+                      padding: '6px',
+                      borderRadius: '4px'
+                    }}>
+                      ⚠️ Stuck in sync - Auto-clearing in progress
+                    </div>
+                  )}
+                  {todayAtt && !isSynced && !isStuck && (
+                    <div style={{
+                      marginTop: '10px',
+                      paddingTop: '10px',
+                      borderTop: '1px solid #f3f4f6',
+                      fontSize: '12px',
+                      color: '#f59e0b',
+                      textAlign: 'center'
+                    }}>
+                      ⏳ Offline - Will appear when online
+                    </div>
+                  )}
+                  {!todayAtt && !isStuck && (
+                    <div style={{
+                      marginTop: '10px',
+                      paddingTop: '10px',
+                      borderTop: '1px solid #f3f4f6',
+                      fontSize: '12px',
+                      color: '#9ca3af',
+                      textAlign: 'center'
                     }}>
                       No attendance recorded today
                     </div>
@@ -414,7 +776,7 @@ function AttendanceManagement({
         </div>
       )}
 
-      {/* Table Card */}
+      {/* ===== TABLE CARD ===== */}
       <div style={{
         background: '#ffffff',
         borderRadius: '8px',
@@ -422,8 +784,37 @@ function AttendanceManagement({
         border: '1px solid #e5e7eb',
         overflow: 'hidden'
       }}>
-        <div style={{padding: '16px 20px', borderBottom: '1px solid #e5e7eb', background: '#fafafa'}}>
+        <div style={{padding: '16px 20px', borderBottom: '1px solid #e5e7eb', background: '#fafafa', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap'}}>
           <h4 style={{margin: 0, fontSize: '15px', fontWeight: '600', color: '#1a1a2e'}}>📊 Attendance Records</h4>
+          <div style={{display: 'flex', gap: '8px', alignItems: 'center'}}>
+            {stuckCount > 0 && (
+              <span style={{
+                background: '#fee2e2',
+                color: '#991b1b',
+                padding: '2px 12px',
+                borderRadius: '12px',
+                fontSize: '12px',
+                fontWeight: '500'
+              }}>
+                ⚠️ {stuckCount} stuck
+              </span>
+            )}
+            {pendingCount > 0 && (
+              <span style={{
+                background: '#fef3c7',
+                color: '#92400e',
+                padding: '2px 12px',
+                borderRadius: '12px',
+                fontSize: '12px',
+                fontWeight: '500'
+              }}>
+                ⏳ {pendingCount} pending sync
+              </span>
+            )}
+            <span style={{fontSize: '12px', color: '#64748b'}}>
+              {displayFilteredAttendance.length} records
+            </span>
+          </div>
         </div>
         <div style={{overflowX: 'auto'}}>
           <table style={{
@@ -450,15 +841,28 @@ function AttendanceManagement({
               </tr>
             </thead>
             <tbody>
-              {filteredAttendance.length === 0 && (
+              {displayFilteredAttendance.length === 0 && (
                 <tr>
                   <td colSpan={isSupervisor ? "13" : "12"} style={{textAlign: 'center', padding: '48px', color: '#9ca3af'}}>
                     <div style={{fontSize: '36px', marginBottom: '8px'}}>📋</div>
-                    <div>No attendance records found for this date</div>
+                    <div>
+                      {!isOnline && pendingCount > 0 
+                        ? 'Attendance saved offline. Will appear when online.' 
+                        : stuckCount > 0 
+                        ? '⚠️ Attendance records are stuck in sync. Auto-clearing in progress...'
+                        : 'No synced attendance records found'}
+                    </div>
+                    <div style={{fontSize: '12px', marginTop: '4px', color: '#9ca3af'}}>
+                      {!isOnline && pendingCount > 0 
+                        ? `📡 ${pendingCount} record(s) waiting to sync` 
+                        : stuckCount > 0
+                        ? 'Please wait while stuck records are cleared...'
+                        : 'Try adjusting your filters'}
+                    </div>
                   </td>
                 </tr>
               )}
-              {filteredAttendance.map((a, index) => {
+              {displayFilteredAttendance.map((a, index) => {
                 const officer = users?.find(u => u.employeeId === a.employeeId);
                 const isEven = index % 2 === 0;
                 
@@ -473,9 +877,6 @@ function AttendanceManagement({
                   >
                     <td style={{padding: '10px 16px', fontWeight: '600', color: '#1a1a2e'}}>
                       {a.employeeName}
-                      {!a.synced && a.submittedToManager && (
-                        <span style={{fontSize: '10px', color: '#f59e0b', marginLeft: '4px'}}>📡</span>
-                      )}
                     </td>
                     <td style={{padding: '10px 16px', color: '#4a5568'}}>{a.region || 'N/A'}</td>
                     <td style={{padding: '10px 16px', color: '#4a5568'}}>{a.date}</td>
@@ -546,20 +947,21 @@ function AttendanceManagement({
                       <td style={{padding: '10px 16px'}}>
                         <button
                           onClick={() => handleOpenModal(officer)}
+                          disabled={stuckCount > 0}
                           style={{
-                            background: '#1a1a2e',
+                            background: stuckCount > 0 ? '#9ca3af' : '#1a1a2e',
                             color: '#ffffff',
                             border: 'none',
                             padding: '6px 14px',
                             borderRadius: '6px',
-                            cursor: 'pointer',
+                            cursor: stuckCount > 0 ? 'not-allowed' : 'pointer',
                             fontSize: '12px',
                             fontWeight: '500',
                             transition: 'all 0.2s ease',
                             width: '100%'
                           }}
                         >
-                          ✏️ Edit
+                          {stuckCount > 0 ? '⏳ Fixing...' : '✏️ Edit'} {!isOnline && '📡'}
                         </button>
                       </td>
                     )}
@@ -569,9 +971,72 @@ function AttendanceManagement({
             </tbody>
           </table>
         </div>
+
+        {/* Footer with pending count */}
+        {pendingCount > 0 && (
+          <div style={{
+            padding: '12px 24px',
+            borderTop: '1px solid #e5e7eb',
+            background: '#fef3c7',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            fontSize: '13px',
+            color: '#92400e'
+          }}>
+            <span>⏳ {pendingCount} attendance record(s) pending sync</span>
+            {isOnline && (
+              <button
+                onClick={() => window.dispatchEvent(new Event('force-sync'))}
+                style={{
+                  background: '#0b7e4b',
+                  color: 'white',
+                  border: 'none',
+                  padding: '4px 12px',
+                  borderRadius: '4px',
+                  cursor: 'pointer',
+                  fontSize: '12px'
+                }}
+              >
+                🔄 Sync Now
+              </button>
+            )}
+          </div>
+        )}
+        {/* Footer with stuck count */}
+        {stuckCount > 0 && (
+          <div style={{
+            padding: '12px 24px',
+            borderTop: '1px solid #e5e7eb',
+            background: '#fee2e2',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            fontSize: '13px',
+            color: '#991b1b'
+          }}>
+            <span>⚠️ {stuckCount} record(s) stuck in sync. Auto-clearing in progress...</span>
+            <button
+              onClick={handleClearStuck}
+              disabled={isClearing}
+              style={{
+                background: '#dc2626',
+                color: 'white',
+                border: 'none',
+                padding: '4px 12px',
+                borderRadius: '4px',
+                cursor: isClearing ? 'not-allowed' : 'pointer',
+                fontSize: '12px',
+                opacity: isClearing ? 0.6 : 1
+              }}
+            >
+              {isClearing ? '🧹 Clearing...' : '🧹 Clear Stuck'}
+            </button>
+          </div>
+        )}
       </div>
 
-      {/* Modal */}
+      {/* ===== MODAL ===== */}
       {showModal && selectedOfficer && (
         <div style={{
           position: 'fixed',
@@ -607,7 +1072,7 @@ function AttendanceManagement({
             }}>
               <h3 style={{fontSize: '20px', fontWeight: '600', color: '#1a1a2e', margin: 0}}>
                 ✏️ Edit Attendance - {selectedOfficer.name}
-                {!navigator.onLine && <span style={{fontSize: '12px', color: '#f59e0b', marginLeft: '8px'}}>📡 Offline</span>}
+                {!isOnline && <span style={{fontSize: '12px', color: '#f59e0b', marginLeft: '8px'}}>📡 Offline</span>}
               </h3>
               <button 
                 onClick={() => setShowModal(false)} 
@@ -624,6 +1089,24 @@ function AttendanceManagement({
                 ✕
               </button>
             </div>
+
+            {/* Offline Warning in Modal */}
+            {!isOnline && (
+              <div style={{
+                padding: '12px 16px',
+                background: '#fef3c7',
+                border: '1px solid #f59e0b',
+                borderRadius: '8px',
+                marginBottom: '16px'
+              }}>
+                <strong>📡 Offline Mode:</strong> Attendance will be saved locally and appear when online.
+                {pendingCount > 0 && (
+                  <span style={{ marginLeft: '8px' }}>
+                    ({pendingCount} pending sync)
+                  </span>
+                )}
+              </div>
+            )}
 
             <div style={{display: 'flex', flexDirection: 'column', gap: '18px'}}>
               <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px'}}>
@@ -795,23 +1278,23 @@ function AttendanceManagement({
 
               <div style={{
                 padding: '14px',
-                background: !navigator.onLine ? '#fef3c7' : '#dbeafe',
+                background: !isOnline ? '#fef3c7' : '#dbeafe',
                 borderRadius: '8px',
                 fontSize: '13px',
-                color: !navigator.onLine ? '#92400e' : '#1e40af',
-                border: !navigator.onLine ? '1px solid #f59e0b' : '1px solid #93c5fd'
+                color: !isOnline ? '#92400e' : '#1e40af',
+                border: !isOnline ? '1px solid #f59e0b' : '1px solid #93c5fd'
               }}>
-                <strong>ℹ️ {navigator.onLine ? 'Online' : 'Offline'}:</strong> 
-                {navigator.onLine 
+                <strong>ℹ️ {isOnline ? 'Online' : 'Offline'}:</strong> 
+                {isOnline 
                   ? ' This attendance will be sent to the manager for review.' 
-                  : ' This attendance will be saved offline and synced when back online.'}
+                  : ' This attendance will be saved offline and appear when online.'}
               </div>
 
               <div style={{display: 'flex', gap: '12px', marginTop: '8px'}}>
                 <button 
                   onClick={handleSubmitAttendance}
                   style={{
-                    background: navigator.onLine ? '#16a34a' : '#f59e0b',
+                    background: isOnline ? '#16a34a' : '#f59e0b',
                     color: '#ffffff',
                     border: 'none',
                     padding: '12px 24px',
@@ -823,7 +1306,7 @@ function AttendanceManagement({
                     flex: 1
                   }}
                 >
-                  {navigator.onLine ? '📤 Submit to Manager' : '💾 Save Offline'}
+                  {isOnline ? '📤 Submit to Manager' : '💾 Save Offline'}
                 </button>
                 <button 
                   onClick={() => setShowModal(false)}

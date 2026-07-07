@@ -1,11 +1,15 @@
-import React, { useState } from 'react';
+// components/supervisor/SupervisorReports.js
+
+import React, { useState, useEffect } from 'react';
 import { getToday, uid } from '../../utils/helpers';
 import { db } from '../../services/database';
-import { syncQueue } from '../../services/database';
+import { syncQueue, checkRealInternet } from '../../services/database';
 
 function SupervisorReports({ supervisorReports, users, user, teamMembers }) {
   const [showOfficerReport, setShowOfficerReport] = useState(false);
   const [showSelfReport, setShowSelfReport] = useState(false);
+  const [isOnline, setIsOnline] = useState(navigator.onLine);
+  const [pendingCount, setPendingCount] = useState(0);
   const [form, setForm] = useState({
     officerId: '',
     reportDate: getToday(),
@@ -33,119 +37,289 @@ function SupervisorReports({ supervisorReports, users, user, teamMembers }) {
     overallStatus: 'good'
   });
 
+  // ===== CHECK ONLINE STATUS =====
+  useEffect(() => {
+    const checkNetwork = async () => {
+      const online = await checkRealInternet();
+      setIsOnline(online);
+      setPendingCount(syncQueue.count());
+    };
+
+    checkNetwork();
+    const interval = setInterval(checkNetwork, 5000);
+
+    const handleQueueUpdate = () => {
+      setPendingCount(syncQueue.count());
+    };
+
+    window.addEventListener('sync-queue-updated', handleQueueUpdate);
+    window.addEventListener('sync-complete', handleQueueUpdate);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('sync-queue-updated', handleQueueUpdate);
+      window.removeEventListener('sync-complete', handleQueueUpdate);
+    };
+  }, []);
+
+  // ===== HANDLE OFFICER REPORT SUBMIT (OFFLINE SUPPORT) =====
   const handleOfficerReportSubmit = async (e) => {
     e.preventDefault();
     const officer = users.find(u => u.id === form.officerId);
-    if (!officer) { alert('Please select an officer'); return; }
-
-    const online = navigator.onLine;
-
-    const report = {
-      id: uid(),
-      supervisorId: user.id,
-      supervisorName: user.name,
-      officerId: officer.id,
-      officerName: officer.name,
-      officerRegion: officer.region,
-      reportDate: form.reportDate,
-      performance: form.performance,
-      attendance: form.attendance,
-      quality: form.quality,
-      punctuality: form.punctuality,
-      teamwork: form.teamwork,
-      communication: form.communication,
-      comments: form.comments,
-      recommendations: form.recommendations,
-      overallRating: form.overallRating,
-      status: 'submitted',
-      submittedAt: new Date().toISOString(),
-      region: officer.region,
-      type: 'officer_report',
-      synced: online ? true : false
-    };
-    
-    await db.supervisor_reports.add(report);
-    
-    if (!online) {
-      syncQueue.add({
-        type: 'supervisor_report',
-        id: report.id,
-        data: report
-      });
-      alert('📋 Supervisor report saved offline! Will sync when online.');
-      setShowOfficerReport(false);
-      return;
+    if (!officer) { 
+      alert('Please select an officer'); 
+      return; 
     }
-    
-    alert('✅ Supervisor report submitted successfully!');
-    setShowOfficerReport(false);
+
+    const online = await checkRealInternet();
+    setIsOnline(online);
+
+    try {
+      const report = {
+        id: uid(),
+        supervisorId: user.id,
+        supervisorName: user.name,
+        officerId: officer.id,
+        officerName: officer.name,
+        officerRegion: officer.region,
+        reportDate: form.reportDate,
+        performance: form.performance,
+        attendance: form.attendance,
+        quality: form.quality,
+        punctuality: form.punctuality,
+        teamwork: form.teamwork,
+        communication: form.communication,
+        comments: form.comments,
+        recommendations: form.recommendations,
+        overallRating: form.overallRating,
+        status: 'submitted',
+        submittedAt: new Date().toISOString(),
+        region: officer.region,
+        type: 'officer_report',
+        synced: online ? true : false
+      };
+      
+      // Save to IndexedDB
+      await db.supervisor_reports.add(report);
+      
+      // Handle offline
+      if (!online) {
+        syncQueue.add({
+          type: 'supervisor_report',
+          id: report.id,
+          data: report
+        });
+        setPendingCount(syncQueue.count());
+        alert('📋 Supervisor report saved OFFLINE! Will sync when online.');
+        
+        if (window.addNotification) {
+          window.addNotification(
+            user.id, 
+            '💾 Offline Save', 
+            `Report about ${officer.name} saved offline. Will sync when online.`, 
+            'warning'
+          );
+        }
+      } else {
+        alert('✅ Supervisor report submitted successfully!');
+        
+        if (window.addNotification) {
+          window.addNotification(
+            user.id, 
+            '📋 Report Submitted', 
+            `Report about ${officer.name} submitted successfully.`, 
+            'success'
+          );
+        }
+      }
+      
+      setShowOfficerReport(false);
+      // Reset form
+      setForm({
+        officerId: '',
+        reportDate: getToday(),
+        performance: 'good',
+        attendance: 'good',
+        quality: 'good',
+        punctuality: 'good',
+        teamwork: 'good',
+        communication: 'good',
+        comments: '',
+        recommendations: '',
+        overallRating: 3
+      });
+    } catch (error) {
+      console.error('Error submitting officer report:', error);
+      alert('❌ Error submitting report: ' + error.message);
+    }
   };
 
+  // ===== HANDLE SELF REPORT SUBMIT (OFFLINE SUPPORT) =====
   const handleSelfReportSubmit = async (e) => {
     e.preventDefault();
 
-    const online = navigator.onLine;
+    const online = await checkRealInternet();
+    setIsOnline(online);
 
-    const report = {
-      id: uid(),
-      supervisorId: user.id,
-      supervisorName: user.name,
-      reportDate: selfForm.reportDate,
-      region: selfForm.region || user.region,
-      siteVisits: selfForm.siteVisits,
-      issuesResolved: selfForm.issuesResolved,
-      challenges: selfForm.challenges,
-      achievements: selfForm.achievements,
-      teamMorale: selfForm.teamMorale,
-      resourceStatus: selfForm.resourceStatus,
-      recommendations: selfForm.recommendations,
-      overallStatus: selfForm.overallStatus,
-      submittedAt: new Date().toISOString(),
-      type: 'self_report',
-      synced: online ? true : false
-    };
-    
-    await db.supervisor_reports.add(report);
-    
-    if (!online) {
-      syncQueue.add({
-        type: 'supervisor_report',
-        id: report.id,
-        data: report
-      });
-      alert('📋 Self report saved offline! Will sync when online.');
+    try {
+      const report = {
+        id: uid(),
+        supervisorId: user.id,
+        supervisorName: user.name,
+        reportDate: selfForm.reportDate,
+        region: selfForm.region || user.region,
+        siteVisits: selfForm.siteVisits,
+        issuesResolved: selfForm.issuesResolved,
+        challenges: selfForm.challenges,
+        achievements: selfForm.achievements,
+        teamMorale: selfForm.teamMorale,
+        resourceStatus: selfForm.resourceStatus,
+        recommendations: selfForm.recommendations,
+        overallStatus: selfForm.overallStatus,
+        submittedAt: new Date().toISOString(),
+        type: 'self_report',
+        synced: online ? true : false
+      };
+      
+      // Save to IndexedDB
+      await db.supervisor_reports.add(report);
+      
+      // Handle offline
+      if (!online) {
+        syncQueue.add({
+          type: 'supervisor_report',
+          id: report.id,
+          data: report
+        });
+        setPendingCount(syncQueue.count());
+        alert('📋 Self report saved OFFLINE! Will sync when online.');
+        
+        if (window.addNotification) {
+          window.addNotification(
+            user.id, 
+            '💾 Offline Save', 
+            `Self report saved offline. Will sync when online.`, 
+            'warning'
+          );
+        }
+      } else {
+        alert('✅ Self report submitted successfully!');
+        
+        if (window.addNotification) {
+          window.addNotification(
+            user.id, 
+            '📋 Self Report Submitted', 
+            `Self report submitted successfully.`, 
+            'success'
+          );
+        }
+      }
+      
       setShowSelfReport(false);
-      return;
+      // Reset form
+      setSelfForm({
+        reportDate: getToday(),
+        region: '',
+        siteVisits: 0,
+        issuesResolved: 0,
+        challenges: '',
+        achievements: '',
+        teamMorale: 'good',
+        resourceStatus: 'adequate',
+        recommendations: '',
+        overallStatus: 'good'
+      });
+    } catch (error) {
+      console.error('Error submitting self report:', error);
+      alert('❌ Error submitting self report: ' + error.message);
     }
-    
-    alert('✅ Self report submitted successfully!');
-    setShowSelfReport(false);
   };
 
   const reports = supervisorReports.filter(r => r.supervisorId === user?.id);
 
   return (
-    <div className="supervisor-reports-view">
-      {/* Offline Banner */}
-      {!navigator.onLine && (
+    <div className="supervisor-reports-view" style={{ padding: '20px' }}>
+      {/* ===== STATUS BAR ===== */}
+      <div style={{
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        padding: '8px 16px',
+        background: isOnline ? '#d1fae5' : '#fee2e2',
+        borderRadius: '8px',
+        marginBottom: '16px',
+        border: isOnline ? '1px solid #0b7e4b' : '1px solid #dc2626',
+        flexWrap: 'wrap',
+        gap: '8px'
+      }}>
+        <span style={{ fontWeight: '500', color: isOnline ? '#065f37' : '#991b1b' }}>
+          {isOnline ? '✅ Online' : '❌ Offline'}
+        </span>
+        {pendingCount > 0 && (
+          <span style={{
+            background: '#f59e0b',
+            color: 'white',
+            padding: '2px 12px',
+            borderRadius: '12px',
+            fontSize: '12px'
+          }}>
+            ⏳ {pendingCount} pending sync
+          </span>
+        )}
+      </div>
+
+      {/* ===== OFFLINE BANNER ===== */}
+      {!isOnline && (
         <div style={{
           background: '#fef3c7',
           border: '1px solid #f59e0b',
           padding: '12px 16px',
           borderRadius: '8px',
-          marginBottom: '16px'
+          marginBottom: '16px',
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          flexWrap: 'wrap'
         }}>
-          📡 You are offline. Reports will be saved and synced when online.
+          <span>📡 You are offline. Reports will be saved and synced when online.</span>
+          {pendingCount > 0 && (
+            <span style={{
+              background: '#f59e0b',
+              color: 'white',
+              padding: '2px 12px',
+              borderRadius: '12px',
+              fontSize: '12px'
+            }}>
+              {pendingCount} pending sync
+            </span>
+          )}
         </div>
       )}
 
-      <div className="form-card">
-        <div className="form-header">
+      {/* ===== MAIN CARD ===== */}
+      <div className="form-card" style={{
+        background: 'white',
+        borderRadius: '12px',
+        boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
+        overflow: 'hidden',
+        marginBottom: '20px'
+      }}>
+        <div className="form-header" style={{
+          padding: '20px 24px',
+          borderBottom: '1px solid #e5e7eb',
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          flexWrap: 'wrap',
+          gap: '10px'
+        }}>
           <div>
-            <h3>📋 Supervisor Reports</h3>
-            <p>Submit reports about your team members and your own work status</p>
+            <h3 style={{ margin: '0', fontSize: '18px', fontWeight: '600' }}>📋 Supervisor Reports</h3>
+            <p style={{ margin: '4px 0 0 0', color: '#6b7280', fontSize: '14px' }}>
+              Submit reports about your team members and your own work status
+            </p>
           </div>
-          {!navigator.onLine && (
+          {!isOnline && (
             <span style={{
               background: '#fef3c7',
               color: '#92400e',
@@ -158,7 +332,13 @@ function SupervisorReports({ supervisorReports, users, user, teamMembers }) {
             </span>
           )}
         </div>
-        <div className="report-actions" style={{display: 'flex', gap: '12px', flexWrap: 'wrap', marginTop: '12px'}}>
+
+        <div className="report-actions" style={{
+          display: 'flex',
+          gap: '12px',
+          flexWrap: 'wrap',
+          padding: '16px 24px'
+        }}>
           <button 
             className="btn-primary" 
             onClick={() => setShowOfficerReport(true)}
@@ -204,47 +384,109 @@ function SupervisorReports({ supervisorReports, users, user, teamMembers }) {
         </div>
       </div>
 
-      <div className="table-card">
-        <div className="table-header">
+      {/* ===== REPORTS TABLE ===== */}
+      <div className="table-card" style={{
+        background: 'white',
+        borderRadius: '12px',
+        boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
+        overflow: 'hidden'
+      }}>
+        <div className="table-header" style={{
+          padding: '16px 24px',
+          borderBottom: '1px solid #e5e7eb',
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          flexWrap: 'wrap',
+          gap: '8px'
+        }}>
           <div>
-            <h3>My Supervisor Reports</h3>
-            <p>{reports.length} reports submitted</p>
+            <h3 style={{ margin: '0', fontSize: '16px', fontWeight: '600' }}>My Supervisor Reports</h3>
+            <p style={{ margin: '2px 0 0 0', color: '#6b7280', fontSize: '13px' }}>
+              {reports.length} reports submitted
+            </p>
           </div>
+          {pendingCount > 0 && (
+            <span style={{
+              background: '#fef3c7',
+              color: '#92400e',
+              padding: '2px 12px',
+              borderRadius: '12px',
+              fontSize: '12px',
+              fontWeight: '500'
+            }}>
+              ⏳ {pendingCount} pending sync
+            </span>
+          )}
         </div>
-        <div className="table-wrapper">
-          <table>
+
+        <div className="table-wrapper" style={{ overflowX: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead>
-              <tr>
-                <th>Date</th>
-                <th>Type</th>
-                <th>Officer</th>
-                <th>Performance</th>
-                <th>Rating</th>
-                <th>Status</th>
+              <tr style={{ background: '#f8fafc' }}>
+                <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: '600', fontSize: '12px', color: '#6b7280' }}>Date</th>
+                <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: '600', fontSize: '12px', color: '#6b7280' }}>Type</th>
+                <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: '600', fontSize: '12px', color: '#6b7280' }}>Officer</th>
+                <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: '600', fontSize: '12px', color: '#6b7280' }}>Performance</th>
+                <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: '600', fontSize: '12px', color: '#6b7280' }}>Rating</th>
+                <th style={{ padding: '12px 16px', textAlign: 'center', fontWeight: '600', fontSize: '12px', color: '#6b7280' }}>Status</th>
               </tr>
             </thead>
             <tbody>
               {reports.length === 0 && (
                 <tr>
-                  <td colSpan="6" className="empty-state">
-                    <div className="empty-icon">📋</div>
+                  <td colSpan="6" className="empty-state" style={{
+                    padding: '40px',
+                    textAlign: 'center',
+                    color: '#6b7280'
+                  }}>
+                    <div style={{ fontSize: '48px', marginBottom: '8px' }}>📋</div>
                     <div>No supervisor reports found</div>
                   </td>
                 </tr>
               )}
               {reports.map(r => (
-                <tr key={r.id}>
-                  <td>{r.reportDate}</td>
-                  <td>{r.type === 'self_report' ? '📋 Self Report' : '👤 Officer Report'}</td>
-                  <td>{r.type === 'self_report' ? r.supervisorName : r.officerName}</td>
-                  <td>
-                    <span className={`status-tag ${r.overallStatus || r.performance}`}>
+                <tr key={r.id} style={{ borderBottom: '1px solid #f3f4f6' }}>
+                  <td style={{ padding: '12px 16px', fontSize: '13px' }}>{r.reportDate}</td>
+                  <td style={{ padding: '12px 16px', fontSize: '13px' }}>
+                    {r.type === 'self_report' ? '📋 Self Report' : '👤 Officer Report'}
+                  </td>
+                  <td style={{ padding: '12px 16px', fontSize: '13px', fontWeight: '500' }}>
+                    {r.type === 'self_report' ? r.supervisorName : r.officerName}
+                  </td>
+                  <td style={{ padding: '12px 16px', fontSize: '13px' }}>
+                    <span className={`status-tag ${r.overallStatus || r.performance}`} style={{
+                      padding: '2px 10px',
+                      borderRadius: '12px',
+                      fontSize: '11px',
+                      fontWeight: '500',
+                      background: r.overallStatus === 'excellent' || r.performance === 'excellent' ? '#d1fae5' :
+                                r.overallStatus === 'good' || r.performance === 'good' ? '#dbeafe' :
+                                r.overallStatus === 'average' || r.performance === 'average' ? '#fef3c7' :
+                                '#fee2e2',
+                      color: r.overallStatus === 'excellent' || r.performance === 'excellent' ? '#065f37' :
+                            r.overallStatus === 'good' || r.performance === 'good' ? '#1e40af' :
+                            r.overallStatus === 'average' || r.performance === 'average' ? '#92400e' :
+                            '#991b1b'
+                    }}>
                       {r.overallStatus || r.performance}
                     </span>
                   </td>
-                  <td>{r.type === 'self_report' ? 'N/A' : `${r.overallRating}/5 ⭐`}</td>
-                  <td>
-                    <span className="status-tag submitted">
+                  <td style={{ padding: '12px 16px', fontSize: '13px' }}>
+                    {r.type === 'self_report' ? 'N/A' : `${r.overallRating}/5 ⭐`}
+                  </td>
+                  <td style={{ padding: '12px 16px', textAlign: 'center', fontSize: '13px' }}>
+                    <span className="status-tag submitted" style={{
+                      padding: '2px 10px',
+                      borderRadius: '12px',
+                      fontSize: '11px',
+                      fontWeight: '500',
+                      background: r.synced ? '#d1fae5' : '#fef3c7',
+                      color: r.synced ? '#065f37' : '#92400e',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '4px'
+                    }}>
                       {r.synced ? '✅ Synced' : '📡 Offline'}
                     </span>
                   </td>
@@ -253,9 +495,41 @@ function SupervisorReports({ supervisorReports, users, user, teamMembers }) {
             </tbody>
           </table>
         </div>
+
+        {/* Footer with pending count */}
+        {pendingCount > 0 && (
+          <div style={{
+            padding: '12px 24px',
+            borderTop: '1px solid #e5e7eb',
+            background: '#fef3c7',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            fontSize: '13px',
+            color: '#92400e'
+          }}>
+            <span>⏳ {pendingCount} report(s) pending sync</span>
+            {isOnline && (
+              <button
+                onClick={() => window.dispatchEvent(new Event('force-sync'))}
+                style={{
+                  background: '#0b7e4b',
+                  color: 'white',
+                  border: 'none',
+                  padding: '4px 12px',
+                  borderRadius: '4px',
+                  cursor: 'pointer',
+                  fontSize: '12px'
+                }}
+              >
+                🔄 Sync Now
+              </button>
+            )}
+          </div>
+        )}
       </div>
 
-      {/* Officer Report Modal */}
+      {/* ===== OFFICER REPORT MODAL ===== */}
       {showOfficerReport && (
         <div className="modal-overlay" onClick={() => setShowOfficerReport(false)}>
           <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{
@@ -270,7 +544,7 @@ function SupervisorReports({ supervisorReports, users, user, teamMembers }) {
             <div className="modal-header" style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px'}}>
               <h3 style={{fontSize: '20px', fontWeight: '600'}}>
                 📝 Report About Officer
-                {!navigator.onLine && <span style={{fontSize: '12px', color: '#f59e0b', marginLeft: '8px'}}>📡 Offline</span>}
+                {!isOnline && <span style={{fontSize: '12px', color: '#f59e0b', marginLeft: '8px'}}>📡 Offline</span>}
               </h3>
               <button 
                 className="modal-close" 
@@ -286,6 +560,25 @@ function SupervisorReports({ supervisorReports, users, user, teamMembers }) {
                 }}
               >✕</button>
             </div>
+
+            {/* Offline Warning in Modal */}
+            {!isOnline && (
+              <div style={{
+                padding: '12px 16px',
+                background: '#fef3c7',
+                border: '1px solid #f59e0b',
+                borderRadius: '8px',
+                marginBottom: '16px'
+              }}>
+                <strong>📡 Offline Mode:</strong> Your report will be saved locally and synced automatically when online.
+                {pendingCount > 0 && (
+                  <span style={{ marginLeft: '8px' }}>
+                    ({pendingCount} pending sync)
+                  </span>
+                )}
+              </div>
+            )}
+
             <form onSubmit={handleOfficerReportSubmit} className="modal-form" style={{display: 'flex', flexDirection: 'column', gap: '16px'}}>
               <div className="form-group" style={{display: 'flex', flexDirection: 'column', gap: '4px'}}>
                 <label style={{fontSize: '13px', fontWeight: '500', color: '#374151'}}>Select Officer *</label>
@@ -539,13 +832,13 @@ function SupervisorReports({ supervisorReports, users, user, teamMembers }) {
               </div>
               <div style={{
                 padding: '12px',
-                background: !navigator.onLine ? '#fef3c7' : '#dbeafe',
+                background: !isOnline ? '#fef3c7' : '#dbeafe',
                 borderRadius: '8px',
                 fontSize: '13px',
-                color: !navigator.onLine ? '#92400e' : '#1e40af'
+                color: !isOnline ? '#92400e' : '#1e40af'
               }}>
-                <strong>ℹ️ {navigator.onLine ? 'Online' : 'Offline'}:</strong>
-                {navigator.onLine 
+                <strong>ℹ️ {isOnline ? 'Online' : 'Offline'}:</strong>
+                {isOnline 
                   ? ' This report will be sent immediately.' 
                   : ' This report will be saved offline and synced when online.'}
               </div>
@@ -559,7 +852,7 @@ function SupervisorReports({ supervisorReports, users, user, teamMembers }) {
                     display: 'inline-flex',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    background: navigator.onLine ? '#0b7e4b' : '#f59e0b',
+                    background: isOnline ? '#0b7e4b' : '#f59e0b',
                     color: 'white',
                     padding: '10px 24px',
                     border: 'none',
@@ -569,7 +862,7 @@ function SupervisorReports({ supervisorReports, users, user, teamMembers }) {
                     fontWeight: '500'
                   }}
                 >
-                  {navigator.onLine ? 'Submit Report' : '💾 Save Offline'}
+                  {isOnline ? 'Submit Report' : '💾 Save Offline'}
                 </button>
                 <button 
                   type="button" 
@@ -599,7 +892,7 @@ function SupervisorReports({ supervisorReports, users, user, teamMembers }) {
         </div>
       )}
 
-      {/* Self Report Modal */}
+      {/* ===== SELF REPORT MODAL ===== */}
       {showSelfReport && (
         <div className="modal-overlay" onClick={() => setShowSelfReport(false)}>
           <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{
@@ -614,7 +907,7 @@ function SupervisorReports({ supervisorReports, users, user, teamMembers }) {
             <div className="modal-header" style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px'}}>
               <h3 style={{fontSize: '20px', fontWeight: '600'}}>
                 📋 Supervisor Self Report
-                {!navigator.onLine && <span style={{fontSize: '12px', color: '#f59e0b', marginLeft: '8px'}}>📡 Offline</span>}
+                {!isOnline && <span style={{fontSize: '12px', color: '#f59e0b', marginLeft: '8px'}}>📡 Offline</span>}
               </h3>
               <button 
                 className="modal-close" 
@@ -630,6 +923,25 @@ function SupervisorReports({ supervisorReports, users, user, teamMembers }) {
                 }}
               >✕</button>
             </div>
+
+            {/* Offline Warning in Modal */}
+            {!isOnline && (
+              <div style={{
+                padding: '12px 16px',
+                background: '#fef3c7',
+                border: '1px solid #f59e0b',
+                borderRadius: '8px',
+                marginBottom: '16px'
+              }}>
+                <strong>📡 Offline Mode:</strong> Your self report will be saved locally and synced automatically when online.
+                {pendingCount > 0 && (
+                  <span style={{ marginLeft: '8px' }}>
+                    ({pendingCount} pending sync)
+                  </span>
+                )}
+              </div>
+            )}
+
             <form onSubmit={handleSelfReportSubmit} className="modal-form" style={{display: 'flex', flexDirection: 'column', gap: '16px'}}>
               <div className="form-group" style={{display: 'flex', flexDirection: 'column', gap: '4px'}}>
                 <label style={{fontSize: '13px', fontWeight: '500', color: '#374151'}}>Report Date *</label>
@@ -638,6 +950,25 @@ function SupervisorReports({ supervisorReports, users, user, teamMembers }) {
                   value={selfForm.reportDate} 
                   onChange={e => setSelfForm({...selfForm, reportDate: e.target.value})}
                   required 
+                  style={{
+                    padding: '8px 12px',
+                    border: '1px solid #d1d5db',
+                    borderRadius: '6px',
+                    fontSize: '14px',
+                    opacity: 1,
+                    visibility: 'visible',
+                    display: 'block',
+                    width: '100%'
+                  }}
+                />
+              </div>
+              <div className="form-group" style={{display: 'flex', flexDirection: 'column', gap: '4px'}}>
+                <label style={{fontSize: '13px', fontWeight: '500', color: '#374151'}}>Region</label>
+                <input 
+                  type="text" 
+                  value={selfForm.region} 
+                  onChange={e => setSelfForm({...selfForm, region: e.target.value})}
+                  placeholder="Enter your region (optional)" 
                   style={{
                     padding: '8px 12px',
                     border: '1px solid #d1d5db',
@@ -803,15 +1134,36 @@ function SupervisorReports({ supervisorReports, users, user, teamMembers }) {
                   }}
                 />
               </div>
+              <div className="form-group" style={{display: 'flex', flexDirection: 'column', gap: '4px'}}>
+                <label style={{fontSize: '13px', fontWeight: '500', color: '#374151'}}>Recommendations</label>
+                <textarea 
+                  value={selfForm.recommendations} 
+                  onChange={e => setSelfForm({...selfForm, recommendations: e.target.value})}
+                  placeholder="Any recommendations..." 
+                  rows="2"
+                  style={{
+                    padding: '8px 12px',
+                    border: '1px solid #d1d5db',
+                    borderRadius: '6px',
+                    fontSize: '14px',
+                    opacity: 1,
+                    visibility: 'visible',
+                    display: 'block',
+                    width: '100%',
+                    resize: 'vertical',
+                    minHeight: '60px'
+                  }}
+                />
+              </div>
               <div style={{
                 padding: '12px',
-                background: !navigator.onLine ? '#fef3c7' : '#dbeafe',
+                background: !isOnline ? '#fef3c7' : '#dbeafe',
                 borderRadius: '8px',
                 fontSize: '13px',
-                color: !navigator.onLine ? '#92400e' : '#1e40af'
+                color: !isOnline ? '#92400e' : '#1e40af'
               }}>
-                <strong>ℹ️ {navigator.onLine ? 'Online' : 'Offline'}:</strong>
-                {navigator.onLine 
+                <strong>ℹ️ {isOnline ? 'Online' : 'Offline'}:</strong>
+                {isOnline 
                   ? ' This report will be sent immediately.' 
                   : ' This report will be saved offline and synced when online.'}
               </div>
@@ -825,7 +1177,7 @@ function SupervisorReports({ supervisorReports, users, user, teamMembers }) {
                     display: 'inline-flex',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    background: navigator.onLine ? '#0b7e4b' : '#f59e0b',
+                    background: isOnline ? '#0b7e4b' : '#f59e0b',
                     color: 'white',
                     padding: '10px 24px',
                     border: 'none',
@@ -835,7 +1187,7 @@ function SupervisorReports({ supervisorReports, users, user, teamMembers }) {
                     fontWeight: '500'
                   }}
                 >
-                  {navigator.onLine ? 'Submit Self Report' : '💾 Save Offline'}
+                  {isOnline ? 'Submit Self Report' : '💾 Save Offline'}
                 </button>
                 <button 
                   type="button" 

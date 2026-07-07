@@ -1,3 +1,5 @@
+// components/users/UserManagement.js
+
 import React, { useState } from 'react';
 import { db } from '../../services/database';
 import { uid } from '../../utils/helpers';
@@ -7,11 +9,6 @@ import UserLanguageSelector from './UserLanguageSelector';
 function UserManagement({ 
   users, 
   setUsers, 
-  newUser, 
-  setNewUser, 
-  handleCreateUser, 
-  toggleUserStatus, 
-  deleteUser,
   addNotification 
 }) {
   const { userT } = useUserLanguage();
@@ -29,6 +26,7 @@ function UserManagement({
     department: ''
   });
 
+  // ===== CREATE USER =====
   const handleSubmit = async (e) => {
     e.preventDefault();
     setIsSubmitting(true);
@@ -69,9 +67,14 @@ function UserManagement({
 
       await db.users.add(newUserObj);
       setUsers([...users, newUserObj]);
-      
+
       if (addNotification) {
-        addNotification(newUserObj.id, 'Account Created', `Welcome ${newUserObj.name}! Your account has been created.`, 'success');
+        addNotification(
+          newUserObj.id, 
+          'Account Created', 
+          `Welcome ${newUserObj.name}! Your account has been created.`, 
+          'success'
+        );
       }
       
       alert(userT('userManagement.createSuccess', { name: newUserObj.name }));
@@ -96,9 +99,60 @@ function UserManagement({
     }
   };
 
+  // ===== TOGGLE USER STATUS =====
+  const handleToggleStatus = async (userId) => {
+    try {
+      const user = users.find(u => u.id === userId);
+      if (!user) return;
+
+      const newStatus = user.status === 'active' ? 'inactive' : 'active';
+      const updatedUser = { ...user, status: newStatus };
+
+      await db.users.update(userId, updatedUser);
+      
+      if (setUsers) {
+        setUsers(prev => prev.map(u => u.id === userId ? updatedUser : u));
+      }
+
+      if (addNotification) {
+        addNotification(
+          userId, 
+          'Account Status Updated', 
+          `Your account has been ${newStatus === 'active' ? 'activated' : 'deactivated'}`, 
+          'info'
+        );
+      }
+      alert(`✅ User ${newStatus === 'active' ? 'activated' : 'deactivated'} successfully!`);
+    } catch (error) {
+      console.error('Error toggling user status:', error);
+      alert('❌ Error updating user status: ' + error.message);
+    }
+  };
+
+  // ===== DELETE USER =====
+  const handleDeleteUser = async (userId) => {
+    if (!window.confirm(userT('userManagement.deleteConfirm'))) return;
+
+    try {
+      const user = users.find(u => u.id === userId);
+      if (!user) return;
+
+      await db.users.delete(userId);
+      
+      if (setUsers) {
+        setUsers(prev => prev.filter(u => u.id !== userId));
+      }
+
+      alert(`✅ User ${user.name} deleted successfully!`);
+    } catch (error) {
+      console.error('Error deleting user:', error);
+      alert('❌ Error deleting user: ' + error.message);
+    }
+  };
+
   return (
     <div className="user-management" style={{padding: '0'}}>
-      {/* Language Selector */}
+      {/* ===== LANGUAGE SELECTOR ===== */}
       <div style={{
         display: 'flex',
         justifyContent: 'flex-end',
@@ -107,7 +161,7 @@ function UserManagement({
         <UserLanguageSelector />
       </div>
 
-      {/* Create User Form */}
+      {/* ===== CREATE USER FORM ===== */}
       <div style={{
         background: 'white',
         borderRadius: '12px',
@@ -146,7 +200,7 @@ function UserManagement({
             gap: '16px'
           }}>
             <div style={{display: 'flex', flexDirection: 'column', gap: '4px'}}>
-              <label style={{fontSize: '13px', fontWeight: '500', color: '#374151'}}>{userT('userManagement.fullName')}</label>
+              <label style={{fontSize: '13px', fontWeight: '500', color: '#374151'}}>{userT('userManagement.fullName')} *</label>
               <input 
                 type="text" 
                 value={localNewUser.name} 
@@ -157,7 +211,7 @@ function UserManagement({
               />
             </div>
             <div style={{display: 'flex', flexDirection: 'column', gap: '4px'}}>
-              <label style={{fontSize: '13px', fontWeight: '500', color: '#374151'}}>{userT('userManagement.email')}</label>
+              <label style={{fontSize: '13px', fontWeight: '500', color: '#374151'}}>{userT('userManagement.email')} *</label>
               <input 
                 type="email" 
                 value={localNewUser.email} 
@@ -176,7 +230,7 @@ function UserManagement({
             marginTop: '16px'
           }}>
             <div style={{display: 'flex', flexDirection: 'column', gap: '4px'}}>
-              <label style={{fontSize: '13px', fontWeight: '500', color: '#374151'}}>{userT('userManagement.password')}</label>
+              <label style={{fontSize: '13px', fontWeight: '500', color: '#374151'}}>{userT('userManagement.password')} *</label>
               <input 
                 type="password" 
                 value={localNewUser.password} 
@@ -205,7 +259,7 @@ function UserManagement({
             marginTop: '16px'
           }}>
             <div style={{display: 'flex', flexDirection: 'column', gap: '4px'}}>
-              <label style={{fontSize: '13px', fontWeight: '500', color: '#374151'}}>{userT('userManagement.role')}</label>
+              <label style={{fontSize: '13px', fontWeight: '500', color: '#374151'}}>{userT('userManagement.role')} *</label>
               <select 
                 value={localNewUser.role} 
                 onChange={e => setLocalNewUser({...localNewUser, role: e.target.value})}
@@ -218,7 +272,7 @@ function UserManagement({
               </select>
             </div>
             <div style={{display: 'flex', flexDirection: 'column', gap: '4px'}}>
-              <label style={{fontSize: '13px', fontWeight: '500', color: '#374151'}}>{userT('userManagement.region')}</label>
+              <label style={{fontSize: '13px', fontWeight: '500', color: '#374151'}}>{userT('userManagement.region')} *</label>
               <select 
                 value={localNewUser.region} 
                 onChange={e => setLocalNewUser({...localNewUser, region: e.target.value})}
@@ -259,7 +313,7 @@ function UserManagement({
                 type="text" 
                 value={localNewUser.department} 
                 onChange={e => setLocalNewUser({...localNewUser, department: e.target.value})}
-                placeholder={userT('userManagement.department')}
+                placeholder={userT('userManagement.enterDepartment')}
                 style={{padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '14px'}}
               />
             </div>
@@ -308,10 +362,10 @@ function UserManagement({
                 border: 'none',
                 padding: '10px 24px',
                 borderRadius: '6px',
-                cursor: 'pointer',
+                cursor: isSubmitting ? 'not-allowed' : 'pointer',
                 fontSize: '14px',
                 fontWeight: '500',
-                opacity: 1,
+                opacity: isSubmitting ? 0.7 : 1,
                 visibility: 'visible',
                 display: 'inline-flex',
                 alignItems: 'center',
@@ -324,7 +378,7 @@ function UserManagement({
         </form>
       </div>
 
-      {/* Users Table */}
+      {/* ===== USERS TABLE ===== */}
       <div style={{
         background: 'white',
         borderRadius: '12px',
@@ -342,7 +396,9 @@ function UserManagement({
         }}>
           <div>
             <h3 style={{fontSize: '16px', fontWeight: '600', margin: 0}}>{userT('userManagement.allUsers')}</h3>
-            <p style={{fontSize: '13px', color: '#64748b', margin: '4px 0 0 0'}}>{userT('userManagement.totalUsers', { count: users.length })}</p>
+            <p style={{fontSize: '13px', color: '#64748b', margin: '4px 0 0 0'}}>
+              {userT('userManagement.totalUsers', { count: users.length })}
+            </p>
           </div>
         </div>
 
@@ -404,7 +460,7 @@ function UserManagement({
                   </td>
                   <td style={{padding: '12px 16px'}}>
                     <button 
-                      onClick={() => toggleUserStatus(u.id)}
+                      onClick={() => handleToggleStatus(u.id)}
                       style={{
                         background: u.status === 'active' ? '#dc2626' : '#0b7e4b',
                         color: 'white',
@@ -422,7 +478,7 @@ function UserManagement({
                       {u.status === 'active' ? userT('userManagement.deactivate') : userT('userManagement.activate')}
                     </button>
                     <button 
-                      onClick={() => deleteUser(u.id)}
+                      onClick={() => handleDeleteUser(u.id)}
                       style={{
                         background: '#dc2626',
                         color: 'white',

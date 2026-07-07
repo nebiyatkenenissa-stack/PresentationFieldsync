@@ -1,7 +1,8 @@
-// components/common/Header.js - Complete updated version
+// components/common/Header.jsx
 
 import React, { useState, useMemo, useEffect } from 'react';
-import { db, syncQueue, checkRealInternet } from '../../services/database';
+import { db, syncQueue, checkRealInternet, isDevToolsOffline } from '../../services/database';
+import NetworkStatus from './NetworkStatus';
 
 function Header({ 
   user, 
@@ -22,15 +23,24 @@ function Header({
   const [syncProgress, setSyncProgress] = useState(0);
   const [showSyncDetails, setShowSyncDetails] = useState(false);
 
-  // ===== CHECK NETWORK EVERY 3 SECONDS =====
+  // ===== CHECK NETWORK (DEVOPS FIRST) =====
   useEffect(() => {
     const checkNetwork = async () => {
+      // 1. Check DevTools offline first
+      if (!navigator.onLine) {
+        console.log('🔌 Header: DevTools says OFFLINE');
+        if (isOnline !== false) {
+          setIsOnline(false);
+        }
+        return;
+      }
+      
+      // 2. Then check real internet
       const online = await checkRealInternet();
       if (online !== isOnline) {
         console.log(`🔄 Header: Network changed to: ${online ? 'Online' : 'Offline'}`);
         setIsOnline(online);
         
-        // If back online, trigger sync
         if (online) {
           const queueCount = syncQueue.count();
           if (queueCount > 0) {
@@ -44,10 +54,19 @@ function Header({
     };
 
     checkNetwork();
-    const interval = setInterval(checkNetwork, 3000);
+    
+    // Check every 2 seconds (fast for DevTools testing)
+    const interval = setInterval(checkNetwork, 2000);
 
-    const handleOnline = () => checkNetwork();
-    const handleOffline = () => checkNetwork();
+    const handleOnline = () => {
+      console.log('🔄 Header: Browser online event');
+      checkNetwork();
+    };
+    
+    const handleOffline = () => {
+      console.log('🔄 Header: Browser offline event');
+      checkNetwork();
+    };
 
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
@@ -77,7 +96,6 @@ function Header({
       const queueCount = syncQueue.count();
       setPendingSync(queueCount);
       
-      // Show notification
       if (event.detail && event.detail.synced > 0) {
         console.log(`✅ Sync complete: ${event.detail.synced} items synced`);
       }
@@ -87,7 +105,6 @@ function Header({
       const queueCount = syncQueue.count();
       setPendingSync(queueCount);
       
-      // Check for pending citizens
       db.citizens.filter(c => c.synced === false).count().then(count => {
         if (count > 0) {
           console.log(`📋 ${count} offline citizens pending sync`);
@@ -100,7 +117,6 @@ function Header({
     window.addEventListener('sync-complete', handleSyncComplete);
     window.addEventListener('sync-queue-updated', handleQueueUpdated);
 
-    // Initial check
     handleQueueUpdated();
 
     return () => {
@@ -111,7 +127,6 @@ function Header({
     };
   }, []);
 
-  // ===== UPDATE PENDING SYNC FROM PROPS =====
   useEffect(() => {
     if (propPendingSync !== undefined && propPendingSync !== pendingSync) {
       setPendingSync(propPendingSync);
@@ -198,8 +213,13 @@ function Header({
     }
   };
 
-  // ===== FORCE SYNC BUTTON =====
   const handleForceSync = async () => {
+    // Check DevTools offline first
+    if (!navigator.onLine) {
+      alert('🔌 DevTools says you are offline! Please disable offline mode in DevTools.');
+      return;
+    }
+    
     const online = await checkRealInternet();
     if (online) {
       const queueCount = syncQueue.count();
@@ -214,7 +234,6 @@ function Header({
     }
   };
 
-  // ===== CHECK OFFLINE CITIZENS =====
   const [offlineCitizenCount, setOfflineCitizenCount] = useState(0);
   
   useEffect(() => {
@@ -477,6 +496,9 @@ function Header({
           )}
         </div>
 
+        {/* ===== NETWORK SPEED STATUS ===== */}
+        <NetworkStatus />
+
         {/* ===== ONLINE STATUS ===== */}
         <div 
           onClick={() => setShowSyncDetails(!showSyncDetails)}
@@ -596,10 +618,44 @@ function Header({
         >
           🔄 Sync
         </button>
+
+        {/* Clear Queue Button (Manager Only) */}
+        {user?.role === 'manager' && (
+          <button
+            onClick={() => {
+              if (window.confirm('⚠️ Clear all pending sync items? This cannot be undone.')) {
+                syncQueue.clear();
+                localStorage.removeItem('failedSyncItems');
+                setPendingSync(0);
+                alert('✅ Sync queue cleared!');
+                window.location.reload();
+              }
+            }}
+            style={{
+              background: '#dc2626',
+              color: 'white',
+              border: 'none',
+              padding: '4px 10px',
+              borderRadius: '6px',
+              cursor: 'pointer',
+              fontSize: '11px',
+              fontWeight: '500'
+            }}
+          >
+            🗑️ Clear Queue
+          </button>
+        )}
       </div>
 
       {/* Sync Details Popup */}
       <SyncDetailsPopup />
+
+      <style>{`
+        @keyframes pulse {
+          0%, 100% { opacity: 1; transform: scale(1); }
+          50% { opacity: 0.5; transform: scale(0.8); }
+        }
+      `}</style>
     </header>
   );
 }

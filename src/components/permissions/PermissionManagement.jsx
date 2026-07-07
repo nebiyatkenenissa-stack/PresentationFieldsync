@@ -1,7 +1,9 @@
-import React, { useState } from 'react';
+// components/permissions/PermissionManagement.js
+
+import React, { useState, useEffect } from 'react';
 import { db } from '../../services/database';
 import { uid } from '../../utils/helpers';
-import { syncQueue } from '../../services/database';
+import { syncQueue, checkRealInternet } from '../../services/database';
 
 function PermissionManagement({ 
   filteredPermissions,
@@ -20,6 +22,10 @@ function PermissionManagement({
   const [showModal, setShowModal] = useState(false);
   const [selectedTab, setSelectedTab] = useState('requests');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isOnline, setIsOnline] = useState(navigator.onLine);
+  const [pendingCount, setPendingCount] = useState(0);
+  const [displayPermissions, setDisplayPermissions] = useState([]);
+  const [errors, setErrors] = useState({});
   const [newPermission, setNewPermission] = useState({
     employeeId: '',
     permissionType: '',
@@ -28,37 +34,153 @@ function PermissionManagement({
     reason: ''
   });
 
-  const getFilteredPermissions = () => {
-    if (!permissions) return [];
+  // ===== UPDATE DISPLAY PERMISSIONS =====
+  const updateDisplayPermissions = () => {
+    if (!permissions || permissions.length === 0) {
+      setDisplayPermissions([]);
+      return;
+    }
+    
+    let filtered = [];
     
     if (isSupervisor && user) {
       const teamIds = teamMembers.map(m => m.employeeId);
-      return permissions.filter(p => 
+      filtered = permissions.filter(p => 
         p.employeeId === user.employeeId || teamIds.includes(p.employeeId)
       );
+    } else if (isOfficer && user) {
+      filtered = permissions.filter(p => p.employeeId === user.employeeId);
+    } else {
+      filtered = permissions;
     }
     
-    if (isOfficer && user) {
-      return permissions.filter(p => p.employeeId === user.employeeId);
-    }
+    // ONLY SHOW SYNCED PERMISSIONS
+    let syncedPermissions = filtered.filter(p => p.synced === true);
+    syncedPermissions.sort((a, b) => new Date(b.requestedAt) - new Date(a.requestedAt));
     
-    return permissions;
+    setDisplayPermissions(syncedPermissions);
   };
 
-  const filtered = getFilteredPermissions();
-  const pendingPermissions = filtered.filter(p => p.status === 'pending');
-  const approvedPermissions = filtered.filter(p => p.status === 'approved');
-  const rejectedPermissions = filtered.filter(p => p.status === 'rejected');
+  // ===== CHECK ONLINE STATUS & REFRESH =====
+  useEffect(() => {
+    const checkNetwork = async () => {
+      const online = await checkRealInternet();
+      setIsOnline(online);
+      const count = syncQueue.count();
+      setPendingCount(count);
+      
+      if (online && count > 0) {
+        console.log(`🔄 Back online! Auto-syncing ${count} permission requests...`);
+        window.dispatchEvent(new CustomEvent('force-sync'));
+      }
+    };
 
+    checkNetwork();
+    const interval = setInterval(checkNetwork, 3000);
+
+    // Force refresh on sync events
+    const handleSyncComplete = () => {
+      console.log('🔄 Sync complete - refreshing permissions...');
+      const count = syncQueue.count();
+      setPendingCount(count);
+      updateDisplayPermissions();
+    };
+
+    const handleQueueUpdate = () => {
+      const count = syncQueue.count();
+      setPendingCount(count);
+      updateDisplayPermissions();
+    };
+
+    window.addEventListener('sync-complete', handleSyncComplete);
+    window.addEventListener('sync-queue-updated', handleQueueUpdate);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('sync-complete', handleSyncComplete);
+      window.removeEventListener('sync-queue-updated', handleQueueUpdate);
+    };
+  }, []);
+
+  // Update when permissions change
+  useEffect(() => {
+    updateDisplayPermissions();
+  }, [permissions]);
+
+  // Update when role changes
+  useEffect(() => {
+    updateDisplayPermissions();
+  }, [user, isSupervisor, isOfficer, teamMembers]);
+
+  const pendingPermissions = displayPermissions.filter(p => p.status === 'pending');
+  const approvedPermissions = displayPermissions.filter(p => p.status === 'approved');
+  const rejectedPermissions = displayPermissions.filter(p => p.status === 'rejected');
+
+  // ===== VALIDATION =====
+  const validatePermission = () => {
+    const newErrors = {};
+    
+    if (!newPermission.permissionType) {
+      newErrors.permissionType = 'Permission type is required';
+    }
+    
+    if (!newPermission.startDate) {
+      newErrors.startDate = 'Start date is required';
+    }
+    
+    if (!newPermission.endDate) {
+      newErrors.endDate = 'End date is required';
+    } else if (newPermission.startDate && newPermission.endDate < newPermission.startDate) {
+      newErrors.endDate = 'End date must be after start date';
+    }
+    
+    if (newPermission.startDate && newPermission.endDate) {
+      const start = new Date(newPermission.startDate);
+      const end = new Date(newPermission.endDate);
+      const diffTime = Math.abs(end - start);
+      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+      if (diffDays > 7) {
+        newErrors.endDate = 'Permission cannot exceed 7 days';
+      }
+    }
+    
+    if (newPermission.startDate) {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const start = new Date(newPermission.startDate);
+      if (start < today) {
+        newErrors.startDate = 'Start date cannot be in the past';
+      }
+    }
+    
+    if (!newPermission.reason || newPermission.reason.trim().length < 3) {
+      newErrors.reason = 'Reason must be at least 3 characters';
+    } else if (newPermission.reason.trim().length > 200) {
+      newErrors.reason = 'Reason cannot exceed 200 characters';
+    }
+    
+    if (isManager && !newPermission.employeeId) {
+      newErrors.employeeId = 'Please select an employee';
+    }
+    
+    setErrors(newErrors);
+    return Object.keys(newErrors).length === 0;
+  };
+
+  // ===== REQUEST PERMISSION =====
   const handleRequestPermission = async (e) => {
     e.preventDefault();
     
-    if (!newPermission.permissionType || !newPermission.startDate || !newPermission.endDate || !newPermission.reason) {
-      alert('Please fill all required fields');
+    if (!validatePermission()) {
+      const firstError = document.querySelector('.form-error');
+      if (firstError) {
+        firstError.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
       return;
     }
 
-    const online = navigator.onLine;
+    const online = await checkRealInternet();
+    setIsOnline(online);
     setIsSubmitting(true);
 
     try {
@@ -69,7 +191,7 @@ function PermissionManagement({
         permissionType: newPermission.permissionType,
         startDate: newPermission.startDate,
         endDate: newPermission.endDate,
-        reason: newPermission.reason,
+        reason: newPermission.reason.trim(),
         status: 'pending',
         requestedAt: new Date().toISOString(),
         approvedBy: null,
@@ -79,27 +201,43 @@ function PermissionManagement({
 
       await db.permissions.add(permission);
       
-      if (setPermissions && typeof setPermissions === 'function') {
-        const updated = [permission, ...permissions];
-        setPermissions(updated);
-      }
-      
-      if (!online) {
+      if (online) {
+        if (setPermissions && typeof setPermissions === 'function') {
+          const updated = [permission, ...permissions];
+          setPermissions(updated);
+        }
+        alert('✅ Permission request submitted successfully!');
+        
+        if (addNotification) {
+          addNotification(
+            user.id, 
+            '📋 Permission Request', 
+            `Permission request for ${newPermission.permissionType} submitted`, 
+            'info'
+          );
+        }
+      } else {
         syncQueue.add({
           type: 'permission_request',
           id: permission.id,
           data: permission
         });
-        alert('📋 Permission request saved offline! Will sync when online.');
-      } else {
+        setPendingCount(syncQueue.count());
+        alert('📋 Permission request saved offline! Will appear when online.');
+        
         if (addNotification) {
-          addNotification(user.id, '📋 Permission Request', `Permission request for ${newPermission.permissionType} submitted`, 'info');
+          addNotification(
+            user.id, 
+            '💾 Offline Save', 
+            `Permission request saved offline. Will appear when online.`, 
+            'warning'
+          );
         }
-        alert('✅ Permission request submitted successfully!');
       }
       
       setShowModal(false);
       setNewPermission({ employeeId: '', permissionType: '', startDate: '', endDate: '', reason: '' });
+      setErrors({});
     } catch (error) {
       console.error('Error submitting permission:', error);
       alert('❌ Error submitting permission request: ' + error.message);
@@ -108,9 +246,10 @@ function PermissionManagement({
     }
   };
 
+  // ===== APPROVE PERMISSION =====
   const approvePermission = async (permissionId, approve) => {
     try {
-      const permission = permissions?.find(p => p.id === permissionId);
+      const permission = displayPermissions?.find(p => p.id === permissionId);
       if (!permission) {
         alert('Permission request not found');
         return;
@@ -118,22 +257,21 @@ function PermissionManagement({
 
       if (isSupervisor) {
         if (permission.employeeId === user.employeeId) {
-          alert('❌ You cannot approve your own permission request. Please wait for Manager approval.');
+          alert('❌ You cannot approve your own permission request.');
           return;
         }
         const teamIds = teamMembers.map(m => m.employeeId);
         if (!teamIds.includes(permission.employeeId)) {
-          alert('❌ You can only approve permission requests from your team members.');
+          alert('❌ You can only approve team members.');
           return;
         }
       }
 
       if (isOfficer) {
-        alert('❌ You do not have permission to approve permission requests.');
+        alert('❌ You cannot approve permission requests.');
         return;
       }
 
-      const online = navigator.onLine;
       const status = approve ? 'approved' : 'rejected';
 
       const updatedPermission = {
@@ -141,7 +279,7 @@ function PermissionManagement({
         status,
         approvedBy: user.employeeId,
         approvedAt: new Date().toISOString(),
-        synced: online ? true : false
+        synced: true
       };
 
       await db.permissions.update(permissionId, updatedPermission);
@@ -153,16 +291,11 @@ function PermissionManagement({
         setPermissions(updated);
       }
       
-      if (!online) {
-        syncQueue.add({
-          type: 'permission_update',
-          id: permissionId,
-          data: { permissionId, status }
-        });
-        alert(`📋 Permission ${approve ? 'approved' : 'rejected'} offline! Will sync when online.`);
-      } else {
+      alert(`✅ Permission ${approve ? 'approved' : 'rejected'}!`);
+      
+      if (addNotification) {
         const officer = users?.find(u => u.employeeId === permission.employeeId);
-        if (officer && addNotification) {
+        if (officer) {
           addNotification(
             officer.id, 
             'Permission Request Update', 
@@ -170,7 +303,6 @@ function PermissionManagement({
             approve ? 'success' : 'error'
           );
         }
-        alert(`✅ Permission ${approve ? 'approved' : 'rejected'} successfully!`);
       }
     } catch (error) {
       console.error('Error updating permission:', error);
@@ -182,9 +314,10 @@ function PermissionManagement({
     if (selectedTab === 'pending') return pendingPermissions;
     if (selectedTab === 'approved') return approvedPermissions;
     if (selectedTab === 'rejected') return rejectedPermissions;
-    return filtered;
+    return displayPermissions;
   };
 
+  // ===== MODAL RENDER =====
   const renderModal = () => {
     return (
       <div className="modal-overlay" onClick={() => setShowModal(false)}>
@@ -200,7 +333,7 @@ function PermissionManagement({
           <div className="modal-header" style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px'}}>
             <h3 style={{fontSize: '20px', fontWeight: '600'}}>
               Request Permission
-              {!navigator.onLine && <span style={{fontSize: '12px', color: '#f59e0b', marginLeft: '8px'}}>📡 Offline</span>}
+              {!isOnline && <span style={{fontSize: '12px', color: '#f59e0b', marginLeft: '8px'}}>📡 Offline</span>}
             </h3>
             <button className="modal-close" onClick={() => setShowModal(false)} style={{
               background: 'transparent',
@@ -210,6 +343,22 @@ function PermissionManagement({
               color: '#64748b'
             }}>✕</button>
           </div>
+
+          {!isOnline && (
+            <div style={{
+              padding: '12px 16px',
+              background: '#fef3c7',
+              border: '1px solid #f59e0b',
+              borderRadius: '8px',
+              marginBottom: '16px'
+            }}>
+              <strong>📡 Offline Mode:</strong> Your request will be saved and appear when online.
+              {pendingCount > 0 && (
+                <span style={{ marginLeft: '8px' }}>({pendingCount} pending sync)</span>
+              )}
+            </div>
+          )}
+
           <form onSubmit={handleRequestPermission} className="modal-form" style={{display: 'flex', flexDirection: 'column', gap: '16px'}}>
             {isManager && (
               <div className="form-group" style={{display: 'flex', flexDirection: 'column', gap: '4px'}}>
@@ -218,13 +367,25 @@ function PermissionManagement({
                   value={newPermission.employeeId} 
                   onChange={e => setNewPermission({...newPermission, employeeId: e.target.value})}
                   required
-                  style={{padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '14px'}}
+                  style={{
+                    padding: '8px 12px',
+                    border: `1px solid ${errors.employeeId ? '#dc2626' : '#d1d5db'}`,
+                    borderRadius: '6px',
+                    fontSize: '14px',
+                    width: '100%',
+                    background: 'white'
+                  }}
                 >
                   <option value="">Select Employee</option>
                   {users?.map(u => (
                     <option key={u.id} value={u.employeeId}>{u.name}</option>
                   ))}
                 </select>
+                {errors.employeeId && (
+                  <div className="form-error" style={{ color: '#dc2626', fontSize: '12px', marginTop: '4px' }}>
+                    ⚠️ {errors.employeeId}
+                  </div>
+                )}
               </div>
             )}
             {(isSupervisor || isOfficer) && (
@@ -234,7 +395,7 @@ function PermissionManagement({
                   type="text" 
                   value={user?.name || ''} 
                   readOnly 
-                  style={{padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '14px', background: '#f3f4f6'}}
+                  style={{padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '14px', background: '#f3f4f6', width: '100%'}}
                 />
               </div>
             )}
@@ -244,7 +405,14 @@ function PermissionManagement({
                 value={newPermission.permissionType} 
                 onChange={e => setNewPermission({...newPermission, permissionType: e.target.value})}
                 required
-                style={{padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '14px'}}
+                style={{
+                  padding: '8px 12px',
+                  border: `1px solid ${errors.permissionType ? '#dc2626' : '#d1d5db'}`,
+                  borderRadius: '6px',
+                  fontSize: '14px',
+                  width: '100%',
+                  background: 'white'
+                }}
               >
                 <option value="">Select Type</option>
                 <option value="Work Permission">Work Permission</option>
@@ -252,50 +420,112 @@ function PermissionManagement({
                 <option value="Medical Permission">Medical Permission</option>
                 <option value="Other">Other</option>
               </select>
+              {errors.permissionType && (
+                <div className="form-error" style={{ color: '#dc2626', fontSize: '12px', marginTop: '4px' }}>
+                  ⚠️ {errors.permissionType}
+                </div>
+              )}
             </div>
             <div className="form-row" style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px'}}>
               <div className="form-group" style={{display: 'flex', flexDirection: 'column', gap: '4px'}}>
                 <label style={{fontSize: '13px', fontWeight: '500', color: '#374151'}}>Start Date *</label>
-                <input type="date" value={newPermission.startDate} onChange={e => setNewPermission({...newPermission, startDate: e.target.value})} required style={{padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '14px'}} />
+                <input 
+                  type="date" 
+                  value={newPermission.startDate} 
+                  onChange={e => setNewPermission({...newPermission, startDate: e.target.value})}
+                  required
+                  min={new Date().toISOString().split('T')[0]}
+                  style={{
+                    padding: '8px 12px',
+                    border: `1px solid ${errors.startDate ? '#dc2626' : '#d1d5db'}`,
+                    borderRadius: '6px',
+                    fontSize: '14px',
+                    width: '100%'
+                  }}
+                />
+                {errors.startDate && (
+                  <div className="form-error" style={{ color: '#dc2626', fontSize: '12px', marginTop: '4px' }}>
+                    ⚠️ {errors.startDate}
+                  </div>
+                )}
               </div>
               <div className="form-group" style={{display: 'flex', flexDirection: 'column', gap: '4px'}}>
                 <label style={{fontSize: '13px', fontWeight: '500', color: '#374151'}}>End Date *</label>
-                <input type="date" value={newPermission.endDate} onChange={e => setNewPermission({...newPermission, endDate: e.target.value})} required style={{padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '14px'}} />
+                <input 
+                  type="date" 
+                  value={newPermission.endDate} 
+                  onChange={e => setNewPermission({...newPermission, endDate: e.target.value})}
+                  required
+                  min={newPermission.startDate || new Date().toISOString().split('T')[0]}
+                  style={{
+                    padding: '8px 12px',
+                    border: `1px solid ${errors.endDate ? '#dc2626' : '#d1d5db'}`,
+                    borderRadius: '6px',
+                    fontSize: '14px',
+                    width: '100%'
+                  }}
+                />
+                {errors.endDate && (
+                  <div className="form-error" style={{ color: '#dc2626', fontSize: '12px', marginTop: '4px' }}>
+                    ⚠️ {errors.endDate}
+                  </div>
+                )}
               </div>
             </div>
             <div className="form-group" style={{display: 'flex', flexDirection: 'column', gap: '4px'}}>
               <label style={{fontSize: '13px', fontWeight: '500', color: '#374151'}}>Reason *</label>
-              <textarea value={newPermission.reason} onChange={e => setNewPermission({...newPermission, reason: e.target.value})} placeholder="Enter reason for permission" rows="3" required style={{padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '14px', resize: 'vertical', minHeight: '60px'}} />
+              <textarea 
+                value={newPermission.reason} 
+                onChange={e => setNewPermission({...newPermission, reason: e.target.value})}
+                placeholder="Enter reason for permission (min 3 characters)"
+                rows="3" 
+                required
+                maxLength="200"
+                style={{
+                  padding: '8px 12px',
+                  border: `1px solid ${errors.reason ? '#dc2626' : '#d1d5db'}`,
+                  borderRadius: '6px',
+                  fontSize: '14px',
+                  resize: 'vertical',
+                  minHeight: '60px',
+                  width: '100%'
+                }}
+              />
+              <div style={{display: 'flex', justifyContent: 'space-between', fontSize: '12px', color: '#6b7280', marginTop: '4px'}}>
+                <span>{errors.reason && <span style={{color: '#dc2626'}}>⚠️ {errors.reason}</span>}</span>
+                <span>{newPermission.reason.length}/200</span>
+              </div>
             </div>
             <div style={{
               padding: '12px',
-              background: !navigator.onLine ? '#fef3c7' : '#dbeafe',
+              background: !isOnline ? '#fef3c7' : '#dbeafe',
               borderRadius: '8px',
               fontSize: '13px',
-              color: !navigator.onLine ? '#92400e' : '#1e40af'
+              color: !isOnline ? '#92400e' : '#1e40af'
             }}>
-              <strong>ℹ️ {navigator.onLine ? 'Online' : 'Offline'}:</strong>
-              {navigator.onLine 
-                ? ' Your permission request will be sent immediately.' 
-                : ' Your permission request will be saved offline and synced when online.'}
+              <strong>ℹ️ {isOnline ? 'Online' : 'Offline'}:</strong>
+              {isOnline ? ' Your request will be sent immediately.' : ' Your request will be saved and appear when online.'}
             </div>
             <div className="modal-actions" style={{display: 'flex', gap: '12px', marginTop: '8px'}}>
               <button type="submit" className="btn-submit" disabled={isSubmitting} style={{
-                background: navigator.onLine ? '#0b7e4b' : '#f59e0b',
+                background: isOnline ? '#0b7e4b' : '#f59e0b',
                 color: 'white',
                 border: 'none',
                 padding: '10px 24px',
                 borderRadius: '6px',
-                cursor: 'pointer',
+                cursor: isSubmitting ? 'not-allowed' : 'pointer',
                 fontSize: '14px',
                 fontWeight: '500',
-                opacity: 1,
+                opacity: isSubmitting ? 0.7 : 1,
                 visibility: 'visible',
                 display: 'inline-flex'
               }}>
-                {isSubmitting ? 'Submitting...' : navigator.onLine ? 'Submit Request' : '💾 Save Offline'}
+                {isSubmitting ? 'Submitting...' : isOnline ? 'Submit Request' : '💾 Save Offline'}
               </button>
-              <button type="button" className="btn-cancel" onClick={() => setShowModal(false)} style={{
+              <button type="button" className="btn-cancel" onClick={() => {
+                setShowModal(false);
+                setErrors({});
+              }} style={{
                 background: '#e5e7eb',
                 color: '#374151',
                 border: 'none',
@@ -317,6 +547,7 @@ function PermissionManagement({
     );
   };
 
+  // ===== SUPERVISOR VIEW =====
   const renderSupervisorView = () => {
     const teamIds = teamMembers.map(m => m.employeeId);
     const teamPendingPermissions = pendingPermissions.filter(p => teamIds.includes(p.employeeId));
@@ -324,15 +555,37 @@ function PermissionManagement({
 
     return (
       <div className="permissions-view">
-        {!navigator.onLine && (
+        {!isOnline && pendingCount > 0 && (
           <div style={{
             background: '#fef3c7',
             border: '1px solid #f59e0b',
             padding: '12px 16px',
             borderRadius: '8px',
-            marginBottom: '16px'
+            marginBottom: '16px',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            flexWrap: 'wrap'
           }}>
-            📡 You are offline. Permission actions will be saved and synced when online.
+            <span>📡 Offline: {pendingCount} request(s) saved. Will appear when online.</span>
+            <span style={{ fontSize: '12px', color: '#92400e' }}>⏳ Waiting for connection...</span>
+          </div>
+        )}
+
+        {isOnline && pendingCount > 0 && (
+          <div style={{
+            background: '#dbeafe',
+            border: '1px solid #3b82f6',
+            padding: '12px 16px',
+            borderRadius: '8px',
+            marginBottom: '16px',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            flexWrap: 'wrap'
+          }}>
+            <span>🔄 Syncing: {pendingCount} request(s) being synced...</span>
+            <span style={{ fontSize: '12px', color: '#1e40af' }}>⏳ Please wait...</span>
           </div>
         )}
 
@@ -363,7 +616,7 @@ function PermissionManagement({
           </div>
 
           <div style={{display: 'flex', gap: '10px', marginBottom: '16px', borderBottom: '1px solid #e5e7eb', paddingBottom: '10px', flexWrap: 'wrap'}}>
-            <button onClick={() => setSelectedTab('requests')} style={{padding: '8px 16px', border: 'none', background: selectedTab === 'requests' ? '#1e3a5f' : '#f3f4f6', color: selectedTab === 'requests' ? 'white' : '#374151', borderRadius: '6px', cursor: 'pointer', fontWeight: selectedTab === 'requests' ? '600' : '400', opacity: 1, visibility: 'visible', display: 'inline-flex'}}>All ({filtered.length})</button>
+            <button onClick={() => setSelectedTab('requests')} style={{padding: '8px 16px', border: 'none', background: selectedTab === 'requests' ? '#1e3a5f' : '#f3f4f6', color: selectedTab === 'requests' ? 'white' : '#374151', borderRadius: '6px', cursor: 'pointer', fontWeight: selectedTab === 'requests' ? '600' : '400', opacity: 1, visibility: 'visible', display: 'inline-flex'}}>All ({displayPermissions.length})</button>
             <button onClick={() => setSelectedTab('pending')} style={{padding: '8px 16px', border: 'none', background: selectedTab === 'pending' ? '#d97706' : '#f3f4f6', color: selectedTab === 'pending' ? 'white' : '#374151', borderRadius: '6px', cursor: 'pointer', fontWeight: selectedTab === 'pending' ? '600' : '400', opacity: 1, visibility: 'visible', display: 'inline-flex'}}>⏳ Pending ({pendingPermissions.length})</button>
             <button onClick={() => setSelectedTab('approved')} style={{padding: '8px 16px', border: 'none', background: selectedTab === 'approved' ? '#0b7e4b' : '#f3f4f6', color: selectedTab === 'approved' ? 'white' : '#374151', borderRadius: '6px', cursor: 'pointer', fontWeight: selectedTab === 'approved' ? '600' : '400', opacity: 1, visibility: 'visible', display: 'inline-flex'}}>✅ Approved ({approvedPermissions.length})</button>
             <button onClick={() => setSelectedTab('rejected')} style={{padding: '8px 16px', border: 'none', background: selectedTab === 'rejected' ? '#dc2626' : '#f3f4f6', color: selectedTab === 'rejected' ? 'white' : '#374151', borderRadius: '6px', cursor: 'pointer', fontWeight: selectedTab === 'rejected' ? '600' : '400', opacity: 1, visibility: 'visible', display: 'inline-flex'}}>❌ Rejected ({rejectedPermissions.length})</button>
@@ -378,6 +631,8 @@ function PermissionManagement({
                   const isOwnPermission = p.employeeId === user.employeeId;
                   const isTeamMember = teamIds.includes(p.employeeId);
                   const canApprove = isTeamMember && !isOwnPermission;
+                  const isPending = p.status === 'pending';
+                  
                   return (
                     <tr key={p.id}>
                       <td><strong>{p.employeeName}</strong>{isOwnPermission && <span style={{fontSize: '11px', color: '#6b7f94', marginLeft: '6px'}}>(You)</span>}{isTeamMember && !isOwnPermission && <span style={{fontSize: '11px', color: '#0369a1', marginLeft: '6px'}}>(Team)</span>}</td>
@@ -388,19 +643,56 @@ function PermissionManagement({
                       <td>
                         <span style={{padding: '4px 12px', borderRadius: '20px', fontSize: '12px', fontWeight: '500', background: p.status === 'pending' ? '#fef3c7' : p.status === 'approved' ? '#d1fae5' : '#fee2e2', color: p.status === 'pending' ? '#92400e' : p.status === 'approved' ? '#065f37' : '#991b1b'}}>
                           {p.status}
-                          {!p.synced && p.status !== 'pending' && <span style={{fontSize: '10px', color: '#f59e0b', marginLeft: '4px'}}>📡</span>}
                         </span>
                       </td>
                       <td>
-                        {p.status === 'pending' && (
+                        {isPending ? (
                           canApprove ? (
                             <>
-                              <button onClick={() => approvePermission(p.id, true)} style={{background: '#0b7e4b', color: 'white', border: 'none', padding: '4px 10px', borderRadius: '4px', cursor: 'pointer', fontSize: '12px', marginRight: '4px', opacity: 1, visibility: 'visible', display: 'inline-flex'}}>✅ Approve</button>
-                              <button onClick={() => approvePermission(p.id, false)} style={{background: '#dc2626', color: 'white', border: 'none', padding: '4px 10px', borderRadius: '4px', cursor: 'pointer', fontSize: '12px', opacity: 1, visibility: 'visible', display: 'inline-flex'}}>❌ Reject</button>
+                              <button 
+                                onClick={() => approvePermission(p.id, true)} 
+                                style={{
+                                  background: '#0b7e4b', 
+                                  color: 'white', 
+                                  border: 'none', 
+                                  padding: '4px 10px', 
+                                  borderRadius: '4px', 
+                                  cursor: 'pointer', 
+                                  fontSize: '12px', 
+                                  marginRight: '4px', 
+                                  opacity: 1, 
+                                  visibility: 'visible', 
+                                  display: 'inline-flex'
+                                }}
+                              >
+                                ✅ Approve
+                              </button>
+                              <button 
+                                onClick={() => approvePermission(p.id, false)} 
+                                style={{
+                                  background: '#dc2626', 
+                                  color: 'white', 
+                                  border: 'none', 
+                                  padding: '4px 10px', 
+                                  borderRadius: '4px', 
+                                  cursor: 'pointer', 
+                                  fontSize: '12px', 
+                                  opacity: 1, 
+                                  visibility: 'visible', 
+                                  display: 'inline-flex'
+                                }}
+                              >
+                                ❌ Reject
+                              </button>
                             </>
-                          ) : isOwnPermission ? <span style={{fontSize: '12px', color: '#6b7f94'}}>⏳ Wait for Manager</span> : <span style={{fontSize: '12px', color: '#6b7f94'}}>—</span>
+                          ) : isOwnPermission ? (
+                            <span style={{fontSize: '12px', color: '#6b7f94'}}>⏳ Wait for Manager</span>
+                          ) : (
+                            <span style={{fontSize: '12px', color: '#6b7f94'}}>—</span>
+                          )
+                        ) : (
+                          <span style={{fontSize: '12px', color: '#6b7f94'}}>—</span>
                         )}
-                        {p.status !== 'pending' && <span style={{fontSize: '12px', color: '#6b7f94'}}>—</span>}
                       </td>
                     </tr>
                   );
@@ -414,18 +706,41 @@ function PermissionManagement({
     );
   };
 
+  // ===== OFFICER VIEW =====
   const renderOfficerView = () => {
     return (
       <div className="permissions-view">
-        {!navigator.onLine && (
+        {!isOnline && pendingCount > 0 && (
           <div style={{
             background: '#fef3c7',
             border: '1px solid #f59e0b',
             padding: '12px 16px',
             borderRadius: '8px',
-            marginBottom: '16px'
+            marginBottom: '16px',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            flexWrap: 'wrap'
           }}>
-            📡 You are offline. Permission requests will be saved and synced when online.
+            <span>📡 Offline: {pendingCount} request(s) saved. Will appear when online.</span>
+            <span style={{ fontSize: '12px', color: '#92400e' }}>⏳ Waiting for connection...</span>
+          </div>
+        )}
+
+        {isOnline && pendingCount > 0 && (
+          <div style={{
+            background: '#dbeafe',
+            border: '1px solid #3b82f6',
+            padding: '12px 16px',
+            borderRadius: '8px',
+            marginBottom: '16px',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            flexWrap: 'wrap'
+          }}>
+            <span>🔄 Syncing: {pendingCount} request(s) being synced...</span>
+            <span style={{ fontSize: '12px', color: '#1e40af' }}>⏳ Please wait...</span>
           </div>
         )}
 
@@ -442,7 +757,7 @@ function PermissionManagement({
           </div>
 
           <div style={{display: 'flex', gap: '10px', marginBottom: '16px', borderBottom: '1px solid #e5e7eb', paddingBottom: '10px', flexWrap: 'wrap'}}>
-            <button onClick={() => setSelectedTab('requests')} style={{padding: '8px 16px', border: 'none', background: selectedTab === 'requests' ? '#1e3a5f' : '#f3f4f6', color: selectedTab === 'requests' ? 'white' : '#374151', borderRadius: '6px', cursor: 'pointer', fontWeight: selectedTab === 'requests' ? '600' : '400', opacity: 1, visibility: 'visible', display: 'inline-flex'}}>All ({filtered.length})</button>
+            <button onClick={() => setSelectedTab('requests')} style={{padding: '8px 16px', border: 'none', background: selectedTab === 'requests' ? '#1e3a5f' : '#f3f4f6', color: selectedTab === 'requests' ? 'white' : '#374151', borderRadius: '6px', cursor: 'pointer', fontWeight: selectedTab === 'requests' ? '600' : '400', opacity: 1, visibility: 'visible', display: 'inline-flex'}}>All ({displayPermissions.length})</button>
             <button onClick={() => setSelectedTab('pending')} style={{padding: '8px 16px', border: 'none', background: selectedTab === 'pending' ? '#d97706' : '#f3f4f6', color: selectedTab === 'pending' ? 'white' : '#374151', borderRadius: '6px', cursor: 'pointer', fontWeight: selectedTab === 'pending' ? '600' : '400', opacity: 1, visibility: 'visible', display: 'inline-flex'}}>⏳ Pending ({pendingPermissions.length})</button>
             <button onClick={() => setSelectedTab('approved')} style={{padding: '8px 16px', border: 'none', background: selectedTab === 'approved' ? '#0b7e4b' : '#f3f4f6', color: selectedTab === 'approved' ? 'white' : '#374151', borderRadius: '6px', cursor: 'pointer', fontWeight: selectedTab === 'approved' ? '600' : '400', opacity: 1, visibility: 'visible', display: 'inline-flex'}}>✅ Approved ({approvedPermissions.length})</button>
             <button onClick={() => setSelectedTab('rejected')} style={{padding: '8px 16px', border: 'none', background: selectedTab === 'rejected' ? '#dc2626' : '#f3f4f6', color: selectedTab === 'rejected' ? 'white' : '#374151', borderRadius: '6px', cursor: 'pointer', fontWeight: selectedTab === 'rejected' ? '600' : '400', opacity: 1, visibility: 'visible', display: 'inline-flex'}}>❌ Rejected ({rejectedPermissions.length})</button>
@@ -463,7 +778,6 @@ function PermissionManagement({
                     <td>
                       <span style={{padding: '4px 12px', borderRadius: '20px', fontSize: '12px', fontWeight: '500', background: p.status === 'pending' ? '#fef3c7' : p.status === 'approved' ? '#d1fae5' : '#fee2e2', color: p.status === 'pending' ? '#92400e' : p.status === 'approved' ? '#065f37' : '#991b1b'}}>
                         {p.status}
-                        {!p.synced && p.status !== 'pending' && <span style={{fontSize: '10px', color: '#f59e0b', marginLeft: '4px'}}>📡</span>}
                       </span>
                     </td>
                   </tr>
@@ -477,18 +791,41 @@ function PermissionManagement({
     );
   };
 
+  // ===== MANAGER VIEW =====
   const renderManagerView = () => {
     return (
       <div className="permissions-view">
-        {!navigator.onLine && (
+        {!isOnline && pendingCount > 0 && (
           <div style={{
             background: '#fef3c7',
             border: '1px solid #f59e0b',
             padding: '12px 16px',
             borderRadius: '8px',
-            marginBottom: '16px'
+            marginBottom: '16px',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            flexWrap: 'wrap'
           }}>
-            📡 You are offline. Approvals will be saved and synced when online.
+            <span>📡 Offline: {pendingCount} request(s) saved. Will appear when online.</span>
+            <span style={{ fontSize: '12px', color: '#92400e' }}>⏳ Waiting for connection...</span>
+          </div>
+        )}
+
+        {isOnline && pendingCount > 0 && (
+          <div style={{
+            background: '#dbeafe',
+            border: '1px solid #3b82f6',
+            padding: '12px 16px',
+            borderRadius: '8px',
+            marginBottom: '16px',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            flexWrap: 'wrap'
+          }}>
+            <span>🔄 Syncing: {pendingCount} request(s) being synced...</span>
+            <span style={{ fontSize: '12px', color: '#1e40af' }}>⏳ Please wait...</span>
           </div>
         )}
 
@@ -504,7 +841,7 @@ function PermissionManagement({
           </div>
 
           <div style={{display: 'flex', gap: '10px', marginBottom: '16px', borderBottom: '1px solid #e5e7eb', paddingBottom: '10px', flexWrap: 'wrap'}}>
-            <button onClick={() => setSelectedTab('requests')} style={{padding: '8px 16px', border: 'none', background: selectedTab === 'requests' ? '#1e3a5f' : '#f3f4f6', color: selectedTab === 'requests' ? 'white' : '#374151', borderRadius: '6px', cursor: 'pointer', fontWeight: selectedTab === 'requests' ? '600' : '400', opacity: 1, visibility: 'visible', display: 'inline-flex'}}>All ({filtered.length})</button>
+            <button onClick={() => setSelectedTab('requests')} style={{padding: '8px 16px', border: 'none', background: selectedTab === 'requests' ? '#1e3a5f' : '#f3f4f6', color: selectedTab === 'requests' ? 'white' : '#374151', borderRadius: '6px', cursor: 'pointer', fontWeight: selectedTab === 'requests' ? '600' : '400', opacity: 1, visibility: 'visible', display: 'inline-flex'}}>All ({displayPermissions.length})</button>
             <button onClick={() => setSelectedTab('pending')} style={{padding: '8px 16px', border: 'none', background: selectedTab === 'pending' ? '#d97706' : '#f3f4f6', color: selectedTab === 'pending' ? 'white' : '#374151', borderRadius: '6px', cursor: 'pointer', fontWeight: selectedTab === 'pending' ? '600' : '400', opacity: 1, visibility: 'visible', display: 'inline-flex'}}>⏳ Pending ({pendingPermissions.length})</button>
             <button onClick={() => setSelectedTab('approved')} style={{padding: '8px 16px', border: 'none', background: selectedTab === 'approved' ? '#0b7e4b' : '#f3f4f6', color: selectedTab === 'approved' ? 'white' : '#374151', borderRadius: '6px', cursor: 'pointer', fontWeight: selectedTab === 'approved' ? '600' : '400', opacity: 1, visibility: 'visible', display: 'inline-flex'}}>✅ Approved ({approvedPermissions.length})</button>
             <button onClick={() => setSelectedTab('rejected')} style={{padding: '8px 16px', border: 'none', background: selectedTab === 'rejected' ? '#dc2626' : '#f3f4f6', color: selectedTab === 'rejected' ? 'white' : '#374151', borderRadius: '6px', cursor: 'pointer', fontWeight: selectedTab === 'rejected' ? '600' : '400', opacity: 1, visibility: 'visible', display: 'inline-flex'}}>❌ Rejected ({rejectedPermissions.length})</button>
@@ -525,14 +862,46 @@ function PermissionManagement({
                     <td>
                       <span style={{padding: '4px 12px', borderRadius: '20px', fontSize: '12px', fontWeight: '500', background: p.status === 'pending' ? '#fef3c7' : p.status === 'approved' ? '#d1fae5' : '#fee2e2', color: p.status === 'pending' ? '#92400e' : p.status === 'approved' ? '#065f37' : '#991b1b'}}>
                         {p.status}
-                        {!p.synced && p.status !== 'pending' && <span style={{fontSize: '10px', color: '#f59e0b', marginLeft: '4px'}}>📡</span>}
                       </span>
                     </td>
                     <td>
                       {p.status === 'pending' && (
                         <>
-                          <button onClick={() => approvePermission(p.id, true)} style={{background: '#0b7e4b', color: 'white', border: 'none', padding: '4px 10px', borderRadius: '4px', cursor: 'pointer', fontSize: '12px', marginRight: '4px', opacity: 1, visibility: 'visible', display: 'inline-flex'}}>✅ Approve</button>
-                          <button onClick={() => approvePermission(p.id, false)} style={{background: '#dc2626', color: 'white', border: 'none', padding: '4px 10px', borderRadius: '4px', cursor: 'pointer', fontSize: '12px', opacity: 1, visibility: 'visible', display: 'inline-flex'}}>❌ Reject</button>
+                          <button 
+                            onClick={() => approvePermission(p.id, true)} 
+                            style={{
+                              background: '#0b7e4b', 
+                              color: 'white', 
+                              border: 'none', 
+                              padding: '4px 10px', 
+                              borderRadius: '4px', 
+                              cursor: 'pointer', 
+                              fontSize: '12px', 
+                              marginRight: '4px', 
+                              opacity: 1, 
+                              visibility: 'visible', 
+                              display: 'inline-flex'
+                            }}
+                          >
+                            ✅ Approve
+                          </button>
+                          <button 
+                            onClick={() => approvePermission(p.id, false)} 
+                            style={{
+                              background: '#dc2626', 
+                              color: 'white', 
+                              border: 'none', 
+                              padding: '4px 10px', 
+                              borderRadius: '4px', 
+                              cursor: 'pointer', 
+                              fontSize: '12px', 
+                              opacity: 1, 
+                              visibility: 'visible', 
+                              display: 'inline-flex'
+                            }}
+                          >
+                            ❌ Reject
+                          </button>
                         </>
                       )}
                       {p.status !== 'pending' && <span style={{fontSize: '12px', color: '#6b7f94'}}>—</span>}

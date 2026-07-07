@@ -1,4 +1,4 @@
-// services/database.js - YOUR ORIGINAL VERSION
+// services/database.js
 
 import Dexie from 'dexie';
 import { SAMPLE_USERS } from '../utils/constants';
@@ -26,7 +26,9 @@ db.version(1).stores({
 
 export { db };
 
-// ===== OFFLINE SYNC QUEUE =====
+// ============================================================
+// OFFLINE SYNC QUEUE
+// ============================================================
 export const syncQueue = {
   pending: [],
   
@@ -46,16 +48,26 @@ export const syncQueue = {
   save: () => {
     try {
       localStorage.setItem('offlineSyncQueue', JSON.stringify(syncQueue.pending));
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('sync-queue-updated'));
+      }
     } catch (e) {
       console.error('Error saving sync queue:', e);
     }
   },
   
   add: (item) => {
+    const exists = syncQueue.pending.some(q => q.id === item.id && q.type === item.type);
+    if (exists) {
+      console.log(`⚠️ Item ${item.id} already in queue`);
+      return;
+    }
+    
     syncQueue.pending.push({
       ...item,
       queuedAt: new Date().toISOString(),
-      attempts: 0
+      attempts: 0,
+      maxRetries: 5
     });
     syncQueue.save();
     console.log(`📥 Added to sync queue: ${item.type} - ${item.id} (Total: ${syncQueue.pending.length})`);
@@ -85,24 +97,187 @@ export const syncQueue = {
 // Load queue on initialization
 syncQueue.load();
 
-// ===== CHECK INTERNET =====
+// ============================================================
+// NETWORK CHECK
+// ============================================================
+
+let _networkOnline = true;
+
+const checkNetworkWithImage = () => {
+  return new Promise((resolve) => {
+    const img = new Image();
+    let resolved = false;
+    
+    img.onload = () => {
+      if (!resolved) {
+        resolved = true;
+        _networkOnline = true;
+        resolve(true);
+      }
+    };
+    
+    img.onerror = () => {
+      if (!resolved) {
+        resolved = true;
+        _networkOnline = false;
+        resolve(false);
+      }
+    };
+    
+    img.src = 'https://www.google.com/favicon.ico?_=' + Date.now();
+    
+    setTimeout(() => {
+      if (!resolved) {
+        resolved = true;
+        _networkOnline = false;
+        resolve(false);
+      }
+    }, 3000);
+  });
+};
+
 export const checkRealInternet = async () => {
-  try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 3000);
-    const response = await fetch('https://cdn.jsdelivr.net/npm/axios/package.json', {
-      method: 'HEAD',
-      signal: controller.signal,
-      cache: 'no-store'
-    });
-    clearTimeout(timeoutId);
-    return response.ok;
-  } catch {
+  if (!navigator.onLine) {
+    _networkOnline = false;
     return false;
+  }
+  
+  const result = await checkNetworkWithImage();
+  _networkOnline = result;
+  return result;
+};
+
+export const isDevToolsOffline = () => {
+  return !_networkOnline || !navigator.onLine;
+};
+
+export const getNetworkStatus = () => {
+  const connection = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+  
+  const isOnline = _networkOnline && navigator.onLine;
+  
+  if (!isOnline) {
+    return {
+      type: 'devtools-offline',
+      label: !navigator.onLine ? 'Offline' : 'DevTools Offline',
+      speed: 0,
+      isSlow: false,
+      rtt: 0,
+      browserOnline: navigator.onLine,
+      devtoolsOffline: true
+    };
+  }
+  
+  let networkType = 'unknown';
+  let isSlow = false;
+  let speed = 0;
+  let rtt = 0;
+  let label = 'Unknown';
+  
+  if (connection) {
+    const types = {
+      'slow-2g': { label: '2G', isSlow: true },
+      '2g': { label: '2G', isSlow: true },
+      '3g': { label: '3G', isSlow: true },
+      '4g': { label: '4G', isSlow: false },
+      '5g': { label: '5G', isSlow: false }
+    };
+    
+    const effectiveType = connection.effectiveType || 'unknown';
+    const info = types[effectiveType] || { label: 'Unknown', isSlow: false };
+    
+    networkType = effectiveType;
+    label = info.label;
+    isSlow = info.isSlow;
+    speed = connection.downlink || 0;
+    rtt = connection.rtt || 0;
+  }
+  
+  return {
+    type: networkType,
+    label: label,
+    speed: speed,
+    isSlow: isSlow,
+    rtt: rtt,
+    browserOnline: true,
+    devtoolsOffline: false
+  };
+};
+
+export const isSlowConnection = () => {
+  const info = getNetworkStatus();
+  return info.isSlow || info.type === 'slow-2g' || info.type === '2g' || info.type === '3g';
+};
+
+export const isOnline = async () => {
+  return await checkRealInternet();
+};
+
+// ============================================================
+// CLEAR STUCK SYNC ITEMS
+// ============================================================
+export const clearStuckSyncItems = async () => {
+  try {
+    console.log('🧹 Clearing stuck sync operations...');
+    
+    const storesToCheck = [
+      'reports', 'attendance', 'citizens', 'tasks', 
+      'leaves', 'permissions', 'supervisor_reports'
+    ];
+    
+    const stuckThreshold = Date.now() - 60000; // 1 minute
+    let clearedCount = 0;
+    
+    for (const storeName of storesToCheck) {
+      try {
+        const store = db[storeName];
+        if (!store) continue;
+        
+        const items = await store
+          .where('synced')
+          .equals('syncing')
+          .toArray();
+        
+        for (const item of items) {
+          if (!item.lastSyncAttempt || item.lastSyncAttempt < stuckThreshold) {
+            await store.update(item.id, {
+              synced: false,
+              syncError: 'Stuck sync cleared automatically',
+              lastSyncAttempt: Date.now()
+            });
+            clearedCount++;
+            console.log(`✅ Cleared stuck sync for ${storeName} ${item.id}`);
+          }
+        }
+      } catch (error) {
+        console.error(`Error checking ${storeName}:`, error);
+      }
+    }
+    
+    const pending = syncQueue.getAll();
+    let queueCleared = 0;
+    
+    for (const item of pending) {
+      if (item.attempts >= item.maxRetries) {
+        syncQueue.remove(item.id);
+        queueCleared++;
+        console.log(`✅ Removed stuck queue item: ${item.type} - ${item.id}`);
+      }
+    }
+    
+    console.log(`✅ Cleared ${clearedCount} stuck store items and ${queueCleared} stuck queue items`);
+    
+    return { clearedStore: clearedCount, clearedQueue: queueCleared };
+    
+  } catch (error) {
+    console.error('Error clearing stuck sync items:', error);
+    return { clearedStore: 0, clearedQueue: 0 };
   }
 };
 
-// ===== PROCESS SYNC QUEUE =====
+// ============================================================
+// PROCESS SYNC QUEUE - ✅ WORKING VERSION (NO API CALL)
+// ============================================================
 export const processSyncQueue = async (isOnline) => {
   if (!isOnline) {
     console.log('📡 Offline - Cannot process sync queue');
@@ -119,10 +294,10 @@ export const processSyncQueue = async (isOnline) => {
   
   let synced = 0;
   let failed = 0;
+  const MAX_RETRIES = 3;
 
   for (const item of pending) {
     try {
-      // Update local record to synced
       const storeMap = {
         'citizen': 'citizens',
         'report': 'reports',
@@ -130,28 +305,95 @@ export const processSyncQueue = async (isOnline) => {
         'task': 'tasks',
         'leave_request': 'leaves',
         'permission_request': 'permissions',
-        'supervisor_report': 'supervisor_reports'
+        'supervisor_report': 'supervisor_reports',
+        'user': 'users',
+        'user_status_update': 'users',
+        'user_delete': 'users',
+        'alert': 'alerts',
+        'alert_read': 'alerts',
+        'screen_time_update': 'screen_time'
       };
+      
       const store = storeMap[item.type];
       if (store && db[store]) {
-        await db[store].update(item.id, { synced: true });
+        // Mark as syncing
+        await db[store].update(item.id, { 
+          synced: 'syncing',
+          lastSyncAttempt: Date.now()
+        });
+        
+        // ✅ FIX: Directly mark as synced (no API call)
+        console.log(`🔄 Syncing: ${item.type} - ${item.id}`);
+        
+        // Small delay to simulate network
+        await new Promise(resolve => setTimeout(resolve, 300));
+        
+        // Mark as synced
+        await db[store].update(item.id, { 
+          synced: true,
+          syncedAt: new Date().toISOString(),
+          serverId: `demo-${Date.now()}`
+        });
+        
+        // Remove from queue
+        syncQueue.remove(item.id);
+        synced++;
+        console.log(`✅ Synced: ${item.type} - ${item.id}`);
+        
+      } else {
+        syncQueue.remove(item.id);
+        synced++;
       }
-
-      syncQueue.remove(item.id);
-      synced++;
-      console.log(`✅ Synced: ${item.type} - ${item.id}`);
     } catch (error) {
       console.error(`❌ Failed to sync: ${item.type} - ${item.id}`, error);
       item.attempts = (item.attempts || 0) + 1;
-      if (item.attempts > 5) {
-        console.warn(`⚠️ Max attempts reached for ${item.id}, removing from queue`);
-        syncQueue.remove(item.id);
+      
+      const storeMap = {
+        'citizen': 'citizens',
+        'report': 'reports',
+        'attendance': 'attendance',
+        'task': 'tasks',
+        'leave_request': 'leaves',
+        'permission_request': 'permissions',
+        'supervisor_report': 'supervisor_reports',
+        'user': 'users',
+        'user_status_update': 'users',
+        'user_delete': 'users',
+        'alert': 'alerts',
+        'alert_read': 'alerts',
+        'screen_time_update': 'screen_time'
+      };
+      
+      const store = storeMap[item.type];
+      if (store && db[store]) {
+        await db[store].update(item.id, {
+          synced: false,
+          syncError: error.message,
+          lastSyncAttempt: Date.now()
+        });
       }
-      failed++;
+      
+      if (item.attempts > MAX_RETRIES) {
+        console.warn(`⚠️ Max attempts (${MAX_RETRIES}) reached for ${item.id}, removing from queue`);
+        syncQueue.remove(item.id);
+        failed++;
+      } else {
+        const index = syncQueue.pending.findIndex(q => q.id === item.id);
+        if (index !== -1) {
+          syncQueue.pending[index] = item;
+          syncQueue.save();
+        }
+        failed++;
+      }
     }
   }
 
   syncQueue.save();
+  
+  // Dispatch events
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new Event('sync-complete'));
+  }
   
   return {
     synced,
@@ -160,7 +402,9 @@ export const processSyncQueue = async (isOnline) => {
   };
 };
 
-// ===== SYNC ENGINE =====
+// ============================================================
+// SYNC ENGINE
+// ============================================================
 export const syncPendingData = async (isOnline) => {
   if (!isOnline) {
     console.log('📡 Offline - Sync paused');
@@ -170,22 +414,108 @@ export const syncPendingData = async (isOnline) => {
   return await processSyncQueue(isOnline);
 };
 
-// ===== EVENT LISTENERS FOR ONLINE/OFFLINE =====
+// ============================================================
+// AUTO-SYNC
+// ============================================================
 if (typeof window !== 'undefined') {
-  window.addEventListener('online', async () => {
-    console.log('🔄 Back online! Starting sync...');
+  let isSyncing = false;
+  
+  const checkAndSync = async () => {
     const online = await checkRealInternet();
-    const result = await processSyncQueue(online);
-    if (result.synced > 0) {
-      if (window.dispatchEvent) {
-        window.dispatchEvent(new CustomEvent('sync-complete', { 
-          detail: result 
-        }));
+    _networkOnline = online;
+    
+    if (online && !isSyncing) {
+      const count = syncQueue.count();
+      if (count > 0) {
+        console.log(`🔄 Auto-syncing ${count} items...`);
+        isSyncing = true;
+        try {
+          await processSyncQueue(true);
+        } catch (error) {
+          console.error('Sync error:', error);
+        } finally {
+          isSyncing = false;
+        }
       }
+    }
+  };
+
+  window.addEventListener('online', () => {
+    console.log('🔄 Browser online event');
+    setTimeout(checkAndSync, 1000);
+  });
+
+  window.addEventListener('offline', () => {
+    console.log('🔴 Browser offline event');
+    _networkOnline = false;
+  });
+
+  // Check every 2 seconds
+  const interval = setInterval(checkAndSync, 2000);
+  
+  setTimeout(checkAndSync, 1000);
+  
+  window.addEventListener('force-sync', checkAndSync);
+  
+  // Clear stuck items every 30 seconds
+  setInterval(async () => {
+    const online = await checkRealInternet();
+    if (online) {
+      await clearStuckSyncItems();
+    }
+  }, 30000);
+
+  window.addEventListener('beforeunload', () => {
+    if (interval) {
+      clearInterval(interval);
     }
   });
 }
 
+// ============================================================
+// EXPORT UTILITY FUNCTIONS
+// ============================================================
+export const getFailedItems = () => {
+  try {
+    const failed = localStorage.getItem('failedSyncItems');
+    return failed ? JSON.parse(failed) : [];
+  } catch {
+    return [];
+  }
+};
+
+export const clearFailedItems = () => {
+  localStorage.removeItem('failedSyncItems');
+  console.log('🗑️ Failed items cleared');
+};
+
+export const retryFailedItems = async () => {
+  const failedItems = getFailedItems();
+  if (failedItems.length === 0) {
+    console.log('✅ No failed items to retry');
+    return;
+  }
+  
+  console.log(`🔄 Retrying ${failedItems.length} failed items...`);
+  
+  for (const item of failedItems) {
+    syncQueue.add({
+      id: item.id,
+      type: item.type,
+      data: item.data
+    });
+  }
+  
+  localStorage.removeItem('failedSyncItems');
+  
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new Event('force-sync'));
+  }
+};
+
+// ============================================================
+// INITIALIZE DATA
+// ============================================================
 export const initializeAllData = async () => {
   try {
     const userCount = await db.users.count();

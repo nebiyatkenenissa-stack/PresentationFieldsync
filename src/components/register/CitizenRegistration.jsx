@@ -133,6 +133,134 @@ const translations = {
     pendingSync: 'በመጠበቅ ላይ',
     offlineMode: 'ከመስመር ውጭ ሁነታ፡',
     offlineMessage: 'ዜጎች በአካባቢው ይቀመጣሉ እና በመስመር ላይ ሲሆኑ በራስ-ሰር ይመሳሰላሉ።'
+  },
+  om: {
+    title: '🆔 Firoota Magaalaa Sabaa Qabaachuuf Galmeessaa',
+    subtitle: 'Odeeffannoo Firoota galmeessuu Magaalaa Sabaa qabaachuuf',
+    offlineReady: 'Offline Qopheessa',
+    firstName: 'Maqaa Dura *',
+    firstNamePlaceholder: 'Maqaa dura galchi',
+    lastName: 'Maqaa Abbootii *',
+    lastNamePlaceholder: 'Maqaa Abbootii galchi',
+    dateOfBirth: 'Guyyaa Dhalootaa *',
+    gender: 'Saala *',
+    selectGender: 'Saala fili',
+    male: 'Dhiira',
+    female: 'Dubartii',
+    other: 'Kan Biroo',
+    phone: 'Lakkoobsa Bilbilaa *',
+    phonePlaceholder: 'Lakkoobsa bilbilaa galchi',
+    email: 'Email',
+    emailPlaceholder: 'Teessoo email galchi',
+    region: 'Naannoo *',
+    selectRegion: 'Naannoo fili',
+    north: 'Kaaba',
+    south: 'Kibba',
+    east: 'Baha',
+    west: 'Lixa',
+    central: 'Gidduu',
+    district: 'Aanaa',
+    districtPlaceholder: 'Aanaa galchi',
+    village: 'Ganda',
+    villagePlaceholder: 'Ganda galchi',
+    address: 'Teessoo',
+    addressPlaceholder: 'Teessoo guutuu galchi',
+    occupation: 'Hojii',
+    occupationPlaceholder: 'Hojii galchi',
+    maritalStatus: 'Haala Fuudhaa',
+    selectStatus: 'Haala fili',
+    single: 'Kan Hin Fuunne/Hin Heerumne',
+    married: 'Kan Fuudhe/Heerume',
+    divorced: 'Kan Hiiku',
+    widowed: 'Kan Hiyyeesee',
+    idType: 'Gosa Waraqaa Magaalaa',
+    nationalId: 'Waraqaa Magaalaa Sabaa',
+    birthCertificate: 'Waraqaa Dhalootaa',
+    passport: 'Paasipooriti',
+    idNumber: 'Lakkoobsa Waraqaa Magaalaa',
+    idNumberPlaceholder: 'Lakkoobsa waraqaa magaalaa galchi',
+    biometrics: 'Biometrics Walitti Qabame',
+    yes: 'Eeyyee',
+    no: 'Lakkii',
+    systemAssignId: 'Sistimiin Magaalaa Sabaa Godina',
+    register: 'Firoota Galmeessi',
+    saveOffline: 'Offline Qusadhu',
+    processing: 'Hojii Irratti...',
+    clear: 'Forma Qulqulleessi',
+    clearConfirm: 'Dirree hunda qulqulleessuu barbaadda?',
+    success: 'Firoota milkaa\'iin galmeessame!',
+    successId: 'Magaalaa Sabaa: ',
+    offlineSuccess: 'Firoota offline qusatame! Yeroo online ta\'u ofiifuu wal qabsiifama.',
+    error: 'Dogoggora galmeessuu firoota: ',
+    online: 'Online',
+    offline: 'Offline',
+    pendingSync: 'eegachaa jira',
+    offlineMode: 'Haala Offline:',
+    offlineMessage: 'Firoonni naannoo keessatti qusatamanii yeroo online ta\'an ofiifuu wal qabsiifamu.'
+  },
+  ti: {
+    title: '🆔 ንብሔራዊ መታወቂያ ዜጋ ተመዝገብ',
+    subtitle: 'ንብሔራዊ መታወቂያ ምዝገባ ሓበሬታ ዜጋ አእትዉ',
+    offlineReady: 'ብልዕ መስመር ተዳሉ',
+    firstName: 'ስም *',
+    firstNamePlaceholder: 'ስም አእትዉ',
+    lastName: 'ስም ኣቦ *',
+    lastNamePlaceholder: 'ስም ኣቦ አእትዉ',
+    dateOfBirth: 'ዕለት ትውልድ *',
+    gender: 'ጾታ *',
+    selectGender: 'ጾታ ምረጹ',
+    male: 'ተባዕታይ',
+    female: 'ኣንስተይቲ',
+    other: 'ካልእ',
+    phone: 'ቁጽሪ ተሌፎን *',
+    phonePlaceholder: 'ቁጽሪ ተሌፎን አእትዉ',
+    email: 'ኢመይል',
+    emailPlaceholder: 'አድራሻ ኢመይል አእትዉ',
+    region: 'ክልል *',
+    selectRegion: 'ክልል ምረጹ',
+    north: 'ሰሜን',
+    south: 'ደቡብ',
+    east: 'ምብራቕ',
+    west: 'ምዕራብ',
+    central: 'ማእከላይ',
+    district: 'ወረዳ',
+    districtPlaceholder: 'ወረዳ አእትዉ',
+    village: 'ታቦ',
+    villagePlaceholder: 'ታቦ አእትዉ',
+    address: 'አድራሻ',
+    addressPlaceholder: 'ምሉእ አድራሻ አእትዉ',
+    occupation: 'ሞያ',
+    occupationPlaceholder: 'ሞያ አእትዉ',
+    maritalStatus: 'ኩነት ሓዳር',
+    selectStatus: 'ኩነት ምረጹ',
+    single: 'ካልተዳወለ',
+    married: 'ተዳዊሉ',
+    divorced: 'ተፈንጺሉ',
+    widowed: 'መበለት',
+    idType: 'ዓይነት መታወቂያ',
+    nationalId: 'ብሔራዊ መታወቂያ',
+    birthCertificate: 'ሰርቲፊኬት ትውልድ',
+    passport: 'ፓስፖርት',
+    idNumber: 'ቁጽሪ መታወቂያ',
+    idNumberPlaceholder: 'ቁጽሪ መታወቂያ አእትዉ',
+    biometrics: 'ባዮሜትሪክስ ተሰብሲቡ',
+    yes: 'እወ',
+    no: 'አይኮን',
+    systemAssignId: 'ስርዓት ብሔራዊ መታወቂያ ይምድብ',
+    register: 'ዜጋ ተመዝገብ',
+    saveOffline: 'ብልዕ መስመር ኣቐምጥ',
+    processing: 'ኣብ ስራሕ ኣሎ...',
+    clear: 'ቅጽ አጽርሕ',
+    clearConfirm: 'ኩሉ መዳያት ምጽራሕ ደልየካ ኢኻ?',
+    success: 'ዜጋ ብዕለት ተመዝጊቡ!',
+    successId: 'ብሔራዊ መታወቂያ: ',
+    offlineSuccess: 'ዜጋ ብልዕ መስመር ተቀሚጹ! መስመር ምስ ተመልሰ ብራሱ ይመሳሰል።',
+    error: 'ኣብ ምዝገባ ዜጋ ጌጋ: ',
+    online: 'ብመስመር',
+    offline: 'ብልዕ መስመር',
+    pendingSync: 'ብምጽባይ ኣሎ',
+    offlineMode: 'ብልዕ መስመር ሁነታ:',
+    offlineMessage: 'ዜጋታት ብአካባቢ ይቅመጡ እዮም እሞ መስመር ምስ ተመልሰ ብራሱ ይመሳሰሉ።'
   }
 };
 
@@ -164,10 +292,12 @@ function CitizenRegistration({ user, citizens, setCitizens, addNotification }) {
   // Get translations
   const t = translations[language] || translations.en;
 
-  // Language options
+  // Language options - ALL 4 LANGUAGES
   const languages = [
     { code: 'en', label: '🇬🇧 English' },
-    { code: 'am', label: '🇪🇹 አማርኛ' }
+    { code: 'am', label: '🇪🇹 አማርኛ' },
+    { code: 'om', label: '🇪🇹 Afaan Oromoo' },
+    { code: 'ti', label: '🇪🇹 ትግርኛ' }
   ];
 
   useEffect(() => {
@@ -373,7 +503,7 @@ function CitizenRegistration({ user, citizens, setCitizens, addNotification }) {
           }}>
             {t.offlineReady}
           </span>
-          {/* ===== LANGUAGE SELECTOR ===== */}
+          {/* ===== LANGUAGE SELECTOR - ALL 4 LANGUAGES ===== */}
           <select 
             value={language} 
             onChange={(e) => setLanguage(e.target.value)}
@@ -384,7 +514,8 @@ function CitizenRegistration({ user, citizens, setCitizens, addNotification }) {
               fontSize: '13px',
               background: 'white',
               cursor: 'pointer',
-              outline: 'none'
+              outline: 'none',
+              minWidth: '140px'
             }}
           >
             {languages.map(lang => (

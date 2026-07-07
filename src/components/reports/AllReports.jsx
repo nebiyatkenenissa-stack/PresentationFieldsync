@@ -1,13 +1,52 @@
-import React, { useState, useMemo } from 'react';
+// components/reports/AllReports.js
+
+import React, { useState, useMemo, useEffect } from 'react';
 import { exportCSV, exportJSON } from '../../utils/helpers';
+import { syncQueue, checkRealInternet } from '../../services/database';
 
 function AllReports({ reports, users, supervisorReports }) {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedRegion, setSelectedRegion] = useState('All');
   const [dateRange, setDateRange] = useState({ start: '', end: '' });
+  const [isOnline, setIsOnline] = useState(navigator.onLine);
+  const [pendingCount, setPendingCount] = useState(0);
+
+  // Check online status and pending sync count
+  useEffect(() => {
+    const checkStatus = async () => {
+      const online = await checkRealInternet();
+      setIsOnline(online);
+      const count = syncQueue.count();
+      setPendingCount(count);
+    };
+    checkStatus();
+    const interval = setInterval(checkStatus, 3000);
+
+    const handleQueueUpdate = () => {
+      setPendingCount(syncQueue.count());
+    };
+    window.addEventListener('sync-queue-updated', handleQueueUpdate);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('sync-queue-updated', handleQueueUpdate);
+    };
+  }, []);
+
+  // ONLY show synced reports in manager view and sort by submittedAt (newest first)
+  const syncedReports = useMemo(() => {
+    return reports
+      .filter(r => r.synced === true)
+      // ⭐ FIXED: Sort by submittedAt or createdAt - newest first
+      .sort((a, b) => {
+        const dateA = a.submittedAt || a.createdAt || a.reportDate;
+        const dateB = b.submittedAt || b.createdAt || b.reportDate;
+        return new Date(dateB) - new Date(dateA);
+      });
+  }, [reports]);
 
   const filteredReports = useMemo(() => {
-    let filtered = reports;
+    let filtered = syncedReports;
 
     if (selectedRegion !== 'All') {
       filtered = filtered.filter(r => r.region === selectedRegion);
@@ -29,15 +68,25 @@ function AllReports({ reports, users, supervisorReports }) {
     }
 
     return filtered;
-  }, [reports, selectedRegion, searchTerm, dateRange]);
+  }, [syncedReports, selectedRegion, searchTerm, dateRange]);
 
   const filteredSupervisorReports = useMemo(() => {
     let filtered = supervisorReports || [];
     if (selectedRegion !== 'All') {
       filtered = filtered.filter(r => r.region === selectedRegion);
     }
-    return filtered;
+    // Sort by submittedAt - newest first
+    return filtered.sort((a, b) => {
+      const dateA = a.submittedAt || a.createdAt || a.reportDate;
+      const dateB = b.submittedAt || b.createdAt || b.reportDate;
+      return new Date(dateB) - new Date(dateA);
+    });
   }, [supervisorReports, selectedRegion]);
+
+  // Count offline reports
+  const offlineCount = useMemo(() => {
+    return reports.filter(r => r.synced === false).length;
+  }, [reports]);
 
   return (
     <div className="all-reports-view">
@@ -47,15 +96,72 @@ function AllReports({ reports, users, supervisorReports }) {
             <h3>📋 All Reports</h3>
             <p>Complete overview of all reports from all officers and supervisors</p>
           </div>
-          <span className="form-badge">{reports.length} Total Reports</span>
+          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
+            <span className="form-badge" style={{
+              background: isOnline ? '#d1fae5' : '#fee2e2',
+              color: isOnline ? '#065f37' : '#991b1b'
+            }}>
+              {isOnline ? '✅ Online' : '📡 Offline'}
+            </span>
+            <span className="form-badge">{reports.length} Total Reports</span>
+            <span className="form-badge" style={{
+              background: '#d1fae5',
+              color: '#065f37'
+            }}>
+              ✅ {syncedReports.length} Synced
+            </span>
+            {offlineCount > 0 && (
+              <span className="form-badge" style={{
+                background: '#fef3c7',
+                color: '#92400e'
+              }}>
+                📡 {offlineCount} Offline
+              </span>
+            )}
+          </div>
         </div>
+
+        {/* Offline Banner */}
+        {offlineCount > 0 && (
+          <div style={{
+            background: '#fef3c7',
+            border: '1px solid #f59e0b',
+            padding: '8px 12px',
+            borderRadius: '6px',
+            marginBottom: '12px',
+            fontSize: '13px',
+            color: '#92400e',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            flexWrap: 'wrap'
+          }}>
+            <span>📡 {offlineCount} report(s) waiting to sync. Will appear automatically when online.</span>
+            {isOnline && (
+              <button
+                onClick={() => window.dispatchEvent(new Event('force-sync'))}
+                style={{
+                  background: '#0b7e4b',
+                  color: 'white',
+                  border: 'none',
+                  padding: '4px 12px',
+                  borderRadius: '4px',
+                  cursor: 'pointer',
+                  fontSize: '12px'
+                }}
+              >
+                🔄 Sync Now
+              </button>
+            )}
+          </div>
+        )}
       </div>
 
       <div className="table-card">
         <div className="table-header">
           <div>
             <h3>All Daily Reports</h3>
-            <p>{filteredReports.length} reports found</p>
+            <p>{filteredReports.length} synced reports found</p>
           </div>
           <div className="table-actions">
             <input 
@@ -116,7 +222,13 @@ function AllReports({ reports, users, supervisorReports }) {
                 <tr>
                   <td colSpan="9" className="empty-state">
                     <div className="empty-icon">📋</div>
-                    <div>No reports found</div>
+                    <div>
+                      {offlineCount > 0 ? (
+                        `${offlineCount} report(s) waiting to sync. Will appear when synced.`
+                      ) : (
+                        'No reports found'
+                      )}
+                    </div>
                     <small>Try adjusting your filters</small>
                   </td>
                 </tr>

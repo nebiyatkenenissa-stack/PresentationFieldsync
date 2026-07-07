@@ -1,6 +1,11 @@
-import React, { useMemo } from 'react';
+// components/dashboard/Dashboard.js
+
+import React, { useMemo, useCallback } from 'react';
 import { getToday } from '../../utils/helpers';
-import PerformanceChart from './PerformanceChart';
+import { 
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, 
+  ResponsiveContainer, LineChart, Line, AreaChart, Area, Cell
+} from 'recharts';
 
 function Dashboard({ 
   isManager, isSupervisor, isOfficer, user, reports, users, 
@@ -27,7 +32,7 @@ function Dashboard({
     return { data, max: max || 1 };
   }, [reports]);
 
-  // Region stats for chart - using actual citizens
+  // Region stats with East, South, North, West
   const regionStats = useMemo(() => {
     const map = {};
     reports.forEach(r => {
@@ -38,64 +43,7 @@ function Dashboard({
     return Object.entries(map).map(([region, data]) => ({ region, ...data }));
   }, [reports, citizens]);
 
-  // Performance distribution for pie chart - REAL DATA
-  const performanceData = useMemo(() => {
-    if (!reports || reports.length === 0) {
-      return [
-        { name: 'Approved', value: 0 },
-        { name: 'Pending', value: 0 },
-        { name: 'Rejected', value: 0 }
-      ];
-    }
-    const total = reports.length;
-    const approved = reports.filter(r => r.reviewed && r.status !== 'rejected').length;
-    const pending = reports.filter(r => !r.reviewed && r.status !== 'rejected').length;
-    const rejected = reports.filter(r => r.status === 'rejected').length;
-    return [
-      { name: 'Approved', value: Math.round((approved / total) * 100) },
-      { name: 'Pending', value: Math.round((pending / total) * 100) },
-      { name: 'Rejected', value: Math.round((rejected / total) * 100) }
-    ];
-  }, [reports]);
-
-  // ===== NEW: User Status Distribution (Manager) =====
-  const userStatusData = useMemo(() => {
-    if (!users || users.length === 0) return [];
-    const statuses = { 'Active': 0, 'Inactive': 0 };
-    users.forEach(u => {
-      if (u.status === 'active') statuses['Active']++;
-      else statuses['Inactive']++;
-    });
-    return Object.entries(statuses)
-      .filter(([_, value]) => value > 0)
-      .map(([name, value]) => ({ name, value }));
-  }, [users]);
-
-  // ===== NEW: Role Distribution (Manager) =====
-  const roleDistributionData = useMemo(() => {
-    if (!users || users.length === 0) return [];
-    const roles = {};
-    users.forEach(u => {
-      const role = u.role === 'field_officer' ? 'Field Officer' : 
-                   u.role === 'supervisor' ? 'Supervisor' : 
-                   u.role === 'manager' ? 'Manager' : u.role || 'Unknown';
-      roles[role] = (roles[role] || 0) + 1;
-    });
-    return Object.entries(roles).map(([name, value]) => ({ name, value }));
-  }, [users]);
-
-  // ===== NEW: Region Distribution (Manager) =====
-  const regionDistributionData = useMemo(() => {
-    if (!users || users.length === 0) return [];
-    const regions = {};
-    users.forEach(u => {
-      const region = u.region || 'Unknown';
-      regions[region] = (regions[region] || 0) + 1;
-    });
-    return Object.entries(regions).map(([name, value]) => ({ name, value }));
-  }, [users]);
-
-  // ===== NEW: Report Status Distribution (Manager) =====
+  // ===== REAL DATA: Report Status Distribution =====
   const reportStatusData = useMemo(() => {
     if (!reports || reports.length === 0) return [];
     const statuses = { 'Approved': 0, 'Pending': 0, 'Rejected': 0 };
@@ -109,7 +57,7 @@ function Dashboard({
       .map(([name, value]) => ({ name, value }));
   }, [reports]);
 
-  // ===== NEW: Today's Attendance Status (Manager) =====
+  // ===== REAL DATA: Today's Attendance Status =====
   const todayAttendanceData = useMemo(() => {
     if (!attendance || attendance.length === 0) return [];
     const today = getToday();
@@ -127,7 +75,7 @@ function Dashboard({
       .map(([name, value]) => ({ name, value }));
   }, [attendance]);
 
-  // ===== NEW: Leave Status Distribution =====
+  // ===== REAL DATA: Leave Status Distribution =====
   const leaveStatusData = useMemo(() => {
     if (!leaves || leaves.length === 0) return [];
     const statuses = { 'Approved': 0, 'Pending': 0, 'Rejected': 0 };
@@ -141,7 +89,7 @@ function Dashboard({
       .map(([name, value]) => ({ name, value }));
   }, [leaves]);
 
-  // ===== NEW: Permission Status Distribution =====
+  // ===== REAL DATA: Permission Status Distribution =====
   const permissionStatusData = useMemo(() => {
     if (!permissions || permissions.length === 0) return [];
     const statuses = { 'Approved': 0, 'Pending': 0, 'Rejected': 0 };
@@ -155,6 +103,33 @@ function Dashboard({
       .map(([name, value]) => ({ name, value }));
   }, [permissions]);
 
+  // ===== REAL DATA: Officer's personal performance =====
+  const officerPerformanceData = useMemo(() => {
+    if (!isOfficer || !user) return [];
+    const today = getToday();
+    const last7Days = [];
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date(today);
+      d.setDate(d.getDate() - i);
+      const dateStr = d.toISOString().slice(0, 10);
+      const registrations = citizens.filter(c => 
+        c.registeredBy === user.employeeId && 
+        c.registrationDate?.slice(0, 10) === dateStr
+      ).length;
+      const reportsCount = reports.filter(r => 
+        r.employeeId === user.employeeId && 
+        r.reportDate === dateStr
+      ).length;
+      last7Days.push({ 
+        date: dateStr, 
+        registrations, 
+        reports: reportsCount,
+        efficiency: reportsCount > 0 ? Math.round((registrations / reportsCount) * 100) : 0
+      });
+    }
+    return last7Days;
+  }, [citizens, reports, isOfficer, user]);
+
   const fieldOfficers = users.filter(u => u.role === 'field_officer').length;
   const supervisors = users.filter(u => u.role === 'supervisor').length;
 
@@ -164,61 +139,205 @@ function Dashboard({
     return attendance.find(a => a.employeeId === user.employeeId && a.date === getToday());
   }, [attendance, user, isOfficer]);
 
-  // ========== SUPERVISOR: Get team citizen counts using actual citizens ==========
+  // ========== SUPERVISOR: Team citizen counts ==========
   const teamCitizenCount = useMemo(() => {
     if (!isSupervisor || !user || !teamMembers) return 0;
     const teamIds = teamMembers.map(m => m.employeeId);
     return citizens.filter(c => teamIds.includes(c.registeredBy)).length;
   }, [citizens, teamMembers, isSupervisor, user]);
 
-  // ========== SUPERVISOR: Get team reports count ==========
+  // ========== SUPERVISOR: Team reports count ==========
   const teamReportsCount = useMemo(() => {
     if (!isSupervisor || !user || !teamMembers) return 0;
     const teamIds = teamMembers.map(m => m.employeeId);
     return reports.filter(r => teamIds.includes(r.employeeId)).length;
   }, [reports, teamMembers, isSupervisor, user]);
 
-  // ========== OFFICER: Get officer's actual citizen count ==========
+  // ========== OFFICER: Officer's actual citizen count ==========
   const officerCitizenCount = useMemo(() => {
     if (!isOfficer || !user) return 0;
     return citizens.filter(c => c.registeredBy === user.employeeId).length;
   }, [citizens, isOfficer, user]);
 
-  // ========== OFFICER: Get officer's report count ==========
+  // ========== OFFICER: Officer's report count ==========
   const officerReportsCount = useMemo(() => {
     if (!isOfficer || !user) return 0;
     return reports.filter(r => r.employeeId === user.employeeId).length;
   }, [reports, isOfficer, user]);
 
-  // ========== OFFICER: Today's registrations using actual citizens ==========
+  // ========== OFFICER: Today's registrations ==========
   const officerTodayRegistrations = useMemo(() => {
     if (!isOfficer || !user) return 0;
     const today = getToday();
     return citizens.filter(c => c.registeredBy === user.employeeId && c.registrationDate?.slice(0, 10) === today).length;
   }, [citizens, isOfficer, user]);
 
-  // ========== OFFICER: Total registrations from actual citizens ==========
+  // ========== OFFICER: Total registrations ==========
   const officerTotalRegistrations = useMemo(() => {
     if (!isOfficer || !user) return 0;
     return citizens.filter(c => c.registeredBy === user.employeeId).length;
   }, [citizens, isOfficer, user]);
 
-  // Color palette for gradient cards
-  const cardColors = [
-    { bg: 'linear-gradient(135deg, #1e3a5f, #2a4a7a)', icon: '📋', label: 'Total Reports' },
-    { bg: 'linear-gradient(135deg, #0b7e4b, #0a6a3f)', icon: '🆔', label: 'Citizens Registered' },
-    { bg: 'linear-gradient(135deg, #7c3aed, #6d28d9)', icon: '👤', label: 'Supervisors' },
-    { bg: 'linear-gradient(135deg, #d97706, #b45309)', icon: '👥', label: 'Field Officers' },
-    { bg: 'linear-gradient(135deg, #0b7e4b, #0a6a3f)', icon: '⚡', label: 'Attendance Rate' },
-    { bg: 'linear-gradient(135deg, #dc2626, #b91c1c)', icon: '📅', label: 'Pending Leaves' },
-    { bg: 'linear-gradient(135deg, #2563eb, #1d4ed8)', icon: '📋', label: 'Pending Permissions' }
-  ];
+  const CHART_COLORS = ['#1e3a5f', '#2d6a4f', '#7c3aed', '#d97706', '#0b7e4b', '#2563eb'];
 
-  // Color palette for charts
-  const chartColors = ['#1e3a5f', '#2b4c7a', '#4a7a9c', '#6b9ec4', '#2d6a4f', '#1a3a5f'];
+  // Custom tooltip for charts - memoized to prevent recreation
+  const CustomTooltip = useCallback(({ active, payload, label }) => {
+    if (active && payload && payload.length) {
+      return (
+        <div style={{ 
+          background: 'white', 
+          padding: '12px 16px', 
+          borderRadius: '8px', 
+          border: '1px solid #e5e7eb',
+          boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
+          fontSize: '13px'
+        }}>
+          <p style={{ margin: 0, fontWeight: '600', color: '#1a202c' }}>{label}</p>
+          {payload.map((entry, index) => (
+            <p key={index} style={{ margin: '4px 0', color: entry.color }}>
+              {entry.name}: <strong>{entry.value}</strong>
+            </p>
+          ))}
+        </div>
+      );
+    }
+    return null;
+  }, []);
+
+  // Pre-compute chart data to prevent recreation
+  const registrationChartData = useMemo(() => {
+    return chartData.data.map(d => ({ name: d.date, value: d.value }));
+  }, [chartData.data]);
+
+  const officerRegistrationChartData = useMemo(() => {
+    if (!isOfficer || !user) return [];
+    return officerPerformanceData.map(d => ({ date: d.date, value: d.registrations }));
+  }, [officerPerformanceData, isOfficer, user]);
+
+  const officerEfficiencyChartData = useMemo(() => {
+    if (!isOfficer || !user) return [];
+    return officerPerformanceData.map(d => ({ date: d.date, value: d.efficiency }));
+  }, [officerPerformanceData, isOfficer, user]);
+
+  // Memoized chart render function
+  const renderChart = useCallback((type, data, colors = CHART_COLORS, xAxisKey = 'name') => {
+    if (!data || data.length === 0) {
+      return (
+        <div style={{ textAlign: 'center', padding: '40px', color: '#64748b', fontSize: '14px' }}>
+          No data available
+        </div>
+      );
+    }
+
+    const getStatusColor = (name) => {
+      const colorMap = {
+        'Approved': '#0b7e4b',
+        'Pending': '#d97706',
+        'Rejected': '#dc2626',
+        'Present': '#0b7e4b',
+        'Late': '#d97706',
+        'Absent': '#dc2626',
+        'Half Day': '#7c3aed'
+      };
+      return colorMap[name] || '#1e3a5f';
+    };
+
+    switch(type) {
+      case 'bar':
+        return (
+          <ResponsiveContainer width="100%" height={280}>
+            <BarChart data={data} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+              <XAxis dataKey={xAxisKey} tick={{ fontSize: 12, fill: '#4a5568' }} />
+              <YAxis tick={{ fontSize: 12, fill: '#4a5568' }} />
+              <Tooltip content={CustomTooltip} />
+              <Legend wrapperStyle={{ fontSize: '12px', paddingTop: '10px' }} />
+              <Bar dataKey="value" radius={[4, 4, 0, 0]}>
+                {data.map((entry, index) => (
+                  <Cell key={`cell-${index}`} fill={getStatusColor(entry.name) || CHART_COLORS[index % CHART_COLORS.length]} />
+                ))}
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        );
+      
+      case 'line':
+        return (
+          <ResponsiveContainer width="100%" height={280}>
+            <LineChart data={data} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+              <XAxis dataKey="date" tick={{ fontSize: 12, fill: '#4a5568' }} />
+              <YAxis tick={{ fontSize: 12, fill: '#4a5568' }} />
+              <Tooltip content={CustomTooltip} />
+              <Legend wrapperStyle={{ fontSize: '12px', paddingTop: '10px' }} />
+              <Line type="monotone" dataKey="value" stroke={colors[0]} strokeWidth={2} dot={{ r: 4, fill: colors[0] }} />
+            </LineChart>
+          </ResponsiveContainer>
+        );
+      
+      case 'area':
+        return (
+          <ResponsiveContainer width="100%" height={280}>
+            <AreaChart data={data} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+              <XAxis dataKey="date" tick={{ fontSize: 12, fill: '#4a5568' }} />
+              <YAxis tick={{ fontSize: 12, fill: '#4a5568' }} />
+              <Tooltip content={CustomTooltip} />
+              <Legend wrapperStyle={{ fontSize: '12px', paddingTop: '10px' }} />
+              <Area type="monotone" dataKey="value" stroke={colors[0]} fill={colors[0]} fillOpacity={0.2} />
+            </AreaChart>
+          </ResponsiveContainer>
+        );
+      
+      default:
+        return null;
+    }
+  }, [CustomTooltip]);
+
+  // Chart wrapper component
+  const ChartWrapper = useCallback(({ children, title, subtitle }) => (
+    <div style={{
+      background: 'white',
+      padding: '20px',
+      borderRadius: '8px',
+      boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
+      border: '1px solid #e5e7eb',
+      height: '100%'
+    }}>
+      <div style={{ marginBottom: '16px' }}>
+        <h3 style={{ fontSize: '15px', fontWeight: '600', margin: 0, color: '#1a202c' }}>{title}</h3>
+        {subtitle && <p style={{ fontSize: '13px', color: '#64748b', margin: '4px 0 0 0' }}>{subtitle}</p>}
+      </div>
+      {children}
+    </div>
+  ), []);
+
+  // Stats Card component
+  const StatsCard = useCallback(({ label, value, color, icon }) => (
+    <div style={{
+      background: `linear-gradient(135deg, ${color}, ${color}dd)`,
+      padding: '20px',
+      borderRadius: '8px',
+      color: 'white',
+      boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
+      transition: 'all 0.2s ease',
+      cursor: 'pointer'
+    }}
+    onMouseEnter={(e) => {
+      e.currentTarget.style.transform = 'translateY(-3px)';
+      e.currentTarget.style.boxShadow = '0 6px 20px rgba(0,0,0,0.15)';
+    }}
+    onMouseLeave={(e) => {
+      e.currentTarget.style.transform = 'translateY(0)';
+      e.currentTarget.style.boxShadow = '0 2px 8px rgba(0,0,0,0.1)';
+    }}>
+      <div style={{ fontSize: '26px', fontWeight: '700' }}>{value}</div>
+      <div style={{ fontSize: '13px', opacity: 0.85, marginTop: '4px' }}>{icon} {label}</div>
+    </div>
+  ), []);
 
   return (
-    <div className="dashboard-view">
+    <div className="dashboard-view" style={{ padding: '0 4px' }}>
       {/* ==================== MANAGER VIEW ==================== */}
       {isManager && (
         <>
@@ -231,7 +350,7 @@ function Dashboard({
             gap: '12px'
           }}>
             <div>
-              <h2 style={{fontSize: '24px', fontWeight: '700', margin: 0, color: '#1a202c'}}>📊 Manager Dashboard</h2>
+              <h2 style={{fontSize: '22px', fontWeight: '700', margin: 0, color: '#1a202c'}}>📊 Manager Dashboard</h2>
               <p style={{color: '#64748b', fontSize: '14px', margin: '4px 0 0 0'}}>Overview of all field operations</p>
             </div>
             <div style={{display: 'flex', gap: '8px', flexWrap: 'wrap'}}>
@@ -243,7 +362,7 @@ function Dashboard({
                 fontSize: '12px',
                 fontWeight: '500'
               }}>
-                📅 {new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}
+                📅 {new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
               </span>
               <span style={{
                 background: '#d1fae5',
@@ -258,475 +377,77 @@ function Dashboard({
             </div>
           </div>
 
-          {/* Stats Grid - Colorful Gradient Cards */}
-          <div className="stats-grid" style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '16px', marginBottom: '24px'}}>
-            <div style={{
-              background: 'linear-gradient(135deg, #1e3a5f, #2a4a7a)',
-              padding: '20px',
-              borderRadius: '12px',
-              color: 'white',
-              boxShadow: '0 4px 12px rgba(30, 58, 95, 0.2)',
-              transition: 'all 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94)',
-              cursor: 'pointer'
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.transform = 'translateY(-4px) scale(1.02)';
-              e.currentTarget.style.boxShadow = '0 8px 25px rgba(30, 58, 95, 0.3)';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.transform = 'translateY(0) scale(1)';
-              e.currentTarget.style.boxShadow = '0 4px 12px rgba(30, 58, 95, 0.2)';
-            }}>
-              <div style={{fontSize: '28px', fontWeight: '700'}}>{totalReports}</div>
-              <div style={{fontSize: '13px', opacity: 0.8}}>📋 Total Reports</div>
-            </div>
-            <div style={{
-              background: 'linear-gradient(135deg, #0b7e4b, #0a6a3f)',
-              padding: '20px',
-              borderRadius: '12px',
-              color: 'white',
-              boxShadow: '0 4px 12px rgba(11, 126, 75, 0.2)',
-              transition: 'all 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94)',
-              cursor: 'pointer'
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.transform = 'translateY(-4px) scale(1.02)';
-              e.currentTarget.style.boxShadow = '0 8px 25px rgba(11, 126, 75, 0.3)';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.transform = 'translateY(0) scale(1)';
-              e.currentTarget.style.boxShadow = '0 4px 12px rgba(11, 126, 75, 0.2)';
-            }}>
-              <div style={{fontSize: '28px', fontWeight: '700'}}>{totalRegistrations}</div>
-              <div style={{fontSize: '13px', opacity: 0.8}}>🆔 Citizens Registered</div>
-            </div>
-            <div style={{
-              background: 'linear-gradient(135deg, #7c3aed, #6d28d9)',
-              padding: '20px',
-              borderRadius: '12px',
-              color: 'white',
-              boxShadow: '0 4px 12px rgba(124, 58, 237, 0.2)',
-              transition: 'all 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94)',
-              cursor: 'pointer'
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.transform = 'translateY(-4px) scale(1.02)';
-              e.currentTarget.style.boxShadow = '0 8px 25px rgba(124, 58, 237, 0.3)';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.transform = 'translateY(0) scale(1)';
-              e.currentTarget.style.boxShadow = '0 4px 12px rgba(124, 58, 237, 0.2)';
-            }}>
-              <div style={{fontSize: '28px', fontWeight: '700'}}>{supervisors}</div>
-              <div style={{fontSize: '13px', opacity: 0.8}}>👤 Supervisors</div>
-            </div>
-            <div style={{
-              background: 'linear-gradient(135deg, #d97706, #b45309)',
-              padding: '20px',
-              borderRadius: '12px',
-              color: 'white',
-              boxShadow: '0 4px 12px rgba(217, 119, 6, 0.2)',
-              transition: 'all 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94)',
-              cursor: 'pointer'
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.transform = 'translateY(-4px) scale(1.02)';
-              e.currentTarget.style.boxShadow = '0 8px 25px rgba(217, 119, 6, 0.3)';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.transform = 'translateY(0) scale(1)';
-              e.currentTarget.style.boxShadow = '0 4px 12px rgba(217, 119, 6, 0.2)';
-            }}>
-              <div style={{fontSize: '28px', fontWeight: '700'}}>{fieldOfficers}</div>
-              <div style={{fontSize: '13px', opacity: 0.8}}>👥 Field Officers</div>
-            </div>
-            <div style={{
-              background: 'linear-gradient(135deg, #0b7e4b, #0a6a3f)',
-              padding: '20px',
-              borderRadius: '12px',
-              color: 'white',
-              boxShadow: '0 4px 12px rgba(11, 126, 75, 0.2)',
-              transition: 'all 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94)',
-              cursor: 'pointer'
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.transform = 'translateY(-4px) scale(1.02)';
-              e.currentTarget.style.boxShadow = '0 8px 25px rgba(11, 126, 75, 0.3)';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.transform = 'translateY(0) scale(1)';
-              e.currentTarget.style.boxShadow = '0 4px 12px rgba(11, 126, 75, 0.2)';
-            }}>
-              <div style={{fontSize: '28px', fontWeight: '700'}}>{attendanceSummary.rate}%</div>
-              <div style={{fontSize: '13px', opacity: 0.8}}>⚡ Attendance Rate</div>
-            </div>
-            <div style={{
-              background: 'linear-gradient(135deg, #dc2626, #b91c1c)',
-              padding: '20px',
-              borderRadius: '12px',
-              color: 'white',
-              boxShadow: '0 4px 12px rgba(220, 38, 38, 0.2)',
-              transition: 'all 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94)',
-              cursor: 'pointer'
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.transform = 'translateY(-4px) scale(1.02)';
-              e.currentTarget.style.boxShadow = '0 8px 25px rgba(220, 38, 38, 0.3)';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.transform = 'translateY(0) scale(1)';
-              e.currentTarget.style.boxShadow = '0 4px 12px rgba(220, 38, 38, 0.2)';
-            }}>
-              <div style={{fontSize: '28px', fontWeight: '700'}}>{pendingLeaves}</div>
-              <div style={{fontSize: '13px', opacity: 0.8}}>📅 Pending Leaves</div>
-            </div>
-            <div style={{
-              background: 'linear-gradient(135deg, #2563eb, #1d4ed8)',
-              padding: '20px',
-              borderRadius: '12px',
-              color: 'white',
-              boxShadow: '0 4px 12px rgba(37, 99, 235, 0.2)',
-              transition: 'all 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94)',
-              cursor: 'pointer'
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.transform = 'translateY(-4px) scale(1.02)';
-              e.currentTarget.style.boxShadow = '0 8px 25px rgba(37, 99, 235, 0.3)';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.transform = 'translateY(0) scale(1)';
-              e.currentTarget.style.boxShadow = '0 4px 12px rgba(37, 99, 235, 0.2)';
-            }}>
-              <div style={{fontSize: '28px', fontWeight: '700'}}>{pendingPermissions}</div>
-              <div style={{fontSize: '13px', opacity: 0.8}}>📋 Pending Permissions</div>
-            </div>
+          {/* Stats Grid */}
+          <div style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '14px', marginBottom: '24px'}}>
+            <StatsCard label="Total Reports" value={totalReports} color="#1e3a5f" icon="📋" />
+            <StatsCard label="Citizens" value={totalRegistrations} color="#2d6a4f" icon="🆔" />
+            <StatsCard label="Supervisors" value={supervisors} color="#7c3aed" icon="👤" />
+            <StatsCard label="Field Officers" value={fieldOfficers} color="#d97706" icon="👥" />
+            <StatsCard label="Attendance Rate" value={`${attendanceSummary.rate}%`} color="#0b7e4b" icon="⚡" />
+            <StatsCard label="Pending Leaves" value={pendingLeaves} color="#dc2626" icon="📅" />
+            <StatsCard label="Pending Permissions" value={pendingPermissions} color="#2563eb" icon="📋" />
           </div>
 
-          {/* ===== NEW: Performance Chart Row - Using PerformanceChart Component ===== */}
+          {/* Charts Row - Real Data Only */}
           <div style={{
             display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))',
             gap: '20px',
             marginBottom: '24px'
           }}>
-            {/* User Status Distribution */}
-            {userStatusData.length > 0 && (
-              <div style={{
-                background: 'white',
-                padding: '16px',
-                borderRadius: '12px',
-                boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
-                border: '1px solid #f1f5f9'
-              }}>
-                <PerformanceChart 
-                  data={userStatusData} 
-                  title="👥 User Status Distribution" 
-                />
-              </div>
-            )}
-            
-            {/* Role Distribution */}
-            {roleDistributionData.length > 0 && (
-              <div style={{
-                background: 'white',
-                padding: '16px',
-                borderRadius: '12px',
-                boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
-                border: '1px solid #f1f5f9'
-              }}>
-                <PerformanceChart 
-                  data={roleDistributionData} 
-                  title="👤 Users by Role" 
-                />
-              </div>
-            )}
-            
-            {/* Region Distribution */}
-            {regionDistributionData.length > 0 && (
-              <div style={{
-                background: 'white',
-                padding: '16px',
-                borderRadius: '12px',
-                boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
-                border: '1px solid #f1f5f9'
-              }}>
-                <PerformanceChart 
-                  data={regionDistributionData} 
-                  title="📍 Users by Region" 
-                />
-              </div>
-            )}
-            
-            {/* Report Status Distribution */}
             {reportStatusData.length > 0 && (
-              <div style={{
-                background: 'white',
-                padding: '16px',
-                borderRadius: '12px',
-                boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
-                border: '1px solid #f1f5f9'
-              }}>
-                <PerformanceChart 
-                  data={reportStatusData} 
-                  title="📊 Report Status" 
-                />
-              </div>
+              <ChartWrapper title="📊 Report Status" subtitle="Approved, Pending, Rejected reports">
+                {renderChart('bar', reportStatusData)}
+              </ChartWrapper>
             )}
             
-            {/* Today's Attendance */}
             {todayAttendanceData.length > 0 && (
-              <div style={{
-                background: 'white',
-                padding: '16px',
-                borderRadius: '12px',
-                boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
-                border: '1px solid #f1f5f9'
-              }}>
-                <PerformanceChart 
-                  data={todayAttendanceData} 
-                  title="📋 Today's Attendance" 
-                />
-              </div>
+              <ChartWrapper title="📋 Today's Attendance" subtitle="Attendance distribution for today">
+                {renderChart('bar', todayAttendanceData)}
+              </ChartWrapper>
             )}
             
-            {/* Leave Status */}
             {leaveStatusData.length > 0 && (
-              <div style={{
-                background: 'white',
-                padding: '16px',
-                borderRadius: '12px',
-                boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
-                border: '1px solid #f1f5f9'
-              }}>
-                <PerformanceChart 
-                  data={leaveStatusData} 
-                  title="📅 Leave Status" 
-                />
-              </div>
+              <ChartWrapper title="📅 Leave Status" subtitle="Approved, Pending, Rejected leaves">
+                {renderChart('bar', leaveStatusData)}
+              </ChartWrapper>
             )}
             
-            {/* Permission Status */}
             {permissionStatusData.length > 0 && (
-              <div style={{
-                background: 'white',
-                padding: '16px',
-                borderRadius: '12px',
-                boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
-                border: '1px solid #f1f5f9'
-              }}>
-                <PerformanceChart 
-                  data={permissionStatusData} 
-                  title="📋 Permission Status" 
-                />
-              </div>
+              <ChartWrapper title="📋 Permission Status" subtitle="Approved, Pending, Rejected permissions">
+                {renderChart('bar', permissionStatusData)}
+              </ChartWrapper>
             )}
           </div>
 
-          {/* Charts Row - Existing Charts */}
-          <div className="charts-row" style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', marginBottom: '24px'}}>
-            {/* Registration Trend Chart */}
-            <div style={{
-              background: 'white',
-              padding: '24px',
-              borderRadius: '12px',
-              boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
-              border: '1px solid #f1f5f9',
-              transition: 'all 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94)',
-              cursor: 'pointer'
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.transform = 'translateY(-4px)';
-              e.currentTarget.style.boxShadow = '0 8px 30px rgba(0,0,0,0.12)';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.transform = 'translateY(0)';
-              e.currentTarget.style.boxShadow = '0 1px 3px rgba(0,0,0,0.1)';
-            }}>
-              <div className="chart-header" style={{marginBottom: '16px'}}>
-                <h3 style={{fontSize: '16px', fontWeight: '600', margin: 0, color: '#1a202c'}}>📈 Registration Trend (Last 7 Days)</h3>
-                <p style={{fontSize: '13px', color: '#64748b', margin: '4px 0 0 0'}}>Daily citizen registration trends</p>
-              </div>
-              <div className="css-trend-chart">
-                <div className="css-trend-labels" style={{display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '8px', marginBottom: '8px'}}>
-                  {chartData.data.map((d, i) => (
-                    <div key={i} style={{textAlign: 'center', fontSize: '11px', color: '#64748b'}}>{d.date}</div>
-                  ))}
-                </div>
-                <div className="css-trend-bars" style={{display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '8px', height: '180px', alignItems: 'end'}}>
-                  {chartData.data.map((d, i) => (
-                    <div key={i} style={{display: 'flex', flexDirection: 'column', alignItems: 'center', height: '100%', justifyContent: 'flex-end'}}>
-                      <div 
-                        style={{ 
-                          width: '100%',
-                          height: `${(d.value / chartData.max) * 100}%`,
-                          background: d.value > 0 ? `linear-gradient(180deg, ${chartColors[i % chartColors.length]}, ${chartColors[(i + 1) % chartColors.length]})` : '#E5E7EB',
-                          minHeight: d.value > 0 ? '20px' : '4px',
-                          borderRadius: '4px 4px 0 0',
-                          transition: 'all 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94)',
-                          cursor: 'pointer',
-                          position: 'relative',
-                          display: 'flex',
-                          alignItems: 'flex-start',
-                          justifyContent: 'center'
-                        }}
-                        onMouseEnter={(e) => {
-                          e.currentTarget.style.filter = 'brightness(1.2)';
-                          e.currentTarget.style.transform = 'scaleY(1.05)';
-                        }}
-                        onMouseLeave={(e) => {
-                          e.currentTarget.style.filter = 'brightness(1)';
-                          e.currentTarget.style.transform = 'scaleY(1)';
-                        }}
-                      >
-                        <span style={{fontSize: '12px', fontWeight: '600', color: '#1a202c', paddingTop: '4px'}}>{d.value}</span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
+          {/* Registration Trend */}
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: '1fr 1fr',
+            gap: '20px',
+            marginBottom: '24px'
+          }}>
+            <ChartWrapper title="📈 Registration Trend" subtitle="Daily citizen registrations (Last 7 days)">
+              {renderChart('bar', registrationChartData, ['#1e3a5f'])}
+            </ChartWrapper>
 
-            {/* Performance Distribution Chart - Using REAL DATA */}
-            <div style={{
-              background: 'white',
-              padding: '24px',
-              borderRadius: '12px',
-              boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
-              border: '1px solid #f1f5f9',
-              transition: 'all 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94)',
-              cursor: 'pointer'
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.transform = 'translateY(-4px)';
-              e.currentTarget.style.boxShadow = '0 8px 30px rgba(0,0,0,0.12)';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.transform = 'translateY(0)';
-              e.currentTarget.style.boxShadow = '0 1px 3px rgba(0,0,0,0.1)';
-            }}>
-              <div className="chart-header" style={{marginBottom: '16px'}}>
-                <h3 style={{fontSize: '16px', fontWeight: '600', margin: 0, color: '#1a202c'}}>📊 Performance Distribution</h3>
-                <p style={{fontSize: '13px', color: '#64748b', margin: '4px 0 0 0'}}>Report status breakdown</p>
-              </div>
-              <div className="performance-chart" style={{display: 'flex', flexDirection: 'column', gap: '12px', padding: '16px 0'}}>
-                {performanceData.map((item, idx) => {
-                  const colors = ['#0b7e4b', '#d97706', '#dc2626'];
-                  return (
-                    <div key={item.name} style={{display: 'flex', alignItems: 'center', gap: '12px'}}>
-                      <div style={{fontSize: '14px', fontWeight: '500', minWidth: '80px', color: '#1a202c'}}>{item.name}</div>
-                      <div style={{flex: 1, height: '32px', background: '#e5e7eb', borderRadius: '6px', overflow: 'hidden', position: 'relative'}}>
-                        <div 
-                          style={{ 
-                            width: `${item.value}%`,
-                            height: '100%',
-                            background: colors[idx % colors.length],
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'flex-end',
-                            paddingRight: '8px',
-                            borderRadius: '6px',
-                            transition: 'all 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94)',
-                            minWidth: '20px',
-                            cursor: 'pointer'
-                          }}
-                          onMouseEnter={(e) => {
-                            e.currentTarget.style.filter = 'brightness(1.15)';
-                            e.currentTarget.style.transform = 'scaleX(1.02)';
-                          }}
-                          onMouseLeave={(e) => {
-                            e.currentTarget.style.filter = 'brightness(1)';
-                            e.currentTarget.style.transform = 'scaleX(1)';
-                          }}
-                        >
-                          <span style={{fontSize: '12px', fontWeight: '600', color: 'white'}}>{item.value}%</span>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
+            <ChartWrapper title="📊 Performance Distribution" subtitle="Report status breakdown">
+              {renderChart('bar', reportStatusData)}
+            </ChartWrapper>
           </div>
 
-          {/* Regional Performance Bar Chart */}
+          {/* Top Performers */}
           <div style={{
             background: 'white',
-            padding: '24px',
-            borderRadius: '12px',
-            boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
-            border: '1px solid #f1f5f9',
-            marginBottom: '24px',
-            transition: 'all 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94)',
-            cursor: 'pointer'
-          }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.transform = 'translateY(-4px)';
-            e.currentTarget.style.boxShadow = '0 8px 30px rgba(0,0,0,0.12)';
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.transform = 'translateY(0)';
-            e.currentTarget.style.boxShadow = '0 1px 3px rgba(0,0,0,0.1)';
+            padding: '20px',
+            borderRadius: '8px',
+            boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
+            border: '1px solid #e5e7eb'
           }}>
-            <div style={{marginBottom: '16px'}}>
-              <h3 style={{fontSize: '16px', fontWeight: '600', margin: 0, color: '#1a202c'}}>🌍 Regional Performance</h3>
-              <p style={{fontSize: '13px', color: '#64748b', margin: '4px 0 0 0'}}>Citizens registered by region</p>
-            </div>
-            <div className="css-chart" style={{display: 'flex', flexDirection: 'column', gap: '12px', padding: '16px 0'}}>
-              {regionStats.length > 0 ? (
-                regionStats.map((region, idx) => {
-                  const maxVal = Math.max(...regionStats.map(r => r.registrations)) || 1;
-                  const colors = ['#1e3a5f', '#2b4c7a', '#4a7a9c', '#6b9ec4', '#2d6a4f', '#1a3a5f'];
-                  return (
-                    <div key={region.region} style={{display: 'flex', alignItems: 'center', gap: '12px'}}>
-                      <div style={{fontSize: '14px', fontWeight: '500', minWidth: '60px', color: '#1a202c'}}>{region.region}</div>
-                      <div style={{flex: 1, height: '32px', background: '#e5e7eb', borderRadius: '6px', overflow: 'hidden', position: 'relative'}}>
-                        <div 
-                          style={{ 
-                            width: `${(region.registrations / maxVal) * 100}%`,
-                            height: '100%',
-                            background: colors[idx % colors.length],
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'flex-end',
-                            paddingRight: '8px',
-                            borderRadius: '6px',
-                            transition: 'all 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94)',
-                            minWidth: '20px',
-                            cursor: 'pointer'
-                          }}
-                          onMouseEnter={(e) => {
-                            e.currentTarget.style.filter = 'brightness(1.15)';
-                            e.currentTarget.style.transform = 'scaleX(1.02)';
-                          }}
-                          onMouseLeave={(e) => {
-                            e.currentTarget.style.filter = 'brightness(1)';
-                            e.currentTarget.style.transform = 'scaleX(1)';
-                          }}
-                        >
-                          <span style={{fontSize: '12px', fontWeight: '600', color: 'white'}}>{region.registrations}</span>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })
-              ) : (
-                <div style={{textAlign: 'center', padding: '40px', color: '#64748b'}}>No data available</div>
-              )}
-            </div>
-          </div>
-
-          {/* Top Performers - Colorful */}
-          <div className="top-performers" style={{
-            background: 'white',
-            padding: '24px',
-            borderRadius: '12px',
-            boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
-            border: '1px solid #f1f5f9'
-          }}>
-            <h3 style={{fontSize: '16px', fontWeight: '600', marginBottom: '16px', color: '#1a202c'}}>🏆 Top Performing Officers</h3>
-            <div className="performer-list" style={{display: 'flex', flexDirection: 'column', gap: '8px'}}>
+            <h3 style={{fontSize: '15px', fontWeight: '600', marginBottom: '16px', color: '#1a202c'}}>🏆 Top Performing Officers</h3>
+            <div style={{display: 'flex', flexDirection: 'column', gap: '6px'}}>
               {topPerformers.length === 0 ? (
-                <div style={{textAlign: 'center', padding: '20px', color: '#64748b'}}>No performance data available</div>
+                <div style={{textAlign: 'center', padding: '20px', color: '#64748b', fontSize: '14px'}}>No performance data available</div>
               ) : (
                 topPerformers.map((emp, i) => (
                   <div 
@@ -737,32 +458,20 @@ function Dashboard({
                       gap: '12px',
                       padding: '10px 16px',
                       background: i === 0 ? '#fef3c7' : '#f8fafc',
-                      borderRadius: '8px',
-                      border: i === 0 ? '2px solid #d97706' : '1px solid #e5e7eb',
+                      borderRadius: '6px',
+                      border: i === 0 ? '1px solid #d97706' : '1px solid #e5e7eb',
                       flexWrap: 'wrap',
-                      transition: 'all 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94)',
-                      cursor: 'pointer'
-                    }}
-                    onMouseEnter={(e) => {
-                      e.currentTarget.style.transform = 'translateX(6px) scale(1.02)';
-                      e.currentTarget.style.background = '#e8edf5';
-                      e.currentTarget.style.boxShadow = '0 4px 16px rgba(0,0,0,0.08)';
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.transform = 'translateX(0) scale(1)';
-                      e.currentTarget.style.background = i === 0 ? '#fef3c7' : '#f8fafc';
-                      e.currentTarget.style.boxShadow = 'none';
+                      fontSize: '13px'
                     }}
                   >
-                    <span style={{fontWeight: '700', color: i === 0 ? '#d97706' : '#64748b', minWidth: '40px'}}>
-                      #{i + 1} {i === 0 ? '🏆' : ''}
+                    <span style={{fontWeight: '700', color: i === 0 ? '#d97706' : '#64748b', minWidth: '30px'}}>
+                      #{i + 1}
                     </span>
                     <span style={{fontWeight: '600', flex: 1}}>{emp.employeeName}</span>
-                    <span style={{color: '#64748b', fontSize: '13px'}}>{emp.region}</span>
+                    <span style={{color: '#64748b'}}>{emp.region}</span>
                     <span style={{color: '#2563eb', fontWeight: '500'}}>🆔 {emp.totalRegistrations}</span>
                     <span style={{color: '#0b7e4b', fontWeight: '600'}}>{emp.avgEfficiency}%</span>
                     <span style={{color: '#7c3aed'}}>📊 {Math.round(emp.attendanceRate)}%</span>
-                    <span style={{color: '#dc2626'}}>🎯 {emp.trustScore || 0}%</span>
                   </div>
                 ))
               )}
@@ -783,7 +492,7 @@ function Dashboard({
             gap: '12px'
           }}>
             <div>
-              <h2 style={{fontSize: '24px', fontWeight: '700', margin: 0, color: '#1a202c'}}>👨‍💼 Supervisor Dashboard</h2>
+              <h2 style={{fontSize: '22px', fontWeight: '700', margin: 0, color: '#1a202c'}}>👨‍💼 Supervisor Dashboard</h2>
               <p style={{color: '#64748b', fontSize: '14px', margin: '4px 0 0 0'}}>Team overview and performance</p>
             </div>
             <div style={{display: 'flex', gap: '8px', flexWrap: 'wrap'}}>
@@ -795,7 +504,7 @@ function Dashboard({
                 fontSize: '12px',
                 fontWeight: '500'
               }}>
-                📅 {new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}
+                📅 {new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
               </span>
               <span style={{
                 background: '#d1fae5',
@@ -810,263 +519,63 @@ function Dashboard({
             </div>
           </div>
 
-          {/* Stats Grid - Colorful */}
-          <div className="stats-grid" style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px', marginBottom: '24px'}}>
-            <div style={{
-              background: 'linear-gradient(135deg, #7c3aed, #6d28d9)',
-              padding: '20px',
-              borderRadius: '12px',
-              color: 'white',
-              boxShadow: '0 4px 12px rgba(124, 58, 237, 0.2)',
-              transition: 'all 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94)',
-              cursor: 'pointer'
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.transform = 'translateY(-4px) scale(1.02)';
-              e.currentTarget.style.boxShadow = '0 8px 25px rgba(124, 58, 237, 0.3)';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.transform = 'translateY(0) scale(1)';
-              e.currentTarget.style.boxShadow = '0 4px 12px rgba(124, 58, 237, 0.2)';
-            }}>
-              <div style={{fontSize: '28px', fontWeight: '700'}}>{teamMembers.length}</div>
-              <div style={{fontSize: '13px', opacity: 0.8}}>👥 Team Members</div>
-            </div>
-            <div style={{
-              background: 'linear-gradient(135deg, #2563eb, #1d4ed8)',
-              padding: '20px',
-              borderRadius: '12px',
-              color: 'white',
-              boxShadow: '0 4px 12px rgba(37, 99, 235, 0.2)',
-              transition: 'all 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94)',
-              cursor: 'pointer'
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.transform = 'translateY(-4px) scale(1.02)';
-              e.currentTarget.style.boxShadow = '0 8px 25px rgba(37, 99, 235, 0.3)';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.transform = 'translateY(0) scale(1)';
-              e.currentTarget.style.boxShadow = '0 4px 12px rgba(37, 99, 235, 0.2)';
-            }}>
-              <div style={{fontSize: '28px', fontWeight: '700'}}>{teamReportsCount}</div>
-              <div style={{fontSize: '13px', opacity: 0.8}}>📋 Team Reports</div>
-            </div>
-            <div style={{
-              background: 'linear-gradient(135deg, #0b7e4b, #0a6a3f)',
-              padding: '20px',
-              borderRadius: '12px',
-              color: 'white',
-              boxShadow: '0 4px 12px rgba(11, 126, 75, 0.2)',
-              transition: 'all 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94)',
-              cursor: 'pointer'
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.transform = 'translateY(-4px) scale(1.02)';
-              e.currentTarget.style.boxShadow = '0 8px 25px rgba(11, 126, 75, 0.3)';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.transform = 'translateY(0) scale(1)';
-              e.currentTarget.style.boxShadow = '0 4px 12px rgba(11, 126, 75, 0.2)';
-            }}>
-              <div style={{fontSize: '28px', fontWeight: '700'}}>{teamCitizenCount}</div>
-              <div style={{fontSize: '13px', opacity: 0.8}}>🆔 Team Registrations</div>
-            </div>
-            <div style={{
-              background: 'linear-gradient(135deg, #dc2626, #b91c1c)',
-              padding: '20px',
-              borderRadius: '12px',
-              color: 'white',
-              boxShadow: '0 4px 12px rgba(220, 38, 38, 0.2)',
-              transition: 'all 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94)',
-              cursor: 'pointer'
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.transform = 'translateY(-4px) scale(1.02)';
-              e.currentTarget.style.boxShadow = '0 8px 25px rgba(220, 38, 38, 0.3)';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.transform = 'translateY(0) scale(1)';
-              e.currentTarget.style.boxShadow = '0 4px 12px rgba(220, 38, 38, 0.2)';
-            }}>
-              <div style={{fontSize: '28px', fontWeight: '700'}}>{pendingLeaves}</div>
-              <div style={{fontSize: '13px', opacity: 0.8}}>📅 Pending Leaves</div>
-            </div>
+          {/* Stats Grid */}
+          <div style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '14px', marginBottom: '24px'}}>
+            <StatsCard label="Team Members" value={teamMembers.length} color="#7c3aed" icon="👥" />
+            <StatsCard label="Team Reports" value={teamReportsCount} color="#2563eb" icon="📋" />
+            <StatsCard label="Team Registrations" value={teamCitizenCount} color="#0b7e4b" icon="🆔" />
+            <StatsCard label="Pending Leaves" value={pendingLeaves} color="#dc2626" icon="📅" />
           </div>
 
-          {/* ===== NEW: Supervisor Performance Charts ===== */}
+          {/* Charts - Real Data Only */}
           <div style={{
             display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))',
             gap: '20px',
             marginBottom: '24px'
           }}>
-            {/* Team Report Status */}
             {reportStatusData.length > 0 && (
-              <div style={{
-                background: 'white',
-                padding: '16px',
-                borderRadius: '12px',
-                boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
-                border: '1px solid #f1f5f9'
-              }}>
-                <PerformanceChart 
-                  data={reportStatusData} 
-                  title="📊 Team Report Status" 
-                />
-              </div>
+              <ChartWrapper title="📊 Team Report Status" subtitle="Approved, Pending, Rejected reports">
+                {renderChart('bar', reportStatusData)}
+              </ChartWrapper>
             )}
             
-            {/* Team Leave Status */}
             {leaveStatusData.length > 0 && (
-              <div style={{
-                background: 'white',
-                padding: '16px',
-                borderRadius: '12px',
-                boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
-                border: '1px solid #f1f5f9'
-              }}>
-                <PerformanceChart 
-                  data={leaveStatusData} 
-                  title="📅 Team Leave Status" 
-                />
-              </div>
+              <ChartWrapper title="📅 Team Leave Status" subtitle="Approved, Pending, Rejected leaves">
+                {renderChart('bar', leaveStatusData)}
+              </ChartWrapper>
             )}
           </div>
 
-          {/* Charts Row */}
-          <div className="charts-row" style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', marginBottom: '24px'}}>
-            <div style={{
-              background: 'white',
-              padding: '24px',
-              borderRadius: '12px',
-              boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
-              border: '1px solid #f1f5f9',
-              transition: 'all 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94)',
-              cursor: 'pointer'
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.transform = 'translateY(-4px)';
-              e.currentTarget.style.boxShadow = '0 8px 30px rgba(0,0,0,0.12)';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.transform = 'translateY(0)';
-              e.currentTarget.style.boxShadow = '0 1px 3px rgba(0,0,0,0.1)';
-            }}>
-              <div className="chart-header" style={{marginBottom: '16px'}}>
-                <h3 style={{fontSize: '16px', fontWeight: '600', margin: 0, color: '#1a202c'}}>📈 Team Registration Trend (Last 7 Days)</h3>
-                <p style={{fontSize: '13px', color: '#64748b', margin: '4px 0 0 0'}}>Daily registrations by your team</p>
-              </div>
-              <div className="css-trend-chart">
-                <div className="css-trend-labels" style={{display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '8px', marginBottom: '8px'}}>
-                  {chartData.data.map((d, i) => (
-                    <div key={i} style={{textAlign: 'center', fontSize: '11px', color: '#64748b'}}>{d.date}</div>
-                  ))}
-                </div>
-                <div className="css-trend-bars" style={{display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '8px', height: '180px', alignItems: 'end'}}>
-                  {chartData.data.map((d, i) => (
-                    <div key={i} style={{display: 'flex', flexDirection: 'column', alignItems: 'center', height: '100%', justifyContent: 'flex-end'}}>
-                      <div 
-                        style={{ 
-                          width: '100%',
-                          height: `${(d.value / chartData.max) * 100}%`,
-                          background: d.value > 0 ? 'linear-gradient(180deg, #2b4c7a, #6b9ec4)' : '#E5E7EB',
-                          minHeight: d.value > 0 ? '20px' : '4px',
-                          borderRadius: '4px 4px 0 0',
-                          transition: 'all 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94)',
-                          cursor: 'pointer'
-                        }}
-                        onMouseEnter={(e) => {
-                          e.currentTarget.style.filter = 'brightness(1.2)';
-                          e.currentTarget.style.transform = 'scaleY(1.05)';
-                        }}
-                        onMouseLeave={(e) => {
-                          e.currentTarget.style.filter = 'brightness(1)';
-                          e.currentTarget.style.transform = 'scaleY(1)';
-                        }}
-                      >
-                        <span style={{fontSize: '12px', fontWeight: '600', color: '#1a202c', paddingTop: '4px'}}>{d.value}</span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
+          {/* Registration Trend */}
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: '1fr 1fr',
+            gap: '20px',
+            marginBottom: '24px'
+          }}>
+            <ChartWrapper title="📈 Team Registration Trend" subtitle="Daily registrations (Last 7 days)">
+              {renderChart('bar', registrationChartData, ['#2d6a4f'])}
+            </ChartWrapper>
 
-            <div style={{
-              background: 'white',
-              padding: '24px',
-              borderRadius: '12px',
-              boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
-              border: '1px solid #f1f5f9',
-              transition: 'all 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94)',
-              cursor: 'pointer'
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.transform = 'translateY(-4px)';
-              e.currentTarget.style.boxShadow = '0 8px 30px rgba(0,0,0,0.12)';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.transform = 'translateY(0)';
-              e.currentTarget.style.boxShadow = '0 1px 3px rgba(0,0,0,0.1)';
-            }}>
-              <div className="chart-header" style={{marginBottom: '16px'}}>
-                <h3 style={{fontSize: '16px', fontWeight: '600', margin: 0, color: '#1a202c'}}>📊 Team Performance</h3>
-                <p style={{fontSize: '13px', color: '#64748b', margin: '4px 0 0 0'}}>Team report status breakdown</p>
-              </div>
-              <div className="performance-chart" style={{display: 'flex', flexDirection: 'column', gap: '12px', padding: '16px 0'}}>
-                {performanceData.map((item, idx) => {
-                  const colors = ['#0b7e4b', '#d97706', '#dc2626'];
-                  return (
-                    <div key={item.name} style={{display: 'flex', alignItems: 'center', gap: '12px'}}>
-                      <div style={{fontSize: '14px', fontWeight: '500', minWidth: '80px', color: '#1a202c'}}>{item.name}</div>
-                      <div style={{flex: 1, height: '32px', background: '#e5e7eb', borderRadius: '6px', overflow: 'hidden', position: 'relative'}}>
-                        <div 
-                          style={{ 
-                            width: `${item.value}%`,
-                            height: '100%',
-                            background: colors[idx % colors.length],
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'flex-end',
-                            paddingRight: '8px',
-                            borderRadius: '6px',
-                            transition: 'all 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94)',
-                            minWidth: '20px',
-                            cursor: 'pointer'
-                          }}
-                          onMouseEnter={(e) => {
-                            e.currentTarget.style.filter = 'brightness(1.15)';
-                            e.currentTarget.style.transform = 'scaleX(1.02)';
-                          }}
-                          onMouseLeave={(e) => {
-                            e.currentTarget.style.filter = 'brightness(1)';
-                            e.currentTarget.style.transform = 'scaleX(1)';
-                          }}
-                        >
-                          <span style={{fontSize: '12px', fontWeight: '600', color: 'white'}}>{item.value}%</span>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
+            <ChartWrapper title="📊 Team Performance" subtitle="Team report status breakdown">
+              {renderChart('bar', reportStatusData)}
+            </ChartWrapper>
           </div>
 
-          {/* Team Performance List - Colorful */}
-          <div className="top-performers" style={{
+          {/* Team Performance List */}
+          <div style={{
             background: 'white',
-            padding: '24px',
-            borderRadius: '12px',
-            boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
-            border: '1px solid #f1f5f9'
+            padding: '20px',
+            borderRadius: '8px',
+            boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
+            border: '1px solid #e5e7eb'
           }}>
-            <h3 style={{fontSize: '16px', fontWeight: '600', marginBottom: '16px', color: '#1a202c'}}>🏆 Team Performance</h3>
+            <h3 style={{fontSize: '15px', fontWeight: '600', marginBottom: '16px', color: '#1a202c'}}>🏆 Team Performance</h3>
             {teamPerformance.length === 0 ? (
-              <div style={{textAlign: 'center', padding: '20px', color: '#64748b'}}>No team performance data yet</div>
+              <div style={{textAlign: 'center', padding: '20px', color: '#64748b', fontSize: '14px'}}>No team performance data yet</div>
             ) : (
-              <div className="performer-list" style={{display: 'flex', flexDirection: 'column', gap: '8px'}}>
+              <div style={{display: 'flex', flexDirection: 'column', gap: '6px'}}>
                 {teamPerformance.map((emp, i) => (
                   <div 
                     key={emp.employeeId} 
@@ -1076,64 +585,22 @@ function Dashboard({
                       gap: '12px',
                       padding: '10px 16px',
                       background: i === 0 ? '#fef3c7' : '#f8fafc',
-                      borderRadius: '8px',
-                      border: i === 0 ? '2px solid #d97706' : '1px solid #e5e7eb',
+                      borderRadius: '6px',
+                      border: i === 0 ? '1px solid #d97706' : '1px solid #e5e7eb',
                       flexWrap: 'wrap',
-                      transition: 'all 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94)',
-                      cursor: 'pointer'
-                    }}
-                    onMouseEnter={(e) => {
-                      e.currentTarget.style.transform = 'translateX(6px) scale(1.02)';
-                      e.currentTarget.style.background = '#e8edf5';
-                      e.currentTarget.style.boxShadow = '0 4px 16px rgba(0,0,0,0.08)';
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.transform = 'translateX(0) scale(1)';
-                      e.currentTarget.style.background = i === 0 ? '#fef3c7' : '#f8fafc';
-                      e.currentTarget.style.boxShadow = 'none';
+                      fontSize: '13px'
                     }}
                   >
-                    <span style={{fontWeight: '700', color: i === 0 ? '#d97706' : '#64748b', minWidth: '40px'}}>
-                      #{i + 1} {i === 0 ? '🏆' : ''}
+                    <span style={{fontWeight: '700', color: i === 0 ? '#d97706' : '#64748b', minWidth: '30px'}}>
+                      #{i + 1}
                     </span>
                     <span style={{fontWeight: '600', flex: 1}}>{emp.employeeName}</span>
-                    <span style={{color: '#64748b', fontSize: '13px'}}>{emp.region}</span>
+                    <span style={{color: '#64748b'}}>{emp.region}</span>
                     <span style={{color: '#2563eb', fontWeight: '500'}}>🆔 {emp.totalRegistrations}</span>
                     <span style={{color: '#0b7e4b', fontWeight: '600'}}>{emp.avgEfficiency}%</span>
                     <span style={{color: '#7c3aed'}}>📊 {Math.round(emp.attendanceRate)}%</span>
                   </div>
                 ))}
-                {employeePerformance.find(p => p.employeeId === user.employeeId) && (
-                  <div 
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '12px',
-                      padding: '10px 16px',
-                      background: '#e8edf5',
-                      border: '2px solid #1e3a5f',
-                      borderRadius: '8px',
-                      flexWrap: 'wrap',
-                      transition: 'all 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94)',
-                      cursor: 'pointer'
-                    }}
-                    onMouseEnter={(e) => {
-                      e.currentTarget.style.transform = 'translateX(6px) scale(1.02)';
-                      e.currentTarget.style.boxShadow = '0 4px 16px rgba(0,0,0,0.12)';
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.transform = 'translateX(0) scale(1)';
-                      e.currentTarget.style.boxShadow = 'none';
-                    }}
-                  >
-                    <span style={{fontWeight: '700', color: '#1e3a5f', minWidth: '40px'}}>👨‍💼</span>
-                    <span style={{fontWeight: '600', flex: 1}}>{user.name} (You)</span>
-                    <span style={{color: '#64748b', fontSize: '13px'}}>{user.region}</span>
-                    <span style={{color: '#2563eb', fontWeight: '500'}}>🆔 {employeePerformance.find(p => p.employeeId === user.employeeId)?.totalRegistrations || 0}</span>
-                    <span style={{color: '#0b7e4b', fontWeight: '600'}}>{employeePerformance.find(p => p.employeeId === user.employeeId)?.avgEfficiency || 0}%</span>
-                    <span style={{color: '#7c3aed'}}>📊 {Math.round(employeePerformance.find(p => p.employeeId === user.employeeId)?.attendanceRate || 0)}%</span>
-                  </div>
-                )}
               </div>
             )}
           </div>
@@ -1152,7 +619,7 @@ function Dashboard({
             gap: '12px'
           }}>
             <div>
-              <h2 style={{fontSize: '24px', fontWeight: '700', margin: 0, color: '#1a202c'}}>👤 Field Officer Dashboard</h2>
+              <h2 style={{fontSize: '22px', fontWeight: '700', margin: 0, color: '#1a202c'}}>👤 Field Officer Dashboard</h2>
               <p style={{color: '#64748b', fontSize: '14px', margin: '4px 0 0 0'}}>Your personal performance overview</p>
             </div>
             <div style={{display: 'flex', gap: '8px', flexWrap: 'wrap'}}>
@@ -1164,7 +631,7 @@ function Dashboard({
                 fontSize: '12px',
                 fontWeight: '500'
               }}>
-                📅 {new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}
+                📅 {new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
               </span>
               <span style={{
                 background: '#d1fae5',
@@ -1179,231 +646,77 @@ function Dashboard({
             </div>
           </div>
 
-          {/* Stats Grid - Colorful */}
-          <div className="stats-grid" style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px', marginBottom: '24px'}}>
-            <div style={{
-              background: 'linear-gradient(135deg, #2563eb, #1d4ed8)',
-              padding: '20px',
-              borderRadius: '12px',
-              color: 'white',
-              boxShadow: '0 4px 12px rgba(37, 99, 235, 0.2)',
-              transition: 'all 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94)',
-              cursor: 'pointer'
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.transform = 'translateY(-4px) scale(1.02)';
-              e.currentTarget.style.boxShadow = '0 8px 25px rgba(37, 99, 235, 0.3)';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.transform = 'translateY(0) scale(1)';
-              e.currentTarget.style.boxShadow = '0 4px 12px rgba(37, 99, 235, 0.2)';
-            }}>
-              <div style={{fontSize: '28px', fontWeight: '700'}}>{officerReportsCount}</div>
-              <div style={{fontSize: '13px', opacity: 0.8}}>📋 My Reports</div>
-            </div>
-            <div style={{
-              background: 'linear-gradient(135deg, #0b7e4b, #0a6a3f)',
-              padding: '20px',
-              borderRadius: '12px',
-              color: 'white',
-              boxShadow: '0 4px 12px rgba(11, 126, 75, 0.2)',
-              transition: 'all 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94)',
-              cursor: 'pointer'
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.transform = 'translateY(-4px) scale(1.02)';
-              e.currentTarget.style.boxShadow = '0 8px 25px rgba(11, 126, 75, 0.3)';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.transform = 'translateY(0) scale(1)';
-              e.currentTarget.style.boxShadow = '0 4px 12px rgba(11, 126, 75, 0.2)';
-            }}>
-              <div style={{fontSize: '28px', fontWeight: '700'}}>{officerTotalRegistrations}</div>
-              <div style={{fontSize: '13px', opacity: 0.8}}>🆔 Citizens Registered</div>
-            </div>
-            <div style={{
-              background: 'linear-gradient(135deg, #dc2626, #b91c1c)',
-              padding: '20px',
-              borderRadius: '12px',
-              color: 'white',
-              boxShadow: '0 4px 12px rgba(220, 38, 38, 0.2)',
-              transition: 'all 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94)',
-              cursor: 'pointer'
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.transform = 'translateY(-4px) scale(1.02)';
-              e.currentTarget.style.boxShadow = '0 8px 25px rgba(220, 38, 38, 0.3)';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.transform = 'translateY(0) scale(1)';
-              e.currentTarget.style.boxShadow = '0 4px 12px rgba(220, 38, 38, 0.2)';
-            }}>
-              <div style={{fontSize: '28px', fontWeight: '700'}}>{pendingLeaves}</div>
-              <div style={{fontSize: '13px', opacity: 0.8}}>📅 Pending Leaves</div>
-            </div>
-            <div style={{
-              background: 'linear-gradient(135deg, #d97706, #b45309)',
-              padding: '20px',
-              borderRadius: '12px',
-              color: 'white',
-              boxShadow: '0 4px 12px rgba(217, 119, 6, 0.2)',
-              transition: 'all 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94)',
-              cursor: 'pointer'
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.transform = 'translateY(-4px) scale(1.02)';
-              e.currentTarget.style.boxShadow = '0 8px 25px rgba(217, 119, 6, 0.3)';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.transform = 'translateY(0) scale(1)';
-              e.currentTarget.style.boxShadow = '0 4px 12px rgba(217, 119, 6, 0.2)';
-            }}>
-              <div style={{fontSize: '28px', fontWeight: '700'}}>{pendingPermissions}</div>
-              <div style={{fontSize: '13px', opacity: 0.8}}>📋 Pending Permissions</div>
-            </div>
+          {/* Stats Grid */}
+          <div style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '14px', marginBottom: '24px'}}>
+            <StatsCard label="My Reports" value={officerReportsCount} color="#2563eb" icon="📋" />
+            <StatsCard label="Citizens Registered" value={officerTotalRegistrations} color="#0b7e4b" icon="🆔" />
+            <StatsCard label="Pending Leaves" value={pendingLeaves} color="#dc2626" icon="📅" />
+            <StatsCard label="Pending Permissions" value={pendingPermissions} color="#d97706" icon="📋" />
           </div>
 
-          {/* Officer Quick Stats */}
-          <div className="officer-quick-stats" style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px', marginTop: '16px', marginBottom: '24px'}}>
+          {/* Quick Stats */}
+          <div style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '10px', marginBottom: '24px'}}>
             {[
-              { label: "📋 Today's Reports", value: reports.filter(r => r.employeeId === user.employeeId && r.reportDate === getToday()).length },
-              { label: "🆔 Today's Registrations", value: officerTodayRegistrations },
-              { label: '⚡ Efficiency', value: `${Math.round((officerTotalRegistrations / (officerReportsCount || 1) / 100) * 100)}%` },
-              { label: '📋 Attendance', value: todayAttendance?.status || 'Not Marked' },
-              { label: '🎯 Trust Score', value: `${screenTime.find(s => s.employeeId === user.employeeId && s.date === getToday())?.trustScore || 0}%` }
+              { label: "Today's Reports", value: reports.filter(r => r.employeeId === user.employeeId && r.reportDate === getToday()).length },
+              { label: "Today's Registrations", value: officerTodayRegistrations },
+              { label: 'Efficiency', value: `${Math.round((officerTotalRegistrations / (officerReportsCount || 1) / 100) * 100)}%` },
+              { label: 'Attendance', value: todayAttendance?.status || 'Not Marked' },
+              { label: 'Trust Score', value: `${screenTime.find(s => s.employeeId === user.employeeId && s.date === getToday())?.trustScore || 0}%` }
             ].map((stat, index) => (
               <div 
                 key={index}
                 style={{
                   background: 'white',
-                  padding: '16px 20px',
-                  borderRadius: '10px',
-                  boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
+                  padding: '14px 16px',
+                  borderRadius: '8px',
+                  boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
                   display: 'flex',
                   justifyContent: 'space-between',
                   alignItems: 'center',
-                  transition: 'all 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94)',
-                  cursor: 'pointer',
-                  border: '1px solid #f1f5f9'
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.transform = 'translateY(-3px)';
-                  e.currentTarget.style.boxShadow = '0 4px 16px rgba(0,0,0,0.08)';
-                  e.currentTarget.style.background = '#f0f4f8';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.transform = 'translateY(0)';
-                  e.currentTarget.style.boxShadow = '0 1px 3px rgba(0,0,0,0.1)';
-                  e.currentTarget.style.background = 'white';
+                  border: '1px solid #e5e7eb'
                 }}
               >
-                <span style={{fontSize: '14px', color: '#64748b'}}>{stat.label}</span>
-                <strong style={{fontSize: '20px', color: '#1a202c'}}>{stat.value}</strong>
+                <span style={{fontSize: '12px', color: '#64748b'}}>{stat.label}</span>
+                <strong style={{fontSize: '16px', color: '#1a202c'}}>{stat.value}</strong>
               </div>
             ))}
           </div>
 
-          {/* Officer Performance Chart */}
+          {/* Officer Performance Charts */}
           <div style={{
-            background: 'white',
-            padding: '24px',
-            borderRadius: '12px',
-            boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
-            border: '1px solid #f1f5f9',
-            marginBottom: '24px',
-            transition: 'all 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94)',
-            cursor: 'pointer'
-          }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.transform = 'translateY(-4px)';
-            e.currentTarget.style.boxShadow = '0 8px 30px rgba(0,0,0,0.12)';
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.transform = 'translateY(0)';
-            e.currentTarget.style.boxShadow = '0 1px 3px rgba(0,0,0,0.1)';
+            display: 'grid',
+            gridTemplateColumns: '1fr 1fr',
+            gap: '20px',
+            marginBottom: '24px'
           }}>
-            <div className="chart-header" style={{marginBottom: '16px'}}>
-              <h3 style={{fontSize: '16px', fontWeight: '600', margin: 0, color: '#1a202c'}}>📈 My Registration Trend (Last 7 Days)</h3>
-              <p style={{fontSize: '13px', color: '#64748b', margin: '4px 0 0 0'}}>Your daily registration performance</p>
-            </div>
-            <div className="css-trend-chart">
-              <div className="css-trend-labels" style={{display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '8px', marginBottom: '8px'}}>
-                {chartData.data.map((d, i) => (
-                  <div key={i} style={{textAlign: 'center', fontSize: '11px', color: '#64748b'}}>{d.date}</div>
-                ))}
-              </div>
-              <div className="css-trend-bars" style={{display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '8px', height: '180px', alignItems: 'end'}}>
-                {chartData.data.map((d, i) => {
-                  const officerValue = citizens.filter(c => c.registeredBy === user.employeeId && c.registrationDate?.slice(0, 10) === d.date).length;
-                  const maxVal = Math.max(...chartData.data.map(d => citizens.filter(c => c.registeredBy === user.employeeId && c.registrationDate?.slice(0, 10) === d.date).length)) || 1;
-                  return (
-                    <div key={i} style={{display: 'flex', flexDirection: 'column', alignItems: 'center', height: '100%', justifyContent: 'flex-end'}}>
-                      <div 
-                        style={{ 
-                          width: '100%',
-                          height: `${(officerValue / maxVal) * 100}%`,
-                          background: officerValue > 0 ? 'linear-gradient(180deg, #0b7e4b, #4ade80)' : '#E5E7EB',
-                          minHeight: officerValue > 0 ? '20px' : '4px',
-                          borderRadius: '4px 4px 0 0',
-                          transition: 'all 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94)',
-                          cursor: 'pointer'
-                        }}
-                        onMouseEnter={(e) => {
-                          e.currentTarget.style.filter = 'brightness(1.2)';
-                          e.currentTarget.style.transform = 'scaleY(1.05)';
-                        }}
-                        onMouseLeave={(e) => {
-                          e.currentTarget.style.filter = 'brightness(1)';
-                          e.currentTarget.style.transform = 'scaleY(1)';
-                        }}
-                      >
-                        <span style={{fontSize: '12px', fontWeight: '600', color: '#1a202c', paddingTop: '4px'}}>{officerValue}</span>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
+            <ChartWrapper title="📈 My Registration Trend" subtitle="Your daily registrations (Last 7 days)">
+              {renderChart('area', officerRegistrationChartData, ['#0b7e4b'])}
+            </ChartWrapper>
+
+            <ChartWrapper title="⚡ Efficiency Trend" subtitle="Registrations per report">
+              {renderChart('line', officerEfficiencyChartData, ['#7c3aed'])}
+            </ChartWrapper>
           </div>
 
-          {/* Officer Attendance Status - Colorful */}
-          <div className="attendance-status-card" style={{
+          {/* Today's Attendance */}
+          <div style={{
             background: 'white',
-            borderRadius: '12px',
-            padding: '24px',
-            boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
-            border: '1px solid #f1f5f9'
+            borderRadius: '8px',
+            padding: '20px',
+            boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
+            border: '1px solid #e5e7eb'
           }}>
-            <h3 style={{fontSize: '16px', fontWeight: '600', marginBottom: '16px', color: '#1a202c'}}>📊 Today's Attendance Status</h3>
-            <div className="attendance-status-grid" style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '12px'}}>
+            <h3 style={{fontSize: '15px', fontWeight: '600', marginBottom: '16px', color: '#1a202c'}}>📊 Today's Attendance</h3>
+            <div style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: '10px'}}>
               {[
-                { label: 'Status', value: todayAttendance?.status || 'Not Marked', color: todayAttendance?.status === 'present' ? '#0b7e4b' : todayAttendance?.status === 'late' ? '#d97706' : todayAttendance?.status === 'absent' ? '#dc2626' : '#6b7f94' },
+                { label: 'Status', value: todayAttendance?.status || 'Not Marked', color: todayAttendance?.status === 'present' ? '#0b7e4b' : todayAttendance?.status === 'late' ? '#d97706' : todayAttendance?.status === 'absent' ? '#dc2626' : '#64748b' },
                 { label: 'Check In', value: todayAttendance?.checkIn || '--:--', color: '#1a202c' },
                 { label: 'Check Out', value: todayAttendance?.checkOut || '--:--', color: '#1a202c' },
                 { label: 'Work Hours', value: `${todayAttendance?.workHours || 0}h`, color: '#1a202c' }
               ].map((item, index) => (
-                <div 
-                  key={index}
-                  style={{
-                    display: 'flex',
-                    flexDirection: 'column',
-                    padding: '10px',
-                    background: '#f8fafc',
-                    borderRadius: '8px',
-                    transition: 'all 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94)',
-                    cursor: 'pointer'
-                  }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.transform = 'scale(1.03)';
-                    e.currentTarget.style.background = '#e8edf5';
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.transform = 'scale(1)';
-                    e.currentTarget.style.background = '#f8fafc';
-                  }}
-                >
-                  <span style={{fontSize: '12px', color: '#64748b'}}>{item.label}</span>
-                  <span style={{fontSize: '16px', fontWeight: '600', color: item.color}}>{item.value}</span>
+                <div key={index} style={{ padding: '10px', background: '#f8fafc', borderRadius: '6px' }}>
+                  <div style={{ fontSize: '11px', color: '#64748b' }}>{item.label}</div>
+                  <div style={{ fontSize: '15px', fontWeight: '600', color: item.color }}>{item.value}</div>
                 </div>
               ))}
             </div>

@@ -1,11 +1,23 @@
-// App.js - Complete updated version with offline support
+// App.js - Complete updated version with DevTools + Real Internet support
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { db, initializeAllData, syncPendingData, syncQueue, processSyncQueue } from './services/database';
+import { 
+  db, 
+  initializeAllData, 
+  syncPendingData, 
+  syncQueue, 
+  processSyncQueue, 
+  isDevToolsOffline,
+  checkRealInternet,
+  clearStuckSyncItems,
+  isOnline,
+  getNetworkStatus
+} from './services/database';
 import { useScreenTime } from './hooks/useScreenTime';
 import { getToday, formatTime, exportCSV, exportJSON, fakeSyncApi } from './utils/helpers';
 import { uid } from './utils/helpers';
 import './App.css';
+
 
 // Import components
 import Login from './components/auth/Login';
@@ -32,26 +44,9 @@ import AuditLog from './components/audit/AuditLog';
 import AllReports from './components/reports/AllReports';
 import AlertManagement from './components/alerts/AlertManagement';
 import TeamManagement from './components/team/TeamManagement';
-
+import NetworkStatus from './components/common/NetworkStatus';
 // ===== LANGUAGE IMPORTS =====
 import { UserLanguageProvider } from './components/context/UserLanguageContext';
-
-// ===== REAL NETWORK CHECK =====
-const checkRealInternet = async () => {
-  try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 3000);
-    const response = await fetch('https://cdn.jsdelivr.net/npm/axios/package.json', {
-      method: 'HEAD',
-      signal: controller.signal,
-      cache: 'no-store'
-    });
-    clearTimeout(timeoutId);
-    return response.ok;
-  } catch {
-    return false;
-  }
-};
 
 // ===== OFFLINE QUEUE PROCESSOR =====
 const processOfflineQueue = async (queueItems) => {
@@ -410,6 +405,9 @@ function App() {
 
         await db.auth.clear();
         
+        // Clear any stuck sync items on startup
+        await clearStuckSyncItems();
+        
         // Check for pending sync items and process them
         const queueItems = syncQueue.getAll();
         if (queueItems.length > 0) {
@@ -427,18 +425,25 @@ function App() {
   }, []);
 
   // ============================================================
-  // AUTO-SYNC - UPDATED WITH BETTER OFFLINE SUPPORT
+  // AUTO-SYNC - WITH DEVTOOLS + REAL INTERNET SUPPORT
   // ============================================================
   const runSync = useCallback(async () => {
+    // 1. Check DevTools offline first (highest priority)
+    if (isDevToolsOffline()) {
+      console.log('🔌 App: DevTools says OFFLINE - No sync');
+      return;
+    }
+    
+    // 2. Then check real internet
     const online = await checkRealInternet();
     
     if (!online) {
-      console.log('📡 Sync skipped - Device is offline');
+      console.log('📡 App: Sync skipped - Device is offline');
       return;
     }
     
     if (syncing) {
-      console.log('⏳ Sync already in progress');
+      console.log('⏳ App: Sync already in progress');
       return;
     }
     
@@ -447,20 +452,23 @@ function App() {
     const pendingReports = reports.filter(r => !r.synced);
     
     if (pendingReports.length === 0 && queueItems.length === 0) {
-      console.log('✅ No pending items to sync');
+      console.log('✅ App: No pending items to sync');
       return;
     }
 
-    console.log(`📤 Syncing ${pendingReports.length} reports and ${queueItems.length} queue items...`);
+    console.log(`📤 App: Syncing ${pendingReports.length} reports and ${queueItems.length} queue items...`);
     
     setSyncing(true);
     let logEntries = [];
     let updated = [...reports];
     
     try {
+      // Clear any stuck items before syncing
+      await clearStuckSyncItems();
+      
       // Process queue items first
       if (queueItems.length > 0) {
-        console.log(`🔄 Processing ${queueItems.length} items from sync queue...`);
+        console.log(`🔄 App: Processing ${queueItems.length} items from sync queue...`);
         const results = await processOfflineQueue(queueItems);
         
         if (results.synced > 0) {
@@ -499,6 +507,7 @@ function App() {
         setLeaves(updatedLeaves);
         setPermissions(updatedPermissions);
         setSupervisorReports(updatedSupervisorReports);
+        updated = updatedReports;
       }
       
       // Sync pending reports
@@ -530,7 +539,7 @@ function App() {
       }
       
     } catch (error) {
-      console.error('Sync error:', error);
+      console.error('App: Sync error:', error);
       logEntries.push(`❌ Sync error: ${error.message}`);
     } finally {
       setSyncLog(prev => [...logEntries, ...prev].slice(0, 20));
@@ -548,15 +557,25 @@ function App() {
   }, [reports, syncing, user, addNotification]);
 
   // ============================================================
-  // NETWORK STATUS MONITORING - UPDATED
+  // NETWORK STATUS MONITORING - DEVOPS + REAL INTERNET
   // ============================================================
   useEffect(() => {
     const checkNetwork = async () => {
+      // 1. Check DevTools offline first (highest priority)
+      if (isDevToolsOffline()) {
+        if (isOnline !== false) {
+          console.log('🔌 App: DevTools says OFFLINE');
+          setIsOnline(false);
+        }
+        return;
+      }
+      
+      // 2. Then check real internet
       const online = await checkRealInternet();
       if (online !== isOnline) {
         setIsOnline(online);
         if (online) {
-          console.log('🔄 Back online! Checking for pending items...');
+          console.log('🔄 App: Back online! Checking for pending items...');
           const queueItems = syncQueue.getAll();
           const pendingReports = reports.filter(r => !r.synced);
           if (queueItems.length > 0 || pendingReports.length > 0) {
@@ -570,11 +589,17 @@ function App() {
     // Check immediately
     checkNetwork();
     
-    // Check every 5 seconds
-    const interval = setInterval(checkNetwork, 5000);
+    // Check every 2 seconds (faster for DevTools testing)
+    const interval = setInterval(checkNetwork, 2000);
     
     // Listen for manual sync triggers
     const handleForceSync = () => {
+      // Check DevTools offline
+      if (isDevToolsOffline()) {
+        alert('🔌 DevTools says you are offline! Please disable offline mode in DevTools.');
+        return;
+      }
+      
       if (navigator.onLine) {
         runSync();
       } else {
@@ -1337,7 +1362,8 @@ function App() {
         approved: true,
         updatedBy: user.employeeId,
         submittedToManager: true,
-        synced: online ? true : false
+        synced: online ? true : false,
+        lastSyncAttempt: Date.now()
       };
 
       if (existingRecord) {
@@ -1721,7 +1747,7 @@ function App() {
   };
 
   // ============================================================
-  // RENDER FUNCTIONS - All functions must be defined before use
+  // RENDER FUNCTIONS
   // ============================================================
   
   // 1. RENDER SCREEN TIME TABLE
@@ -2597,8 +2623,7 @@ function App() {
             {activeTab === 'audit' && isManager && (
               <AuditLog 
                 auditLog={auditLog}
-                exportCSV={exportCSVWithNotification}
-                exportJSON={exportJSONWithNotification}
+                setAuditLog={setAuditLog}
               />
             )}
             

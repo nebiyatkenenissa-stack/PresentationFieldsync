@@ -1,6 +1,167 @@
-import React from 'react';
+// components/reports/ReportForm.js
 
-function ReportForm({ form, setForm, handleSubmit, user, isOfficer, isSupervisor }) {
+import React, { useState } from 'react';
+import { syncQueue, checkRealInternet } from '../../services/database';
+import { uid } from '../../utils/helpers';
+
+function ReportForm({ form, setForm, handleSubmit, user, isOfficer, isSupervisor, addNotification }) {
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isOnline, setIsOnline] = useState(navigator.onLine);
+
+  // Check online status
+  React.useEffect(() => {
+    const checkStatus = async () => {
+      const online = await checkRealInternet();
+      setIsOnline(online);
+    };
+    checkStatus();
+    const interval = setInterval(checkStatus, 3000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const handleFormSubmit = async (e) => {
+    e.preventDefault();
+    if (!user) {
+      alert('Please login first');
+      return;
+    }
+
+    if (!form.siteName?.trim()) {
+      alert('Site name is required');
+      return;
+    }
+    if (form.registrations < 0) {
+      alert('Registrations cannot be negative');
+      return;
+    }
+
+    setIsSubmitting(true);
+
+    try {
+      // Check if online
+      const online = await checkRealInternet();
+      setIsOnline(online);
+
+      // Create report object
+      const newReport = {
+        id: uid(),
+        reportId: `RPT-${Date.now()}`,
+        reportDate: form.reportDate,
+        region: form.region || user.region,
+        siteName: form.siteName.trim(),
+        employeeId: user.employeeId,
+        employeeName: user.name,
+        supervisorId: user.supervisorId || '',
+        registrations: Number(form.registrations) || 0,
+        registrationEfficiency: Math.round((Number(form.registrations) / 100) * 100),
+        operationalStatus: form.operationalStatus,
+        attendance: form.attendance,
+        workHours: Number(form.workHours),
+        issues: form.issues?.trim() || '',
+        comments: form.comments?.trim() || '',
+        challenges: form.challenges?.trim() || '',
+        activities: form.activities?.trim() || '',
+        equipmentStatus: form.equipmentStatus || 'operational',
+        materialsUsed: form.materialsUsed?.trim() || '',
+        teamMembers: form.teamMembers?.trim() || '',
+        weatherConditions: form.weatherConditions?.trim() || '',
+        communityFeedback: form.communityFeedback?.trim() || '',
+        submittedAt: new Date().toISOString(),
+        // CRITICAL: Set synced based on online status
+        synced: online ? true : false,
+        syncAttempts: 0,
+        syncError: null,
+        reviewed: false,
+        reviewedBy: null,
+        offlineSaved: !online
+      };
+
+      // Save to IndexedDB
+      const { db } = await import('../../services/database');
+      await db.reports.add(newReport);
+
+      // If offline, add to sync queue
+      if (!online) {
+        syncQueue.add({
+          type: 'report',
+          id: newReport.id,
+          data: newReport
+        });
+
+        if (addNotification) {
+          await addNotification(
+            user.id,
+            '💾 Report Saved Offline',
+            `Report for ${form.siteName} saved offline. Will sync automatically when online.`,
+            'warning'
+          );
+        }
+
+        alert('📋 Report saved OFFLINE! Will sync automatically when internet is back.');
+      } else {
+        // If online, notify supervisor and manager
+        if (isOfficer && user) {
+          const supervisor = users?.find(u => u.id === user.supervisorId);
+          if (supervisor && addNotification) {
+            await addNotification(
+              supervisor.id,
+              '📋 Report Submitted',
+              `${user.name} submitted report for ${form.siteName}`,
+              'success'
+            );
+          }
+          const manager = users?.find(u => u.role === 'manager');
+          if (manager && addNotification) {
+            await addNotification(
+              manager.id,
+              '📋 Report Submitted',
+              `${user.name} submitted report for ${form.siteName}`,
+              'info'
+            );
+          }
+        } else if (isSupervisor && user) {
+          const manager = users?.find(u => u.role === 'manager');
+          if (manager && addNotification) {
+            await addNotification(
+              manager.id,
+              '📋 Report Submitted',
+              `${user.name} submitted report for ${form.siteName}`,
+              'info'
+            );
+          }
+        }
+
+        alert('📋 Report submitted and synced successfully!');
+      }
+
+      // Reset form
+      setForm({
+        reportDate: form.reportDate,
+        region: form.region || user.region,
+        siteName: '',
+        registrations: 0,
+        operationalStatus: 'Active',
+        attendance: 'present',
+        workHours: 8,
+        issues: '',
+        comments: '',
+        challenges: '',
+        activities: '',
+        equipmentStatus: 'operational',
+        materialsUsed: '',
+        teamMembers: '',
+        weatherConditions: '',
+        communityFeedback: ''
+      });
+
+    } catch (error) {
+      console.error('Error submitting report:', error);
+      alert('❌ Error submitting report: ' + error.message);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
   return (
     <div className="reports-view">
       <div className="form-card">
@@ -9,10 +170,51 @@ function ReportForm({ form, setForm, handleSubmit, user, isOfficer, isSupervisor
             <h3>Submit Daily Report</h3>
             <p>{isSupervisor ? 'Submit your supervisor report' : 'Record registration data and attendance'}</p>
           </div>
-          <span className="form-badge">Offline Ready</span>
+          <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+            <span className="form-badge" style={{
+              background: isOnline ? '#d1fae5' : '#fee2e2',
+              color: isOnline ? '#065f37' : '#991b1b',
+              padding: '4px 12px',
+              borderRadius: '20px',
+              fontSize: '12px',
+              fontWeight: '500'
+            }}>
+              {isOnline ? '✅ Online' : '📡 Offline'}
+            </span>
+            <span className="form-badge" style={{
+              background: '#dbeafe',
+              color: '#1e40af',
+              padding: '4px 12px',
+              borderRadius: '20px',
+              fontSize: '12px',
+              fontWeight: '500'
+            }}>
+              {isOnline ? 'Auto-Sync Enabled' : 'Offline Save'}
+            </span>
+          </div>
         </div>
 
-        <form onSubmit={handleSubmit} className="report-form">
+        {/* Offline Warning Banner */}
+        {!isOnline && (
+          <div style={{
+            background: '#fef3c7',
+            border: '1px solid #f59e0b',
+            padding: '12px 16px',
+            borderRadius: '8px',
+            marginBottom: '16px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px'
+          }}>
+            <span>📡</span>
+            <span>
+              <strong>You are offline.</strong> Your report will be saved locally and 
+              <strong> automatically synced</strong> when internet is back.
+            </span>
+          </div>
+        )}
+
+        <form onSubmit={handleFormSubmit} className="report-form">
           <div className="form-row">
             <div className="form-group">
               <label>Report Date</label>
@@ -217,11 +419,18 @@ function ReportForm({ form, setForm, handleSubmit, user, isOfficer, isSupervisor
             marginTop: '20px', 
             display: 'flex', 
             gap: '12px',
-            justifyContent: 'flex-end'
+            justifyContent: 'flex-end',
+            alignItems: 'center'
           }}>
+            {!isOnline && (
+              <span style={{ fontSize: '13px', color: '#92400e' }}>
+                📡 Will sync automatically when online
+              </span>
+            )}
             <button 
               type="submit" 
               className="btn-submit"
+              disabled={isSubmitting}
               style={{
                 opacity: 1,
                 visibility: 'visible',
@@ -229,21 +438,29 @@ function ReportForm({ form, setForm, handleSubmit, user, isOfficer, isSupervisor
                 alignItems: 'center',
                 justifyContent: 'center',
                 gap: '8px',
-                background: '#0b7e4b',
+                background: isSubmitting ? '#94a3b8' : (!isOnline ? '#f59e0b' : '#0b7e4b'),
                 color: 'white',
                 padding: '10px 24px',
                 border: 'none',
                 borderRadius: '6px',
-                cursor: 'pointer',
+                cursor: isSubmitting ? 'not-allowed' : 'pointer',
                 fontSize: '14px',
                 fontWeight: '500',
                 minWidth: '140px',
                 transition: 'background 0.2s'
               }}
-              onMouseEnter={(e) => e.target.style.background = '#0a6a3f'}
-              onMouseLeave={(e) => e.target.style.background = '#0b7e4b'}
+              onMouseEnter={(e) => {
+                if (!isSubmitting) {
+                  e.target.style.background = !isOnline ? '#d97706' : '#0a6a3f';
+                }
+              }}
+              onMouseLeave={(e) => {
+                if (!isSubmitting) {
+                  e.target.style.background = !isOnline ? '#f59e0b' : '#0b7e4b';
+                }
+              }}
             >
-              📋 Submit Report
+              {isSubmitting ? '⏳ Submitting...' : (!isOnline ? '💾 Save Offline' : '📋 Submit Report')}
             </button>
           </div>
         </form>
