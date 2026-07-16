@@ -167,7 +167,7 @@ function PermissionManagement({
     return Object.keys(newErrors).length === 0;
   };
 
-  // ===== REQUEST PERMISSION =====
+  // ===== REQUEST PERMISSION (FIXED) =====
   const handleRequestPermission = async (e) => {
     e.preventDefault();
     
@@ -179,74 +179,78 @@ function PermissionManagement({
       return;
     }
 
-    const online = await checkRealInternet();
-    setIsOnline(online);
     setIsSubmitting(true);
 
-    try {
-      const permission = {
-        id: uid(),
-        employeeId: (isOfficer || isSupervisor) ? user.employeeId : newPermission.employeeId,
-        employeeName: (isOfficer || isSupervisor) ? user.name : users?.find(u => u.employeeId === newPermission.employeeId)?.name || user.name,
-        permissionType: newPermission.permissionType,
-        startDate: newPermission.startDate,
-        endDate: newPermission.endDate,
-        reason: newPermission.reason.trim(),
-        status: 'pending',
-        requestedAt: new Date().toISOString(),
-        approvedBy: null,
-        approvedAt: null,
-        synced: online ? true : false
-      };
+    const permission = {
+      id: uid(),
+      employeeId: (isOfficer || isSupervisor) ? user.employeeId : newPermission.employeeId,
+      employeeName: (isOfficer || isSupervisor) ? user.name : users?.find(u => u.employeeId === newPermission.employeeId)?.name || user.name,
+      permissionType: newPermission.permissionType,
+      startDate: newPermission.startDate,
+      endDate: newPermission.endDate,
+      reason: newPermission.reason.trim(),
+      status: 'pending',
+      requestedAt: new Date().toISOString(),
+      approvedBy: null,
+      approvedAt: null,
+      synced: false   // start as false
+    };
 
+    try {
       await db.permissions.add(permission);
       
-      if (online) {
-        if (setPermissions && typeof setPermissions === 'function') {
-          const updated = [permission, ...permissions];
-          setPermissions(updated);
-        }
-        alert('✅ Permission request submitted successfully!');
-        
-        if (addNotification) {
-          addNotification(
-            user.id, 
-            '📋 Permission Request', 
-            `Permission request for ${newPermission.permissionType} submitted`, 
-            'info'
-          );
+      if (setPermissions && typeof setPermissions === 'function') {
+        const updated = [permission, ...permissions];
+        setPermissions(updated);
+      }
+
+      if (navigator.onLine) {
+        try {
+          const response = await fetch('http://localhost:5000/api/permissions', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(permission)
+          });
+          if (response.ok) {
+            await db.permissions.update(permission.id, { synced: true });
+            if (setPermissions && typeof setPermissions === 'function') {
+              setPermissions(prev => prev.map(p => p.id === permission.id ? { ...p, synced: true } : p));
+            }
+            alert('✅ Permission request submitted successfully!');
+          } else {
+            throw new Error('API failed');
+          }
+        } catch (err) {
+          syncQueue.add({ type: 'permission', id: permission.id, data: permission });   // FIXED type
+          setPendingCount(syncQueue.count());
+          alert('📋 Permission request saved offline! Will sync when online.');
         }
       } else {
-        syncQueue.add({
-          type: 'permission_request',
-          id: permission.id,
-          data: permission
-        });
+        syncQueue.add({ type: 'permission', id: permission.id, data: permission });     // FIXED type
         setPendingCount(syncQueue.count());
-        alert('📋 Permission request saved offline! Will appear when online.');
-        
-        if (addNotification) {
-          addNotification(
-            user.id, 
-            '💾 Offline Save', 
-            `Permission request saved offline. Will appear when online.`, 
-            'warning'
-          );
-        }
+        alert('📋 Permission request saved offline! Will sync when online.');
       }
-      
-      setShowModal(false);
-      setNewPermission({ employeeId: '', permissionType: '', startDate: '', endDate: '', reason: '' });
-      setErrors({});
+
+      if (addNotification) {
+        addNotification(
+          user.id, 
+          '📋 Permission Request', 
+          `Permission request for ${newPermission.permissionType} submitted`, 
+          'info'
+        );
+      }
     } catch (error) {
       console.error('Error submitting permission:', error);
       alert('❌ Error submitting permission request: ' + error.message);
     } finally {
       setIsSubmitting(false);
+      setShowModal(false);
+      setNewPermission({ employeeId: '', permissionType: '', startDate: '', endDate: '', reason: '' });
+      setErrors({});
     }
   };
 
-  // ===== APPROVE PERMISSION =====
+  // ===== APPROVE PERMISSION (unchanged) =====
   const approvePermission = async (permissionId, approve) => {
     try {
       const permission = displayPermissions?.find(p => p.id === permissionId);
@@ -317,7 +321,7 @@ function PermissionManagement({
     return displayPermissions;
   };
 
-  // ===== MODAL RENDER =====
+  // ===== MODAL RENDER (unchanged) =====
   const renderModal = () => {
     return (
       <div className="modal-overlay" onClick={() => setShowModal(false)}>
@@ -547,7 +551,7 @@ function PermissionManagement({
     );
   };
 
-  // ===== SUPERVISOR VIEW =====
+  // ===== SUPERVISOR VIEW (unchanged) =====
   const renderSupervisorView = () => {
     const teamIds = teamMembers.map(m => m.employeeId);
     const teamPendingPermissions = pendingPermissions.filter(p => teamIds.includes(p.employeeId));
@@ -706,7 +710,7 @@ function PermissionManagement({
     );
   };
 
-  // ===== OFFICER VIEW =====
+  // ===== OFFICER VIEW (unchanged) =====
   const renderOfficerView = () => {
     return (
       <div className="permissions-view">
@@ -791,7 +795,7 @@ function PermissionManagement({
     );
   };
 
-  // ===== MANAGER VIEW =====
+  // ===== MANAGER VIEW (unchanged) =====
   const renderManagerView = () => {
     return (
       <div className="permissions-view">

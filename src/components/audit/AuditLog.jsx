@@ -1,65 +1,88 @@
 // components/audit/AuditLog.js
-
 import React, { useState, useEffect } from 'react';
 import { db } from '../../services/database';
 import { exportCSV, exportJSON } from '../../utils/helpers';
 
 function AuditLog({ auditLog, setAuditLog }) {
   const [isClearing, setIsClearing] = useState(false);
-  const [logs, setLogs] = useState(auditLog || []);
+  const [localLogs, setLocalLogs] = useState([]);
 
-  // Update logs when prop changes
+  // Use either prop or local state
+  const logs = auditLog && auditLog.length > 0 ? auditLog : localLogs;
+
+  // Fallback: if prop is empty, fetch from IndexedDB on mount
   useEffect(() => {
-    setLogs(auditLog || []);
-  }, [auditLog]);
+    const fetchLogs = async () => {
+      if (!auditLog || auditLog.length === 0) {
+        const data = await db.audit.toArray();
+        setLocalLogs(data);
+        if (setAuditLog && typeof setAuditLog === 'function') {
+          setAuditLog(data);
+        }
+      }
+    };
+    fetchLogs();
+  }, [auditLog, setAuditLog]);
 
-  // ===== CLEAR AUDIT LOG =====
+  // Refresh function to pull from server and update state
+  const handleRefresh = async () => {
+    try {
+      const response = await fetch('http://localhost:5000/api/audit');
+      if (response.ok) {
+        const serverLogs = await response.json();
+        for (const log of serverLogs) {
+          const existing = await db.audit.get(log.id);
+          if (!existing) {
+            await db.audit.add({
+              id: log.id,
+              userId: log.user_id,
+              userName: log.user_name,
+              action: log.action,
+              details: log.details,
+              timestamp: log.timestamp,
+              ip: log.ip
+            });
+          }
+        }
+        // Refresh local state
+        const updated = await db.audit.toArray();
+        setLocalLogs(updated);
+        if (setAuditLog && typeof setAuditLog === 'function') {
+          setAuditLog(updated);
+        }
+        alert('✅ Audit logs refreshed from server');
+      } else {
+        alert('❌ Failed to fetch from server');
+      }
+    } catch (error) {
+      console.error('Refresh error:', error);
+      alert('❌ Error refreshing audit logs');
+    }
+  };
+
   const handleClearAudit = async () => {
     if (!window.confirm('⚠️ Are you sure you want to clear ALL audit logs? This action cannot be undone.')) {
       return;
     }
 
     setIsClearing(true);
-    
     try {
-      // Method 1: Clear all from IndexedDB
       await db.audit.clear();
-      
-      // Update local state
-      setLogs([]);
-      
-      // Update parent state
+      setLocalLogs([]);
       if (setAuditLog && typeof setAuditLog === 'function') {
         setAuditLog([]);
       }
-      
       alert('✅ Audit log cleared successfully!');
     } catch (error) {
       console.error('Error clearing audit log:', error);
-      
-      // Try alternative method if clear fails
-      try {
-        const allLogs = await db.audit.toArray();
-        for (const log of allLogs) {
-          await db.audit.delete(log.id);
-        }
-        setLogs([]);
-        if (setAuditLog && typeof setAuditLog === 'function') {
-          setAuditLog([]);
-        }
-        alert('✅ Audit log cleared successfully!');
-      } catch (secondError) {
-        console.error('Second attempt failed:', secondError);
-        alert('❌ Error clearing audit log: ' + secondError.message);
-      }
+      alert('❌ Error clearing audit log: ' + error.message);
     } finally {
       setIsClearing(false);
     }
   };
 
-  // ===== EXPORT FUNCTIONS =====
   const handleExportCSV = () => {
-    if (logs.length === 0) {
+    if (!logs || logs.length === 0) {
       alert('No audit records to export');
       return;
     }
@@ -73,7 +96,7 @@ function AuditLog({ auditLog, setAuditLog }) {
   };
 
   const handleExportJSON = () => {
-    if (logs.length === 0) {
+    if (!logs || logs.length === 0) {
       alert('No audit records to export');
       return;
     }
@@ -88,7 +111,7 @@ function AuditLog({ auditLog, setAuditLog }) {
         boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
         overflow: 'hidden'
       }}>
-        {/* ===== HEADER ===== */}
+        {/* Header */}
         <div className="table-header" style={{
           display: 'flex',
           justifyContent: 'space-between',
@@ -101,7 +124,7 @@ function AuditLog({ auditLog, setAuditLog }) {
           <div>
             <h3 style={{ margin: 0, fontSize: '18px', fontWeight: '600' }}>📜 Audit Log</h3>
             <p style={{ margin: '4px 0 0 0', fontSize: '13px', color: '#64748b' }}>
-              {logs.length} activities recorded
+              {logs?.length || 0} activities recorded
             </p>
           </div>
           <div className="table-actions" style={{
@@ -112,6 +135,22 @@ function AuditLog({ auditLog, setAuditLog }) {
           }}>
             <button 
               className="btn-export" 
+              onClick={handleRefresh}
+              style={{
+                padding: '6px 14px',
+                background: '#1e3a5f',
+                color: 'white',
+                border: 'none',
+                borderRadius: '6px',
+                cursor: 'pointer',
+                fontSize: '13px',
+                fontWeight: '500'
+              }}
+            >
+              🔄 Refresh
+            </button>
+            <button 
+              className="btn-export" 
               onClick={handleExportCSV}
               style={{
                 padding: '6px 14px',
@@ -119,12 +158,12 @@ function AuditLog({ auditLog, setAuditLog }) {
                 color: 'white',
                 border: 'none',
                 borderRadius: '6px',
-                cursor: logs.length === 0 ? 'not-allowed' : 'pointer',
+                cursor: (!logs || logs.length === 0) ? 'not-allowed' : 'pointer',
                 fontSize: '13px',
                 fontWeight: '500',
-                opacity: logs.length === 0 ? 0.5 : 1
+                opacity: (!logs || logs.length === 0) ? 0.5 : 1
               }}
-              disabled={logs.length === 0}
+              disabled={!logs || logs.length === 0}
             >
               📥 CSV
             </button>
@@ -137,29 +176,29 @@ function AuditLog({ auditLog, setAuditLog }) {
                 color: 'white',
                 border: 'none',
                 borderRadius: '6px',
-                cursor: logs.length === 0 ? 'not-allowed' : 'pointer',
+                cursor: (!logs || logs.length === 0) ? 'not-allowed' : 'pointer',
                 fontSize: '13px',
                 fontWeight: '500',
-                opacity: logs.length === 0 ? 0.5 : 1
+                opacity: (!logs || logs.length === 0) ? 0.5 : 1
               }}
-              disabled={logs.length === 0}
+              disabled={!logs || logs.length === 0}
             >
               📥 JSON
             </button>
             <button 
               className="btn-danger" 
               onClick={handleClearAudit}
-              disabled={isClearing || logs.length === 0}
+              disabled={isClearing || !logs || logs.length === 0}
               style={{
                 padding: '6px 14px',
                 background: '#dc2626',
                 color: 'white',
                 border: 'none',
                 borderRadius: '6px',
-                cursor: (isClearing || logs.length === 0) ? 'not-allowed' : 'pointer',
+                cursor: (isClearing || !logs || logs.length === 0) ? 'not-allowed' : 'pointer',
                 fontSize: '13px',
                 fontWeight: '500',
-                opacity: (isClearing || logs.length === 0) ? 0.5 : 1,
+                opacity: (isClearing || !logs || logs.length === 0) ? 0.5 : 1,
                 display: 'inline-flex',
                 alignItems: 'center',
                 gap: '4px'
@@ -170,7 +209,7 @@ function AuditLog({ auditLog, setAuditLog }) {
           </div>
         </div>
 
-        {/* ===== TABLE ===== */}
+        {/* Table */}
         <div className="table-wrapper" style={{ overflowX: 'auto' }}>
           <table style={{
             width: '100%',
@@ -186,7 +225,7 @@ function AuditLog({ auditLog, setAuditLog }) {
               </tr>
             </thead>
             <tbody>
-              {logs.length === 0 && (
+              {(!logs || logs.length === 0) && (
                 <tr>
                   <td colSpan="4" className="empty-state" style={{
                     textAlign: 'center',
@@ -195,10 +234,13 @@ function AuditLog({ auditLog, setAuditLog }) {
                   }}>
                     <div style={{ fontSize: '48px', marginBottom: '8px' }}>📜</div>
                     <div>No audit records found</div>
+                    <div style={{ fontSize: '12px', marginTop: '4px' }}>
+                      Click "Refresh" to sync with server
+                    </div>
                   </td>
                 </tr>
               )}
-              {logs.map(log => (
+              {logs && logs.map(log => (
                 <tr key={log.id} style={{ borderBottom: '1px solid #e5e7eb' }}>
                   <td style={{ padding: '12px 16px' }}>
                     {new Date(log.timestamp).toLocaleString()}
@@ -239,8 +281,8 @@ function AuditLog({ auditLog, setAuditLog }) {
           </table>
         </div>
 
-        {/* ===== FOOTER ===== */}
-        {logs.length > 0 && (
+        {/* Footer */}
+        {logs && logs.length > 0 && (
           <div style={{
             padding: '12px 20px',
             borderTop: '1px solid #e5e7eb',

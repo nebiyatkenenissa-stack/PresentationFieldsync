@@ -1,14 +1,16 @@
-// services/database.js
+// services/database.js – FULL WITH VERIFICATION AND SUPERVISOR REPORTS SYNC
 
 import Dexie from 'dexie';
 import { SAMPLE_USERS } from '../utils/constants';
 import { uid, getToday } from '../utils/helpers';
 
+const API_URL = 'http://localhost:5000/api';
+
 // Create Dexie database
 const db = new Dexie('FieldSyncDB');
 
-db.version(1).stores({
-  users: 'id, employeeId, email, role, region, status',
+db.version(3).stores({
+  users: 'id, employeeId, email, role, region, status, pin',
   reports: 'id, reportId, employeeId, region, reportDate, synced',
   attendance: 'id, employeeId, date, status, region, synced',
   citizens: 'id, nationalId, firstName, lastName, region, phone, synced',
@@ -21,7 +23,11 @@ db.version(1).stores({
   leaves: 'id, employeeId, status, startDate, endDate, synced',
   alerts: 'id, targetEmployeeId, targetAll, read, timestamp',
   auth: 'id',
-  permissions: 'id, employeeId, status, startDate, endDate, synced'
+  permissions: 'id, employeeId, status, startDate, endDate, synced',
+  gps_locations: 'id, employeeId, date, timestamp, synced, latitude, longitude',
+  check_ins: 'id, employeeId, date, type, checkInId, synced, timestamp',
+  verification_history: '++id, officerId, timestamp, questionId, success',
+  kiosk_sessions: '++id, officerId, startTime, endTime, status, synced'
 });
 
 export { db };
@@ -94,7 +100,6 @@ export const syncQueue = {
   }
 };
 
-// Load queue on initialization
 syncQueue.load();
 
 // ============================================================
@@ -148,7 +153,14 @@ export const checkRealInternet = async () => {
 };
 
 export const isDevToolsOffline = () => {
-  return !_networkOnline || !navigator.onLine;
+  if (!navigator.onLine) {
+    const hostname = window.location.hostname;
+    if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1') {
+      return true;
+    }
+    return false;
+  }
+  return false;
 };
 
 export const getNetworkStatus = () => {
@@ -225,7 +237,7 @@ export const clearStuckSyncItems = async () => {
       'leaves', 'permissions', 'supervisor_reports'
     ];
     
-    const stuckThreshold = Date.now() - 60000; // 1 minute
+    const stuckThreshold = Date.now() - 60000;
     let clearedCount = 0;
     
     for (const storeName of storesToCheck) {
@@ -276,7 +288,7 @@ export const clearStuckSyncItems = async () => {
 };
 
 // ============================================================
-// PROCESS SYNC QUEUE - ✅ WORKING VERSION (NO API CALL)
+// PROCESS SYNC QUEUE (REAL API CALLS)
 // ============================================================
 export const processSyncQueue = async (isOnline) => {
   if (!isOnline) {
@@ -311,41 +323,54 @@ export const processSyncQueue = async (isOnline) => {
         'user_delete': 'users',
         'alert': 'alerts',
         'alert_read': 'alerts',
-        'screen_time_update': 'screen_time'
+        'screen_time': 'screen_time',
+        'screen_time_update': 'screen_time',
+        'audit': 'audit',
+        'verification': 'verification_history',
+        'gps_location': 'gps_locations',
+        'check_in': 'check_ins',
+        'check_out': 'check_ins',
+        'kiosk_session': 'kiosk_sessions'
       };
       
       const store = storeMap[item.type];
       if (store && db[store]) {
-        // Mark as syncing
         await db[store].update(item.id, { 
           synced: 'syncing',
           lastSyncAttempt: Date.now()
         });
         
-        // ✅ FIX: Directly mark as synced (no API call)
-        console.log(`🔄 Syncing: ${item.type} - ${item.id}`);
+        console.log(`🔄 Syncing to PostgreSQL: ${item.type} - ${item.id}`);
         
-        // Small delay to simulate network
-        await new Promise(resolve => setTimeout(resolve, 300));
-        
-        // Mark as synced
-        await db[store].update(item.id, { 
-          synced: true,
-          syncedAt: new Date().toISOString(),
-          serverId: `demo-${Date.now()}`
+        const response = await fetch(`${API_URL}/sync`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ type: item.type, data: item.data })
         });
         
-        // Remove from queue
-        syncQueue.remove(item.id);
-        synced++;
-        console.log(`✅ Synced: ${item.type} - ${item.id}`);
+        if (response.ok) {
+          const result = await response.json();
+          
+          await db[store].update(item.id, { 
+            synced: true,
+            syncedAt: new Date().toISOString(),
+            serverId: result.data?.id || `server-${Date.now()}`
+          });
+          
+          syncQueue.remove(item.id);
+          synced++;
+          console.log(`✅ Synced to PostgreSQL: ${item.type} - ${item.id}`);
+        } else {
+          const error = await response.json();
+          throw new Error(error.error || `API returned ${response.status}`);
+        }
         
       } else {
         syncQueue.remove(item.id);
         synced++;
       }
     } catch (error) {
-      console.error(`❌ Failed to sync: ${item.type} - ${item.id}`, error);
+      console.error(`❌ Failed to sync: ${item.type} - ${item.id}`, error.message);
       item.attempts = (item.attempts || 0) + 1;
       
       const storeMap = {
@@ -361,7 +386,14 @@ export const processSyncQueue = async (isOnline) => {
         'user_delete': 'users',
         'alert': 'alerts',
         'alert_read': 'alerts',
-        'screen_time_update': 'screen_time'
+        'screen_time': 'screen_time',
+        'screen_time_update': 'screen_time',
+        'audit': 'audit',
+        'verification': 'verification_history',
+        'gps_location': 'gps_locations',
+        'check_in': 'check_ins',
+        'check_out': 'check_ins',
+        'kiosk_session': 'kiosk_sessions'
       };
       
       const store = storeMap[item.type];
@@ -390,7 +422,6 @@ export const processSyncQueue = async (isOnline) => {
 
   syncQueue.save();
   
-  // Dispatch events
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new Event('sync-complete'));
   }
@@ -427,7 +458,7 @@ if (typeof window !== 'undefined') {
     if (online && !isSyncing) {
       const count = syncQueue.count();
       if (count > 0) {
-        console.log(`🔄 Auto-syncing ${count} items...`);
+        console.log(`🔄 Auto-syncing ${count} items to PostgreSQL...`);
         isSyncing = true;
         try {
           await processSyncQueue(true);
@@ -450,14 +481,12 @@ if (typeof window !== 'undefined') {
     _networkOnline = false;
   });
 
-  // Check every 2 seconds
   const interval = setInterval(checkAndSync, 2000);
   
   setTimeout(checkAndSync, 1000);
   
   window.addEventListener('force-sync', checkAndSync);
   
-  // Clear stuck items every 30 seconds
   setInterval(async () => {
     const online = await checkRealInternet();
     if (online) {
@@ -473,48 +502,243 @@ if (typeof window !== 'undefined') {
 }
 
 // ============================================================
-// EXPORT UTILITY FUNCTIONS
+// PULL SCREEN TIME FROM SERVER
 // ============================================================
-export const getFailedItems = () => {
-  try {
-    const failed = localStorage.getItem('failedSyncItems');
-    return failed ? JSON.parse(failed) : [];
-  } catch {
-    return [];
-  }
-};
-
-export const clearFailedItems = () => {
-  localStorage.removeItem('failedSyncItems');
-  console.log('🗑️ Failed items cleared');
-};
-
-export const retryFailedItems = async () => {
-  const failedItems = getFailedItems();
-  if (failedItems.length === 0) {
-    console.log('✅ No failed items to retry');
+export const pullScreenTimeFromServer = async (employeeId = null) => {
+  const online = await checkRealInternet();
+  if (!online) {
+    console.log('📡 Offline – skipping screen time pull');
     return;
   }
-  
-  console.log(`🔄 Retrying ${failedItems.length} failed items...`);
-  
-  for (const item of failedItems) {
-    syncQueue.add({
-      id: item.id,
-      type: item.type,
-      data: item.data
-    });
-  }
-  
-  localStorage.removeItem('failedSyncItems');
-  
-  if (typeof window !== 'undefined') {
-    window.dispatchEvent(new Event('force-sync'));
+
+  try {
+    const url = employeeId
+      ? `${API_URL}/screen-time/employee/${employeeId}`
+      : `${API_URL}/screen-time`;
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status} – ${response.statusText}`);
+    }
+    const serverRecords = await response.json();
+    console.log(`📥 Pulled ${serverRecords.length} screen time records from server`);
+
+    for (const record of serverRecords) {
+      const localRecord = {
+        id: record.id,
+        employeeId: record.employee_id,
+        employeeName: record.employee_name,
+        date: record.date,
+        loginTime: record.login_time,
+        logoutTime: record.logout_time,
+        totalScreenTime: record.total_screen_time,
+        screenTimeLimit: record.screen_time_limit,
+        trustScore: record.trust_score,
+        isLoggedIn: record.is_logged_in,
+        verified: record.verified,
+        verifiedBy: record.verified_by,
+        createdAt: record.created_at,
+        updatedAt: record.updated_at,
+        synced: true,
+      };
+
+      const existing = await db.screen_time.get(record.id);
+      if (!existing || new Date(existing.updatedAt) < new Date(localRecord.updatedAt)) {
+        await db.screen_time.put(localRecord);
+        console.log(`🔄 Updated screen time record for ${localRecord.employeeName}`);
+      }
+    }
+    console.log('✅ Screen time pull completed');
+  } catch (error) {
+    console.error('❌ Pull screen time failed:', error);
   }
 };
 
 // ============================================================
-// INITIALIZE DATA
+// PULL AUDIT LOGS FROM SERVER
+// ============================================================
+export const pullAuditLogsFromServer = async () => {
+  const online = await checkRealInternet();
+  if (!online) {
+    console.log('📡 Offline – skipping audit pull');
+    return;
+  }
+
+  try {
+    const response = await fetch(`${API_URL}/audit`);
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status} – ${response.statusText}`);
+    }
+    const serverLogs = await response.json();
+    console.log(`📥 Pulled ${serverLogs.length} audit logs from server`);
+
+    for (const log of serverLogs) {
+      const localLog = {
+        id: log.id,
+        userId: log.user_id,
+        userName: log.user_name,
+        action: log.action,
+        details: log.details,
+        timestamp: log.timestamp,
+        ip: log.ip,
+      };
+      const existing = await db.audit.get(log.id);
+      if (!existing) {
+        await db.audit.add(localLog);
+        console.log(`🔄 Added audit log: ${log.action} by ${log.user_name}`);
+      }
+    }
+    console.log('✅ Audit pull completed');
+  } catch (error) {
+    console.error('❌ Pull audit logs failed:', error);
+  }
+};
+
+// ============================================================
+// PULL ALERTS FROM SERVER
+// ============================================================
+export const pullAlertsFromServer = async () => {
+  const online = await checkRealInternet();
+  if (!online) {
+    console.log('📡 Offline – skipping alerts pull');
+    return;
+  }
+
+  try {
+    const response = await fetch(`${API_URL}/alerts`);
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status} – ${response.statusText}`);
+    }
+    const serverAlerts = await response.json();
+    console.log(`📥 Pulled ${serverAlerts.length} alerts from server`);
+
+    for (const alert of serverAlerts) {
+      const localAlert = {
+        id: alert.id,
+        title: alert.title,
+        message: alert.message,
+        priority: alert.priority,
+        type: alert.type,
+        timestamp: alert.timestamp,
+        read: alert.read,
+        targetAll: alert.target_all,
+        targetEmployeeId: alert.target_employee_id,
+        sentBy: alert.sent_by,
+        sentByName: alert.sent_by_name,
+        synced: true
+      };
+      const existing = await db.alerts.get(alert.id);
+      if (!existing || new Date(existing.timestamp) < new Date(alert.timestamp)) {
+        await db.alerts.put(localAlert);
+        console.log(`🔄 Updated alert: ${alert.title}`);
+      }
+    }
+    console.log('✅ Alerts pull completed');
+  } catch (error) {
+    console.error('❌ Pull alerts failed:', error);
+  }
+};
+
+// ============================================================
+// PULL VERIFICATION FROM SERVER
+// ============================================================
+export const pullVerificationFromServer = async () => {
+  const online = await checkRealInternet();
+  if (!online) {
+    console.log('📡 Offline – skipping verification pull');
+    return;
+  }
+
+  try {
+    const response = await fetch(`${API_URL}/verification`);
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status} – ${response.statusText}`);
+    }
+    const serverRecords = await response.json();
+    console.log(`📥 Pulled ${serverRecords.length} verification records from server`);
+
+    for (const record of serverRecords) {
+      const localRecord = {
+        id: record.id,
+        officerId: record.officer_id,
+        officerName: record.officer_name,
+        question: record.question,
+        answer: record.answer,
+        success: record.success,
+        score: record.score,
+        responseTime: record.response_time,
+        timestamp: record.timestamp,
+        message: record.message,
+        penalties: record.penalties || [],
+        synced: true
+      };
+      const existing = await db.verification_history.get(record.id);
+      if (!existing) {
+        await db.verification_history.add(localRecord);
+        console.log(`🔄 Added verification record for ${record.officer_name}`);
+      }
+    }
+    console.log('✅ Verification pull completed');
+  } catch (error) {
+    console.error('❌ Pull verification failed:', error);
+  }
+};
+
+// ============================================================
+// PULL SUPERVISOR REPORTS FROM SERVER (NEW)
+// ============================================================
+export const pullSupervisorReportsFromServer = async () => {
+  const online = await checkRealInternet();
+  if (!online) {
+    console.log('📡 Offline – skipping supervisor reports pull');
+    return;
+  }
+
+  try {
+    const response = await fetch(`${API_URL}/supervisor-reports`);
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status} – ${response.statusText}`);
+    }
+    const serverReports = await response.json();
+    console.log(`📥 Pulled ${serverReports.length} supervisor reports from server`);
+
+    for (const report of serverReports) {
+      const localReport = {
+        id: report.id,
+        supervisorId: report.supervisor_id,
+        supervisorName: report.supervisor_name,
+        officerId: report.officer_id,
+        officerName: report.officer_name,
+        officerRegion: report.officer_region,
+        reportDate: report.report_date,
+        performance: report.performance,
+        attendance: report.attendance,
+        quality: report.quality,
+        punctuality: report.punctuality,
+        teamwork: report.teamwork,
+        communication: report.communication,
+        comments: report.comments,
+        recommendations: report.recommendations,
+        overallRating: report.overall_rating,
+        status: report.status,
+        submittedAt: report.submitted_at,
+        region: report.region,
+        type: report.type,
+        synced: true
+      };
+      const existing = await db.supervisor_reports.get(report.id);
+      if (!existing || new Date(existing.submittedAt) < new Date(report.submitted_at)) {
+        await db.supervisor_reports.put(localReport);
+        console.log(`🔄 Updated supervisor report for ${report.supervisor_name}`);
+      }
+    }
+    console.log('✅ Supervisor reports pull completed');
+  } catch (error) {
+    console.error('❌ Pull supervisor reports failed:', error);
+  }
+};
+
+// ============================================================
+// INITIALIZE DATA (unchanged)
 // ============================================================
 export const initializeAllData = async () => {
   try {
@@ -527,9 +751,14 @@ export const initializeAllData = async () => {
     console.log('📦 Initializing data...');
     const today = getToday();
 
-    await db.users.bulkAdd(SAMPLE_USERS);
+    const usersWithPin = SAMPLE_USERS.map(u => ({
+      ...u,
+      pin: u.role === 'field_officer' ? '1234' : null
+    }));
 
-    const fieldOfficers = SAMPLE_USERS.filter(u => u.role === 'field_officer');
+    await db.users.bulkAdd(usersWithPin);
+
+    const fieldOfficers = usersWithPin.filter(u => u.role === 'field_officer');
     
     const attendance = fieldOfficers.map(o => ({
       id: uid(),
@@ -551,7 +780,7 @@ export const initializeAllData = async () => {
     }));
     await db.attendance.bulkAdd(attendance);
 
-    const officers = SAMPLE_USERS.filter(u => u.role === 'field_officer' || u.role === 'supervisor');
+    const officers = usersWithPin.filter(u => u.role === 'field_officer' || u.role === 'supervisor');
     const status = officers.map(o => ({
       id: uid(),
       userId: o.id,
@@ -588,11 +817,12 @@ export const initializeAllData = async () => {
       isLoggedIn: false,
       sessionStart: null,
       sessionEnd: null,
-      totalScreenTime: 28800
+      totalScreenTime: 28800,
+      synced: true
     }));
     await db.screen_time.bulkAdd(screenTime);
 
-    const notifications = SAMPLE_USERS.map(u => ({
+    const notifications = usersWithPin.map(u => ({
       id: uid(),
       userId: u.id,
       title: '👋 Welcome!',
@@ -605,31 +835,31 @@ export const initializeAllData = async () => {
     await db.notifications.bulkAdd(notifications);
 
     const leaves = [
-      { id: uid(), employeeId: 'FO001', employeeName: 'መሠረት አለሙ', startDate: '2024-02-15', endDate: '2024-02-17', reason: 'Family event', type: 'annual', status: 'pending', createdAt: new Date().toISOString(), approvedBy: null, approvedAt: null, synced: true },
-      { id: uid(), employeeId: 'FO004', employeeName: 'መለስ ዘነበ', startDate: '2024-02-20', endDate: '2024-02-22', reason: 'Sick', type: 'sick', status: 'pending', createdAt: new Date().toISOString(), approvedBy: null, approvedAt: null, synced: true }
+      { id: uid(), employeeId: 'FO001', employeeName: 'Meseret Alemu', startDate: '2024-02-15', endDate: '2024-02-17', reason: 'Family event', type: 'annual', status: 'pending', createdAt: new Date().toISOString(), approvedBy: null, approvedAt: null, synced: true },
+      { id: uid(), employeeId: 'FO004', employeeName: 'Meles Zenebe', startDate: '2024-02-20', endDate: '2024-02-22', reason: 'Sick', type: 'sick', status: 'pending', createdAt: new Date().toISOString(), approvedBy: null, approvedAt: null, synced: true }
     ];
     await db.leaves.bulkAdd(leaves);
 
     const reports = [
-      { id: uid(), reportId: 'RPT-001', reportDate: today, region: 'North', siteName: 'Site A', employeeId: 'FO001', employeeName: 'መሠረት አለሙ', supervisorId: 's1', registrations: 15, registrationEfficiency: 75, operationalStatus: 'Active', attendance: 'present', workHours: 8, issues: 'None', comments: 'Good progress', challenges: 'Weather', activities: 'Registration', equipmentStatus: 'operational', materialsUsed: 'Forms', teamMembers: 'Team A', weatherConditions: 'Sunny', communityFeedback: 'Positive', submittedAt: new Date().toISOString(), synced: true, syncAttempts: 0, syncError: null, reviewed: true, reviewedBy: 'System' },
-      { id: uid(), reportId: 'RPT-002', reportDate: today, region: 'South', siteName: 'Site B', employeeId: 'FO004', employeeName: 'መለስ ዘነበ', supervisorId: 's2', registrations: 10, registrationEfficiency: 50, operationalStatus: 'Active', attendance: 'present', workHours: 7, issues: 'None', comments: 'Good', challenges: 'None', activities: 'Registration', equipmentStatus: 'operational', materialsUsed: 'Forms', teamMembers: 'Team B', weatherConditions: 'Cloudy', communityFeedback: 'Good', submittedAt: new Date().toISOString(), synced: true, syncAttempts: 0, syncError: null, reviewed: true, reviewedBy: 'System' },
-      { id: uid(), reportId: 'RPT-003', reportDate: today, region: 'East', siteName: 'Site C', employeeId: 'FO007', employeeName: 'ፍቅሬ ገብረእግዚአብሔር', supervisorId: 's3', registrations: 8, registrationEfficiency: 40, operationalStatus: 'Active', attendance: 'present', workHours: 6, issues: 'None', comments: 'Good', challenges: 'None', activities: 'Registration', equipmentStatus: 'operational', materialsUsed: 'Forms', teamMembers: 'Team C', weatherConditions: 'Sunny', communityFeedback: 'Good', submittedAt: new Date().toISOString(), synced: true, syncAttempts: 0, syncError: null, reviewed: true, reviewedBy: 'System' }
+      { id: uid(), reportId: 'RPT-001', reportDate: today, region: 'North', siteName: 'Site A', employeeId: 'FO001', employeeName: 'Meseret Alemu', supervisorId: 's1', registrations: 15, registrationEfficiency: 75, operationalStatus: 'Active', attendance: 'present', workHours: 8, issues: 'None', comments: 'Good progress', challenges: 'Weather', activities: 'Registration', equipmentStatus: 'operational', materialsUsed: 'Forms', teamMembers: 'Team A', weatherConditions: 'Sunny', communityFeedback: 'Positive', submittedAt: new Date().toISOString(), synced: true, syncAttempts: 0, syncError: null, reviewed: true, reviewedBy: 'System' },
+      { id: uid(), reportId: 'RPT-002', reportDate: today, region: 'South', siteName: 'Site B', employeeId: 'FO004', employeeName: 'Meles Zenebe', supervisorId: 's2', registrations: 10, registrationEfficiency: 50, operationalStatus: 'Active', attendance: 'present', workHours: 7, issues: 'None', comments: 'Good', challenges: 'None', activities: 'Registration', equipmentStatus: 'operational', materialsUsed: 'Forms', teamMembers: 'Team B', weatherConditions: 'Cloudy', communityFeedback: 'Good', submittedAt: new Date().toISOString(), synced: true, syncAttempts: 0, syncError: null, reviewed: true, reviewedBy: 'System' },
+      { id: uid(), reportId: 'RPT-003', reportDate: today, region: 'East', siteName: 'Site C', employeeId: 'FO007', employeeName: 'Fikre Gebreegziabher', supervisorId: 's3', registrations: 8, registrationEfficiency: 40, operationalStatus: 'Active', attendance: 'present', workHours: 6, issues: 'None', comments: 'Good', challenges: 'None', activities: 'Registration', equipmentStatus: 'operational', materialsUsed: 'Forms', teamMembers: 'Team C', weatherConditions: 'Sunny', communityFeedback: 'Good', submittedAt: new Date().toISOString(), synced: true, syncAttempts: 0, syncError: null, reviewed: true, reviewedBy: 'System' }
     ];
     await db.reports.bulkAdd(reports);
 
     const citizens = [
-      { id: uid(), nationalId: 'NID-001', firstName: 'አበበ', lastName: 'ከበደ', dateOfBirth: '1990-01-01', gender: 'Male', phone: '+251-911-000001', email: 'abebe@test.com', address: 'Addis Ababa', region: 'North', district: 'District 1', village: 'Village 1', occupation: 'Teacher', maritalStatus: 'Married', registrationDate: new Date().toISOString(), registeredBy: 'FO001', registeredByName: 'መሠረት አለሙ', idType: 'National ID', idNumber: 'NID-001', biometrics: false, status: 'active', synced: true },
-      { id: uid(), nationalId: 'NID-002', firstName: 'ሣህለ', lastName: 'ወርቅ', dateOfBirth: '1985-06-15', gender: 'Female', phone: '+251-911-000002', email: 'sahle@test.com', address: 'Addis Ababa', region: 'South', district: 'District 2', village: 'Village 2', occupation: 'Nurse', maritalStatus: 'Single', registrationDate: new Date().toISOString(), registeredBy: 'FO004', registeredByName: 'መለስ ዘነበ', idType: 'National ID', idNumber: 'NID-002', biometrics: false, status: 'active', synced: true },
-      { id: uid(), nationalId: 'NID-003', firstName: 'ኪዳን', lastName: 'ተሰማ', dateOfBirth: '1992-03-20', gender: 'Male', phone: '+251-911-000003', email: 'kidan@test.com', address: 'Addis Ababa', region: 'East', district: 'District 3', village: 'Village 3', occupation: 'Engineer', maritalStatus: 'Single', registrationDate: new Date().toISOString(), registeredBy: 'FO007', registeredByName: 'ፍቅሬ ገብረእግዚአብሔር', idType: 'National ID', idNumber: 'NID-003', biometrics: false, status: 'active', synced: true }
+      { id: uid(), nationalId: 'NID-001', firstName: 'Abebe', lastName: 'Kebede', dateOfBirth: '1990-01-01', gender: 'Male', phone: '+251-911-000001', email: 'abebe@test.com', address: 'Addis Ababa', region: 'North', district: 'District 1', village: 'Village 1', occupation: 'Teacher', maritalStatus: 'Married', registrationDate: new Date().toISOString(), registeredBy: 'FO001', registeredByName: 'Meseret Alemu', idType: 'National ID', idNumber: 'NID-001', biometrics: false, status: 'active', synced: true },
+      { id: uid(), nationalId: 'NID-002', firstName: 'Sahle', lastName: 'Work', dateOfBirth: '1985-06-15', gender: 'Female', phone: '+251-911-000002', email: 'sahle@test.com', address: 'Addis Ababa', region: 'South', district: 'District 2', village: 'Village 2', occupation: 'Nurse', maritalStatus: 'Single', registrationDate: new Date().toISOString(), registeredBy: 'FO004', registeredByName: 'Meles Zenebe', idType: 'National ID', idNumber: 'NID-002', biometrics: false, status: 'active', synced: true },
+      { id: uid(), nationalId: 'NID-003', firstName: 'Kidan', lastName: 'Tesema', dateOfBirth: '1992-03-20', gender: 'Male', phone: '+251-911-000003', email: 'kidan@test.com', address: 'Addis Ababa', region: 'East', district: 'District 3', village: 'Village 3', occupation: 'Engineer', maritalStatus: 'Single', registrationDate: new Date().toISOString(), registeredBy: 'FO007', registeredByName: 'Fikre Gebreegziabher', idType: 'National ID', idNumber: 'NID-003', biometrics: false, status: 'active', synced: true }
     ];
     await db.citizens.bulkAdd(citizens);
 
     const supervisorReports = [{
       id: uid(),
       supervisorId: 's1',
-      supervisorName: 'ብርሃን ገብረእግዚአብሔር',
+      supervisorName: 'Birhan Gebreegziabher',
       officerId: 'o1',
-      officerName: 'መሠረት አለሙ',
+      officerName: 'Meseret Alemu',
       officerRegion: 'North',
       reportDate: today,
       performance: 'good',
@@ -650,8 +880,8 @@ export const initializeAllData = async () => {
     await db.supervisor_reports.bulkAdd(supervisorReports);
 
     const audit = [
-      { id: uid(), userId: 'MGR001', userName: 'አበበ በቀለ', action: 'LOGIN', details: 'User logged in', timestamp: new Date().toISOString(), ip: '127.0.0.1' },
-      { id: uid(), userId: 'FO001', userName: 'መሠረት አለሙ', action: 'SUBMIT_REPORT', details: 'Report submitted for Site A', timestamp: new Date().toISOString(), ip: '127.0.0.1' }
+      { id: uid(), userId: 'MGR001', userName: 'Abebe Bekele', action: 'LOGIN', details: 'User logged in', timestamp: new Date().toISOString(), ip: '127.0.0.1' },
+      { id: uid(), userId: 'FO001', userName: 'Meseret Alemu', action: 'SUBMIT_REPORT', details: 'Report submitted for Site A', timestamp: new Date().toISOString(), ip: '127.0.0.1' }
     ];
     await db.audit.bulkAdd(audit);
 
@@ -666,14 +896,14 @@ export const initializeAllData = async () => {
       targetAll: true,
       targetEmployeeId: null,
       sentBy: 'MGR001',
-      sentByName: 'አበበ በቀለ'
+      sentByName: 'Abebe Bekele'
     }];
     await db.alerts.bulkAdd(alerts);
 
     const permissions = [{
       id: uid(),
       employeeId: 'FO001',
-      employeeName: 'መሠረት አለሙ',
+      employeeName: 'Meseret Alemu',
       permissionType: 'Work Permission',
       startDate: '2024-02-25',
       endDate: '2024-02-25',
@@ -686,7 +916,57 @@ export const initializeAllData = async () => {
     }];
     await db.permissions.bulkAdd(permissions);
 
+    const gpsLocations = fieldOfficers.map(o => ({
+      id: uid(),
+      employeeId: o.employeeId,
+      employeeName: o.name,
+      latitude: 9.03 + (Math.random() - 0.5) * 0.5,
+      longitude: 38.74 + (Math.random() - 0.5) * 0.5,
+      accuracy: 10 + Math.random() * 20,
+      timestamp: new Date().toISOString(),
+      date: today,
+      location: 'Work Site',
+      synced: true
+    }));
+    await db.gps_locations.bulkAdd(gpsLocations);
+
+    const checkIns = fieldOfficers.map(o => ({
+      id: uid(),
+      employeeId: o.employeeId,
+      employeeName: o.name,
+      type: 'check_in',
+      location: 'Main Office',
+      latitude: 9.03 + (Math.random() - 0.5) * 0.5,
+      longitude: 38.74 + (Math.random() - 0.5) * 0.5,
+      accuracy: 10 + Math.random() * 20,
+      timestamp: new Date().toISOString(),
+      date: today,
+      synced: true
+    }));
+    await db.check_ins.bulkAdd(checkIns);
+
+    const verificationHistory = fieldOfficers.map(o => ({
+      id: uid(),
+      officerId: o.id,
+      officerName: o.name,
+      question: 'What is your current location?',
+      answer: 'Field',
+      timestamp: new Date().toISOString(),
+      responseTime: Math.floor(5 + Math.random() * 15),
+      score: Math.floor(70 + Math.random() * 30),
+      penalties: [],
+      questionId: 'q1',
+      success: true,
+      message: '✅ Verification passed!'
+    }));
+    await db.verification_history.bulkAdd(verificationHistory);
+
     console.log('✅ Data initialization complete!');
+    console.log('📧 Login with your credentials:');
+    console.log('   Manager: abebe@fieldsync.com / manager123');
+    console.log('   Supervisor: birhan@fieldsync.com / super123');
+    console.log('   Officer: meseret@fieldsync.com / officer123');
+    console.log('   Officer PIN: 1234');
   } catch (error) {
     console.error('Error initializing data:', error);
   }

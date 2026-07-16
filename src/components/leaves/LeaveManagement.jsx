@@ -83,7 +83,6 @@ function LeaveManagement({
       console.log('🔄 Sync complete - refreshing leaves...');
       const count = syncQueue.count();
       setPendingCount(count);
-      // Force refresh from database
       updateDisplayLeaves();
     };
 
@@ -164,7 +163,7 @@ function LeaveManagement({
     return Object.keys(newErrors).length === 0;
   };
 
-  // ===== REQUEST LEAVE =====
+  // ===== REQUEST LEAVE (FIXED) =====
   const handleRequestLeave = async (e) => {
     e.preventDefault();
     
@@ -176,74 +175,81 @@ function LeaveManagement({
       return;
     }
 
-    const online = await checkRealInternet();
-    setIsOnline(online);
     setIsSubmitting(true);
 
-    try {
-      const leave = {
-        id: uid(),
-        employeeId: (isOfficer || isSupervisor) ? user.employeeId : newLeave.employeeId,
-        employeeName: (isOfficer || isSupervisor) ? user.name : users?.find(u => u.employeeId === newLeave.employeeId)?.name || user.name,
-        startDate: newLeave.startDate,
-        endDate: newLeave.endDate,
-        reason: newLeave.reason.trim(),
-        type: newLeave.type,
-        status: 'pending',
-        createdAt: new Date().toISOString(),
-        approvedBy: null,
-        approvedAt: null,
-        synced: online ? true : false
-      };
+    const leave = {
+      id: uid(),
+      employeeId: (isOfficer || isSupervisor) ? user.employeeId : newLeave.employeeId,
+      employeeName: (isOfficer || isSupervisor) ? user.name : users?.find(u => u.employeeId === newLeave.employeeId)?.name || user.name,
+      startDate: newLeave.startDate,
+      endDate: newLeave.endDate,
+      reason: newLeave.reason.trim(),
+      type: newLeave.type,
+      status: 'pending',
+      createdAt: new Date().toISOString(),
+      approvedBy: null,
+      approvedAt: null,
+      synced: false   // start as false
+    };
 
+    try {
       await db.leaves.add(leave);
       
-      if (online) {
-        if (setLeaves && typeof setLeaves === 'function') {
-          const updated = [leave, ...leaves];
-          setLeaves(updated);
-        }
-        alert('✅ Leave request submitted successfully!');
-        
-        if (addNotification) {
-          addNotification(
-            user.id, 
-            '📅 Leave Request', 
-            `Leave request submitted from ${leave.startDate} to ${leave.endDate}`, 
-            'info'
-          );
+      // Immediately update UI state
+      if (setLeaves && typeof setLeaves === 'function') {
+        const updated = [leave, ...leaves];
+        setLeaves(updated);
+      }
+
+      if (navigator.onLine) {
+        try {
+          const response = await fetch('http://localhost:5000/api/leaves', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(leave)
+          });
+          if (response.ok) {
+            await db.leaves.update(leave.id, { synced: true });
+            if (setLeaves && typeof setLeaves === 'function') {
+              setLeaves(prev => prev.map(l => l.id === leave.id ? { ...l, synced: true } : l));
+            }
+            alert('✅ Leave request submitted successfully!');
+          } else {
+            throw new Error('API failed');
+          }
+        } catch (err) {
+          // API unreachable – queue for later
+          syncQueue.add({ type: 'leave', id: leave.id, data: leave });   // FIXED type
+          setPendingCount(syncQueue.count());
+          alert('📅 Leave request saved offline! Will sync when online.');
         }
       } else {
-        syncQueue.add({
-          type: 'leave_request',
-          id: leave.id,
-          data: leave
-        });
+        // Truly offline – queue
+        syncQueue.add({ type: 'leave', id: leave.id, data: leave });     // FIXED type
         setPendingCount(syncQueue.count());
-        alert('📅 Leave request saved offline! Will appear when online.');
-        
-        if (addNotification) {
-          addNotification(
-            user.id, 
-            '💾 Offline Save', 
-            `Leave request saved offline. Will appear when online.`, 
-            'warning'
-          );
-        }
+        alert('📅 Leave request saved offline! Will sync when online.');
       }
-      
-      setShowModal(false);
-      setNewLeave({ employeeId: '', startDate: '', endDate: '', reason: '', type: 'annual' });
-      setErrors({});
+
+      if (addNotification) {
+        addNotification(
+          user.id, 
+          '📅 Leave Request', 
+          `Leave request submitted from ${leave.startDate} to ${leave.endDate}`, 
+          'info'
+        );
+      }
     } catch (error) {
       console.error('Error submitting leave:', error);
       alert('❌ Error submitting leave request: ' + error.message);
     } finally {
       setIsSubmitting(false);
+      setShowModal(false);
+      setNewLeave({ employeeId: '', startDate: '', endDate: '', reason: '', type: 'annual' });
+      setErrors({});
     }
   };
 
-  // ===== APPROVE LEAVE =====
+  // ===== APPROVE LEAVE (unchanged) =====
   const approveLeave = async (leaveId, approve) => {
     try {
       const leave = displayLeaves?.find(l => l.id === leaveId);
@@ -307,6 +313,7 @@ function LeaveManagement({
     }
   };
 
+  // ===== GET DISPLAY LEAVES (unchanged) =====
   const getDisplayLeaves = () => {
     if (selectedTab === 'pending') return pendingLeaves;
     if (selectedTab === 'approved') return approvedLeaves;
@@ -314,7 +321,7 @@ function LeaveManagement({
     return displayLeaves;
   };
 
-  // ===== MODAL RENDER =====
+  // ===== MODAL RENDER (unchanged) =====
   const renderModal = () => {
     return (
       <div className="modal-overlay" onClick={() => setShowModal(false)}>
@@ -530,7 +537,7 @@ function LeaveManagement({
     );
   };
 
-  // ===== SUPERVISOR VIEW =====
+  // ===== SUPERVISOR VIEW (unchanged) =====
   const renderSupervisorView = () => {
     const teamIds = teamMembers.map(m => m.employeeId);
     const teamPendingLeaves = pendingLeaves.filter(l => teamIds.includes(l.employeeId));
@@ -711,7 +718,7 @@ function LeaveManagement({
     );
   };
 
-  // ===== OFFICER VIEW =====
+  // ===== OFFICER VIEW (unchanged) =====
   const renderOfficerView = () => {
     return (
       <div className="leaves-view">
@@ -796,7 +803,7 @@ function LeaveManagement({
     );
   };
 
-  // ===== MANAGER VIEW =====
+  // ===== MANAGER VIEW (unchanged) =====
   const renderManagerView = () => {
     return (
       <div className="leaves-view">

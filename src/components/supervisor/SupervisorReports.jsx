@@ -2,14 +2,20 @@
 
 import React, { useState, useEffect } from 'react';
 import { getToday, uid } from '../../utils/helpers';
-import { db } from '../../services/database';
-import { syncQueue, checkRealInternet } from '../../services/database';
+import { db, syncQueue, checkRealInternet, pullSupervisorReportsFromServer } from '../../services/database';
 
-function SupervisorReports({ supervisorReports, users, user, teamMembers }) {
+function SupervisorReports({ 
+  supervisorReports, 
+  users, 
+  user, 
+  teamMembers,
+  setSupervisorReports
+}) {
   const [showOfficerReport, setShowOfficerReport] = useState(false);
   const [showSelfReport, setShowSelfReport] = useState(false);
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   const [pendingCount, setPendingCount] = useState(0);
+  const [localReports, setLocalReports] = useState([]);
   const [form, setForm] = useState({
     officerId: '',
     reportDate: getToday(),
@@ -62,7 +68,38 @@ function SupervisorReports({ supervisorReports, users, user, teamMembers }) {
     };
   }, []);
 
-  // ===== HANDLE OFFICER REPORT SUBMIT (OFFLINE SUPPORT) =====
+  // ===== LOAD REPORTS FROM INDEXEDDB (fallback) =====
+  const loadReportsFromDB = async () => {
+    try {
+      const all = await db.supervisor_reports.toArray();
+      const filtered = all.filter(r => r.supervisorId === user?.id);
+      setLocalReports(filtered);
+      console.log('📥 Loaded reports from IndexedDB:', filtered.length);
+      return filtered;
+    } catch (error) {
+      console.error('Error loading reports from IndexedDB:', error);
+      return [];
+    }
+  };
+
+  // ===== REFRESH REPORTS =====
+  const handleRefresh = async () => {
+    console.log('🔄 Manual refresh triggered');
+    if (isOnline) {
+      await pullSupervisorReportsFromServer();
+    }
+    const loaded = await loadReportsFromDB();
+    if (setSupervisorReports) {
+      setSupervisorReports(loaded);
+    }
+  };
+
+  // ===== USE PROP OR LOCAL REPORTS =====
+  const reports = supervisorReports && supervisorReports.length > 0 
+    ? supervisorReports.filter(r => r.supervisorId === user?.id)
+    : localReports;
+
+  // ===== HANDLE OFFICER REPORT SUBMIT =====
   const handleOfficerReportSubmit = async (e) => {
     e.preventDefault();
     const officer = users.find(u => u.id === form.officerId);
@@ -99,10 +136,16 @@ function SupervisorReports({ supervisorReports, users, user, teamMembers }) {
         synced: online ? true : false
       };
       
-      // Save to IndexedDB
-      await db.supervisor_reports.add(report);
+      console.log('📝 Saving officer report:', report);
       
-      // Handle offline
+      await db.supervisor_reports.add(report);
+      console.log('✅ Officer report saved to IndexedDB');
+      
+      setLocalReports(prev => [report, ...prev]);
+      if (setSupervisorReports) {
+        setSupervisorReports(prev => [report, ...prev]);
+      }
+      
       if (!online) {
         syncQueue.add({
           type: 'supervisor_report',
@@ -111,30 +154,11 @@ function SupervisorReports({ supervisorReports, users, user, teamMembers }) {
         });
         setPendingCount(syncQueue.count());
         alert('📋 Supervisor report saved OFFLINE! Will sync when online.');
-        
-        if (window.addNotification) {
-          window.addNotification(
-            user.id, 
-            '💾 Offline Save', 
-            `Report about ${officer.name} saved offline. Will sync when online.`, 
-            'warning'
-          );
-        }
       } else {
         alert('✅ Supervisor report submitted successfully!');
-        
-        if (window.addNotification) {
-          window.addNotification(
-            user.id, 
-            '📋 Report Submitted', 
-            `Report about ${officer.name} submitted successfully.`, 
-            'success'
-          );
-        }
       }
       
       setShowOfficerReport(false);
-      // Reset form
       setForm({
         officerId: '',
         reportDate: getToday(),
@@ -154,7 +178,7 @@ function SupervisorReports({ supervisorReports, users, user, teamMembers }) {
     }
   };
 
-  // ===== HANDLE SELF REPORT SUBMIT (OFFLINE SUPPORT) =====
+  // ===== HANDLE SELF REPORT SUBMIT =====
   const handleSelfReportSubmit = async (e) => {
     e.preventDefault();
 
@@ -181,10 +205,16 @@ function SupervisorReports({ supervisorReports, users, user, teamMembers }) {
         synced: online ? true : false
       };
       
-      // Save to IndexedDB
-      await db.supervisor_reports.add(report);
+      console.log('📝 Saving self report:', report);
       
-      // Handle offline
+      await db.supervisor_reports.add(report);
+      console.log('✅ Self report saved to IndexedDB');
+      
+      setLocalReports(prev => [report, ...prev]);
+      if (setSupervisorReports) {
+        setSupervisorReports(prev => [report, ...prev]);
+      }
+      
       if (!online) {
         syncQueue.add({
           type: 'supervisor_report',
@@ -193,30 +223,11 @@ function SupervisorReports({ supervisorReports, users, user, teamMembers }) {
         });
         setPendingCount(syncQueue.count());
         alert('📋 Self report saved OFFLINE! Will sync when online.');
-        
-        if (window.addNotification) {
-          window.addNotification(
-            user.id, 
-            '💾 Offline Save', 
-            `Self report saved offline. Will sync when online.`, 
-            'warning'
-          );
-        }
       } else {
         alert('✅ Self report submitted successfully!');
-        
-        if (window.addNotification) {
-          window.addNotification(
-            user.id, 
-            '📋 Self Report Submitted', 
-            `Self report submitted successfully.`, 
-            'success'
-          );
-        }
       }
       
       setShowSelfReport(false);
-      // Reset form
       setSelfForm({
         reportDate: getToday(),
         region: '',
@@ -235,7 +246,15 @@ function SupervisorReports({ supervisorReports, users, user, teamMembers }) {
     }
   };
 
-  const reports = supervisorReports.filter(r => r.supervisorId === user?.id);
+  // ===== INITIAL LOAD (fallback) =====
+  useEffect(() => {
+    if (user) {
+      loadReportsFromDB();
+    }
+  }, [user]);
+
+  // ===== LOG REPORTS FOR DEBUGGING =====
+  console.log('📋 SupervisorReports rendering, reports count:', reports.length);
 
   return (
     <div className="supervisor-reports-view" style={{ padding: '20px' }}>
@@ -319,18 +338,35 @@ function SupervisorReports({ supervisorReports, users, user, teamMembers }) {
               Submit reports about your team members and your own work status
             </p>
           </div>
-          {!isOnline && (
-            <span style={{
-              background: '#fef3c7',
-              color: '#92400e',
-              padding: '4px 12px',
-              borderRadius: '20px',
-              fontSize: '12px',
-              fontWeight: '500'
-            }}>
-              📡 Offline Mode
-            </span>
-          )}
+          <div style={{ display: 'flex', gap: '8px' }}>
+            {!isOnline && (
+              <span style={{
+                background: '#fef3c7',
+                color: '#92400e',
+                padding: '4px 12px',
+                borderRadius: '20px',
+                fontSize: '12px',
+                fontWeight: '500'
+              }}>
+                📡 Offline Mode
+              </span>
+            )}
+            <button
+              onClick={handleRefresh}
+              style={{
+                background: '#3b82f6',
+                color: 'white',
+                border: 'none',
+                padding: '4px 12px',
+                borderRadius: '6px',
+                cursor: 'pointer',
+                fontSize: '12px',
+                fontWeight: '500'
+              }}
+            >
+              🔄 Refresh
+            </button>
+          </div>
         </div>
 
         <div className="report-actions" style={{
@@ -426,9 +462,9 @@ function SupervisorReports({ supervisorReports, users, user, teamMembers }) {
               <tr style={{ background: '#f8fafc' }}>
                 <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: '600', fontSize: '12px', color: '#6b7280' }}>Date</th>
                 <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: '600', fontSize: '12px', color: '#6b7280' }}>Type</th>
-                <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: '600', fontSize: '12px', color: '#6b7280' }}>Officer</th>
+                <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: '600', fontSize: '12px', color: '#6b7280' }}>Officer / Self</th>
                 <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: '600', fontSize: '12px', color: '#6b7280' }}>Performance</th>
-                <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: '600', fontSize: '12px', color: '#6b7280' }}>Rating</th>
+                <th style={{ padding: '12px 16px', textAlign: 'center', fontWeight: '600', fontSize: '12px', color: '#6b7280' }}>Rating</th>
                 <th style={{ padding: '12px 16px', textAlign: 'center', fontWeight: '600', fontSize: '12px', color: '#6b7280' }}>Status</th>
               </tr>
             </thead>
@@ -442,11 +478,12 @@ function SupervisorReports({ supervisorReports, users, user, teamMembers }) {
                   }}>
                     <div style={{ fontSize: '48px', marginBottom: '8px' }}>📋</div>
                     <div>No supervisor reports found</div>
+                    <div style={{ fontSize: '12px', marginTop: '4px' }}>Click "Submit Self Report" or "Report About Officer" to add one.</div>
                   </td>
                 </tr>
               )}
-              {reports.map(r => (
-                <tr key={r.id} style={{ borderBottom: '1px solid #f3f4f6' }}>
+              {reports.map((r, index) => (
+                <tr key={r.id || index} style={{ borderBottom: '1px solid #f3f4f6' }}>
                   <td style={{ padding: '12px 16px', fontSize: '13px' }}>{r.reportDate}</td>
                   <td style={{ padding: '12px 16px', fontSize: '13px' }}>
                     {r.type === 'self_report' ? '📋 Self Report' : '👤 Officer Report'}
@@ -472,7 +509,7 @@ function SupervisorReports({ supervisorReports, users, user, teamMembers }) {
                       {r.overallStatus || r.performance}
                     </span>
                   </td>
-                  <td style={{ padding: '12px 16px', fontSize: '13px' }}>
+                  <td style={{ padding: '12px 16px', fontSize: '13px', textAlign: 'center' }}>
                     {r.type === 'self_report' ? 'N/A' : `${r.overallRating}/5 ⭐`}
                   </td>
                   <td style={{ padding: '12px 16px', textAlign: 'center', fontSize: '13px' }}>
@@ -529,7 +566,7 @@ function SupervisorReports({ supervisorReports, users, user, teamMembers }) {
         )}
       </div>
 
-      {/* ===== OFFICER REPORT MODAL ===== */}
+      {/* ===== OFFICER REPORT MODAL (FULL) ===== */}
       {showOfficerReport && (
         <div className="modal-overlay" onClick={() => setShowOfficerReport(false)}>
           <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{
@@ -561,7 +598,6 @@ function SupervisorReports({ supervisorReports, users, user, teamMembers }) {
               >✕</button>
             </div>
 
-            {/* Offline Warning in Modal */}
             {!isOnline && (
               <div style={{
                 padding: '12px 16px',
@@ -892,7 +928,7 @@ function SupervisorReports({ supervisorReports, users, user, teamMembers }) {
         </div>
       )}
 
-      {/* ===== SELF REPORT MODAL ===== */}
+      {/* ===== SELF REPORT MODAL (FULL) ===== */}
       {showSelfReport && (
         <div className="modal-overlay" onClick={() => setShowSelfReport(false)}>
           <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{
@@ -924,7 +960,6 @@ function SupervisorReports({ supervisorReports, users, user, teamMembers }) {
               >✕</button>
             </div>
 
-            {/* Offline Warning in Modal */}
             {!isOnline && (
               <div style={{
                 padding: '12px 16px',

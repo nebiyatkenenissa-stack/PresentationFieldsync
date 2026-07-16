@@ -1,4 +1,4 @@
-// components/attendance/AttendanceManagement.js
+// components/attendance/AttendanceManagement.js – FULL FIXED (online API sync)
 
 import React, { useState, useMemo, useEffect } from 'react';
 import { db } from '../../services/database';
@@ -42,7 +42,6 @@ function AttendanceManagement({
   // ===== CHECK ONLINE STATUS & CLEAR STUCK SYNC =====
   useEffect(() => {
     const checkNetwork = async () => {
-      // Check DevTools offline first
       if (isDevToolsOffline()) {
         setIsOnline(false);
         return;
@@ -51,39 +50,29 @@ function AttendanceManagement({
       const online = await checkRealInternet();
       setIsOnline(online);
       
-      // Count pending items
       const count = syncQueue.count();
       setPendingCount(count);
       
-      // Count stuck items in attendance
       const stuck = attendance.filter(a => a.synced === 'syncing').length;
       setStuckCount(stuck);
       
-      // If there are stuck items, clear them automatically
       if (stuck > 0 || count > 0) {
         console.log(`🧹 Found ${stuck} stuck items and ${count} pending items. Clearing...`);
         setIsClearing(true);
         
         try {
-          // Clear stuck sync items
           const result = await clearStuckSyncItems();
           console.log('✅ Cleared stuck items:', result);
           
-          // Refresh attendance data after clearing
           const updatedAttendance = await db.attendance.toArray();
-          if (setAttendance) {
-            setAttendance(updatedAttendance);
-          }
+          if (setAttendance) setAttendance(updatedAttendance);
           
-          // Update stuck count
           const newStuck = updatedAttendance.filter(a => a.synced === 'syncing').length;
           setStuckCount(newStuck);
           
-          // Update pending count
           const newPending = syncQueue.count();
           setPendingCount(newPending);
           
-          // If there are pending items and we're online, trigger sync
           if (online && newPending > 0) {
             console.log(`🔄 Auto-syncing ${newPending} items...`);
             window.dispatchEvent(new CustomEvent('force-sync'));
@@ -96,30 +85,19 @@ function AttendanceManagement({
       }
     };
 
-    // Run immediately
     checkNetwork();
-    
-    // Check every 5 seconds
     const interval = setInterval(checkNetwork, 5000);
 
-    // Listen for sync events
     const handleSyncComplete = async () => {
       const count = syncQueue.count();
       setPendingCount(count);
-      
-      // Refresh attendance data
       const updatedAttendance = await db.attendance.toArray();
-      if (setAttendance) {
-        setAttendance(updatedAttendance);
-      }
-      
-      const stuck = updatedAttendance.filter(a => a.synced === 'syncing').length;
-      setStuckCount(stuck);
+      if (setAttendance) setAttendance(updatedAttendance);
+      setStuckCount(updatedAttendance.filter(a => a.synced === 'syncing').length);
     };
 
     const handleQueueUpdate = () => {
-      const count = syncQueue.count();
-      setPendingCount(count);
+      setPendingCount(syncQueue.count());
     };
 
     window.addEventListener('sync-complete', handleSyncComplete);
@@ -155,12 +133,11 @@ function AttendanceManagement({
     setShowModal(true);
   };
 
-  // ===== HANDLE SUBMIT ATTENDANCE =====
+  // ===== HANDLE SUBMIT ATTENDANCE (NOW WITH IMMEDIATE API SYNC) =====
   const handleSubmitAttendance = async () => {
     if (!selectedOfficer) return;
     const today = getToday();
     
-    // Check DevTools offline first
     if (isDevToolsOffline()) {
       alert('🔌 You are offline. Please disable offline mode in DevTools.');
       return;
@@ -183,7 +160,6 @@ function AttendanceManagement({
     }
 
     try {
-      // Check for existing record
       const existingRecord = attendance.find(
         a => a.employeeId === selectedOfficer.employeeId && a.date === today
       );
@@ -211,23 +187,20 @@ function AttendanceManagement({
         seenBy: null,
         editedBySupervisor: true,
         lastEditedAt: new Date().toISOString(),
-        // CRITICAL: Set synced based on online status
-        synced: online ? true : false,
+        // Mark as NOT synced initially – we'll update after API call
+        synced: false,
         lastSyncAttempt: Date.now()
       };
 
       let recordId;
 
       if (existingRecord) {
-        // UPDATE existing record
         await db.attendance.update(existingRecord.id, attendanceData);
-        const updated = attendance.map(a =>
-          a.id === existingRecord.id ? { ...a, ...attendanceData } : a
+        setAttendance(prev =>
+          prev.map(a => a.id === existingRecord.id ? { ...a, ...attendanceData } : a)
         );
-        if (setAttendance) setAttendance(updated);
         recordId = existingRecord.id;
       } else {
-        // CREATE new record
         const newRecord = {
           id: uid(),
           employeeId: selectedOfficer.employeeId,
@@ -240,35 +213,62 @@ function AttendanceManagement({
           createdAt: new Date().toISOString()
         };
         await db.attendance.add(newRecord);
-        if (setAttendance) setAttendance([newRecord, ...attendance]);
+        setAttendance(prev => [newRecord, ...prev]);
         recordId = newRecord.id;
       }
 
-      // If offline, add to sync queue
-      if (!online) {
-        syncQueue.add({
-          type: 'attendance',
-          id: recordId,
-          data: attendanceData
-        });
+      // Build payload for API
+      const payload = {
+        employeeId: selectedOfficer.employeeId,
+        employeeName: selectedOfficer.name,
+        date: today,
+        status: form.status,
+        checkIn: form.checkIn,
+        checkOut: form.checkOut,
+        workHours: Math.round(workHours * 10) / 10,
+        region: selectedOfficer.region || user.region,
+        supervisorId: user.id,
+        supervisorName: user.name,
+        notes: form.notes || '',
+        submittedToManager: true,
+        submittedAt: new Date().toISOString(),
+      };
+
+      if (online) {
+        // ONLINE – try to send directly to the API
+        try {
+          const response = await fetch('http://localhost:5000/api/attendance', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+          });
+
+          if (response.ok) {
+            // Success: mark as synced in IndexedDB
+            await db.attendance.update(recordId, { synced: true });
+            if (setAttendance) {
+              setAttendance(prev =>
+                prev.map(a => a.id === recordId ? { ...a, synced: true } : a)
+              );
+            }
+            console.log('✅ Attendance sent to PostgreSQL');
+          } else {
+            throw new Error('API failed');
+          }
+        } catch (apiError) {
+          // API call failed – queue for sync
+          console.warn('⚠️ API call failed, queuing attendance for sync');
+          syncQueue.add({ type: 'attendance', id: recordId, data: payload });
+          setPendingCount(syncQueue.count());
+        }
+      } else {
+        // OFFLINE – always queue
+        syncQueue.add({ type: 'attendance', id: recordId, data: payload });
         setPendingCount(syncQueue.count());
         alert('📋 Attendance saved OFFLINE! Will sync automatically when online.');
-        
-        if (addNotification) {
-          await addNotification(
-            user.id,
-            '💾 Offline Save',
-            `Attendance for ${selectedOfficer.name} saved offline. Will sync when online.`,
-            'warning'
-          );
-        }
-        
-        setShowModal(false);
-        setSelectedOfficer(null);
-        return;
       }
 
-      // If online, notify users
+      // Notify manager (unchanged)
       const manager = users.find(u => u.role === 'manager');
       if (manager && addNotification) {
         await addNotification(
@@ -290,7 +290,7 @@ function AttendanceManagement({
 
       setShowModal(false);
       setSelectedOfficer(null);
-      alert('✅ Attendance updated successfully!');
+      alert('✅ Attendance submitted successfully!');
     } catch (error) {
       console.error('Error submitting attendance:', error);
       alert('❌ Error submitting attendance: ' + error.message);
@@ -304,7 +304,6 @@ function AttendanceManagement({
       const result = await clearStuckSyncItems();
       alert(`🧹 Cleared ${result.clearedStore} stuck records and ${result.clearedQueue} stuck queue items`);
       
-      // Refresh data
       const updatedAttendance = await db.attendance.toArray();
       if (setAttendance) setAttendance(updatedAttendance);
       setStuckCount(updatedAttendance.filter(a => a.synced === 'syncing').length);
@@ -319,7 +318,6 @@ function AttendanceManagement({
 
   const today = getToday();
   
-  // ONLY count synced attendance
   const syncedAttendance = attendance.filter(a => a.synced === true);
   
   const pendingApproval = syncedAttendance.filter(a => 
@@ -338,11 +336,9 @@ function AttendanceManagement({
     return attendance.find(a => a.employeeId === officerId && a.date === today);
   };
 
-  // ===== GET FILTERED ATTENDANCE - ONLY SYNCED RECORDS =====
   const getFilteredDisplayAttendance = () => {
     let filtered = [...attendance];
     
-    // Filter by role
     if (isSupervisor && user) {
       const officerIds = supervisorOfficers.map(o => o.employeeId);
       filtered = filtered.filter(a => officerIds.includes(a.employeeId));
@@ -350,20 +346,16 @@ function AttendanceManagement({
       filtered = filtered.filter(a => a.employeeId === user.employeeId);
     }
     
-    // ⚠️ CRITICAL: ONLY SHOW SYNCED RECORDS
     filtered = filtered.filter(a => a.synced === true);
     
-    // Apply date filter
     if (selectedDate) {
       filtered = filtered.filter(a => a.date === selectedDate);
     }
     
-    // Apply status filter
     if (attendanceFilter !== 'all') {
       filtered = filtered.filter(a => a.status === attendanceFilter);
     }
     
-    // Sort by date (newest first)
     filtered.sort((a, b) => new Date(b.date) - new Date(a.date));
     
     return filtered;
@@ -371,10 +363,10 @@ function AttendanceManagement({
 
   const displayFilteredAttendance = getFilteredDisplayAttendance();
 
+  // --- The rest of the component (UI) remains completely unchanged ---
   return (
     <div style={{padding: '24px', maxWidth: '1400px', margin: '0 auto', fontFamily: 'Segoe UI, Tahoma, Geneva, Verdana, sans-serif'}}>
-      
-      {/* ===== STATUS BAR ===== */}
+      {/* STATUS BAR */}
       <div style={{
         display: 'flex',
         justifyContent: 'space-between',
@@ -442,7 +434,7 @@ function AttendanceManagement({
         </div>
       </div>
 
-      {/* ===== STUCK SYNC BANNER ===== */}
+      {/* STUCK SYNC BANNER */}
       {stuckCount > 0 && (
         <div style={{
           background: '#fee2e2',
@@ -480,7 +472,7 @@ function AttendanceManagement({
         </div>
       )}
 
-      {/* ===== OFFLINE BANNER ===== */}
+      {/* OFFLINE BANNER */}
       {!isOnline && pendingCount > 0 && (
         <div style={{
           background: '#fef3c7',
@@ -500,7 +492,7 @@ function AttendanceManagement({
         </div>
       )}
 
-      {/* ===== SYNCING BANNER ===== */}
+      {/* SYNCING BANNER */}
       {isOnline && pendingCount > 0 && stuckCount === 0 && (
         <div style={{
           background: '#dbeafe',
@@ -520,7 +512,7 @@ function AttendanceManagement({
         </div>
       )}
 
-      {/* ===== HEADER CARD ===== */}
+      {/* HEADER CARD */}
       <div style={{
         background: '#ffffff',
         borderRadius: '8px',
@@ -579,7 +571,7 @@ function AttendanceManagement({
         </div>
       </div>
 
-      {/* ===== FILTERS CARD ===== */}
+      {/* FILTERS CARD */}
       <div style={{
         background: '#ffffff',
         borderRadius: '8px',
@@ -644,7 +636,7 @@ function AttendanceManagement({
         </div>
       </div>
 
-      {/* ===== QUICK EDIT CARDS ===== */}
+      {/* QUICK EDIT CARDS */}
       {isSupervisor && supervisorOfficers.length > 0 && (
         <div style={{marginBottom: '20px'}}>
           <h4 style={{fontSize: '15px', fontWeight: '600', color: '#1a1a2e', marginBottom: '14px'}}>
@@ -776,7 +768,7 @@ function AttendanceManagement({
         </div>
       )}
 
-      {/* ===== TABLE CARD ===== */}
+      {/* TABLE CARD */}
       <div style={{
         background: '#ffffff',
         borderRadius: '8px',

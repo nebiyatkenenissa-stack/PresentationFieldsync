@@ -1,4 +1,4 @@
-// components/dashboard/Dashboard.js
+// components/dashboard/Dashboard.js - FULL COMPLETE FIXED VERSION
 
 import React, { useMemo, useCallback } from 'react';
 import { getToday } from '../../utils/helpers';
@@ -6,6 +6,8 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, 
   ResponsiveContainer, LineChart, Line, AreaChart, Area, Cell
 } from 'recharts';
+import VerificationPopup from '../verification/VerificationPopup';
+import { useVerification } from '../../hooks/useVerification';
 
 function Dashboard({ 
   isManager, isSupervisor, isOfficer, user, reports, users, 
@@ -13,9 +15,19 @@ function Dashboard({
   totalRegistrations, attendanceSummary, teamMembers, 
   pendingLeaves, pendingPermissions, topPerformers, 
   teamPerformance, employeePerformance, renderTrendChart,
-  citizens
+  citizens, liveStatus
 }) {
   
+  // ===== VERIFICATION SYSTEM FOR FIELD OFFICER =====
+  const { 
+    showPopup, 
+    verificationScore, 
+    verificationHistory,
+    handleAnswer, 
+    handleClose,
+    lastVerified
+  } = useVerification(isOfficer ? user?.id : null, isOfficer ? user?.name : null);
+
   // Calculate registration trend data for chart
   const chartData = useMemo(() => {
     const today = new Date();
@@ -25,25 +37,25 @@ function Dashboard({
       const d = new Date(today);
       d.setDate(d.getDate() - i);
       const dateStr = d.toISOString().slice(0, 10);
-      const value = reports.filter(r => r.reportDate === dateStr).reduce((sum, r) => sum + (r.registrations || 0), 0);
+      const value = (reports || []).filter(r => r.reportDate === dateStr).reduce((sum, r) => sum + (r.registrations || 0), 0);
       data.push({ date: dateStr, value });
       if (value > max) max = value;
     }
     return { data, max: max || 1 };
   }, [reports]);
 
-  // Region stats with East, South, North, West
+  // Region stats
   const regionStats = useMemo(() => {
     const map = {};
-    reports.forEach(r => {
+    (reports || []).forEach(r => {
       if (!map[r.region]) map[r.region] = { reports: 0, registrations: 0 };
       map[r.region].reports += 1;
-      map[r.region].registrations += citizens.filter(c => c.region === r.region).length;
+      map[r.region].registrations += (citizens || []).filter(c => c.region === r.region).length;
     });
     return Object.entries(map).map(([region, data]) => ({ region, ...data }));
   }, [reports, citizens]);
 
-  // ===== REAL DATA: Report Status Distribution =====
+  // Report Status Distribution
   const reportStatusData = useMemo(() => {
     if (!reports || reports.length === 0) return [];
     const statuses = { 'Approved': 0, 'Pending': 0, 'Rejected': 0 };
@@ -57,7 +69,7 @@ function Dashboard({
       .map(([name, value]) => ({ name, value }));
   }, [reports]);
 
-  // ===== REAL DATA: Today's Attendance Status =====
+  // Today's Attendance Status
   const todayAttendanceData = useMemo(() => {
     if (!attendance || attendance.length === 0) return [];
     const today = getToday();
@@ -75,7 +87,7 @@ function Dashboard({
       .map(([name, value]) => ({ name, value }));
   }, [attendance]);
 
-  // ===== REAL DATA: Leave Status Distribution =====
+  // Leave Status Distribution
   const leaveStatusData = useMemo(() => {
     if (!leaves || leaves.length === 0) return [];
     const statuses = { 'Approved': 0, 'Pending': 0, 'Rejected': 0 };
@@ -89,7 +101,7 @@ function Dashboard({
       .map(([name, value]) => ({ name, value }));
   }, [leaves]);
 
-  // ===== REAL DATA: Permission Status Distribution =====
+  // Permission Status Distribution
   const permissionStatusData = useMemo(() => {
     if (!permissions || permissions.length === 0) return [];
     const statuses = { 'Approved': 0, 'Pending': 0, 'Rejected': 0 };
@@ -103,7 +115,7 @@ function Dashboard({
       .map(([name, value]) => ({ name, value }));
   }, [permissions]);
 
-  // ===== REAL DATA: Officer's personal performance =====
+  // Officer's personal performance
   const officerPerformanceData = useMemo(() => {
     if (!isOfficer || !user) return [];
     const today = getToday();
@@ -112,11 +124,11 @@ function Dashboard({
       const d = new Date(today);
       d.setDate(d.getDate() - i);
       const dateStr = d.toISOString().slice(0, 10);
-      const registrations = citizens.filter(c => 
+      const registrations = (citizens || []).filter(c => 
         c.registeredBy === user.employeeId && 
         c.registrationDate?.slice(0, 10) === dateStr
       ).length;
-      const reportsCount = reports.filter(r => 
+      const reportsCount = (reports || []).filter(r => 
         r.employeeId === user.employeeId && 
         r.reportDate === dateStr
       ).length;
@@ -130,57 +142,51 @@ function Dashboard({
     return last7Days;
   }, [citizens, reports, isOfficer, user]);
 
-  const fieldOfficers = users.filter(u => u.role === 'field_officer').length;
-  const supervisors = users.filter(u => u.role === 'supervisor').length;
+  const fieldOfficers = (users || []).filter(u => u.role === 'field_officer').length;
+  const supervisors = (users || []).filter(u => u.role === 'supervisor').length;
 
   // Get today's attendance for officer
   const todayAttendance = useMemo(() => {
     if (!isOfficer || !user) return null;
-    return attendance.find(a => a.employeeId === user.employeeId && a.date === getToday());
+    return (attendance || []).find(a => a.employeeId === user.employeeId && a.date === getToday());
   }, [attendance, user, isOfficer]);
 
-  // ========== SUPERVISOR: Team citizen counts ==========
+  // Team citizen counts
   const teamCitizenCount = useMemo(() => {
     if (!isSupervisor || !user || !teamMembers) return 0;
-    const teamIds = teamMembers.map(m => m.employeeId);
-    return citizens.filter(c => teamIds.includes(c.registeredBy)).length;
+    const teamIds = (teamMembers || []).map(m => m.employeeId);
+    return (citizens || []).filter(c => teamIds.includes(c.registeredBy)).length;
   }, [citizens, teamMembers, isSupervisor, user]);
 
-  // ========== SUPERVISOR: Team reports count ==========
+  // Team reports count
   const teamReportsCount = useMemo(() => {
     if (!isSupervisor || !user || !teamMembers) return 0;
-    const teamIds = teamMembers.map(m => m.employeeId);
-    return reports.filter(r => teamIds.includes(r.employeeId)).length;
+    const teamIds = (teamMembers || []).map(m => m.employeeId);
+    return (reports || []).filter(r => teamIds.includes(r.employeeId)).length;
   }, [reports, teamMembers, isSupervisor, user]);
 
-  // ========== OFFICER: Officer's actual citizen count ==========
-  const officerCitizenCount = useMemo(() => {
-    if (!isOfficer || !user) return 0;
-    return citizens.filter(c => c.registeredBy === user.employeeId).length;
-  }, [citizens, isOfficer, user]);
-
-  // ========== OFFICER: Officer's report count ==========
+  // Officer's report count
   const officerReportsCount = useMemo(() => {
     if (!isOfficer || !user) return 0;
-    return reports.filter(r => r.employeeId === user.employeeId).length;
+    return (reports || []).filter(r => r.employeeId === user.employeeId).length;
   }, [reports, isOfficer, user]);
 
-  // ========== OFFICER: Today's registrations ==========
+  // Today's registrations
   const officerTodayRegistrations = useMemo(() => {
     if (!isOfficer || !user) return 0;
     const today = getToday();
-    return citizens.filter(c => c.registeredBy === user.employeeId && c.registrationDate?.slice(0, 10) === today).length;
+    return (citizens || []).filter(c => c.registeredBy === user.employeeId && c.registrationDate?.slice(0, 10) === today).length;
   }, [citizens, isOfficer, user]);
 
-  // ========== OFFICER: Total registrations ==========
+  // Total registrations
   const officerTotalRegistrations = useMemo(() => {
     if (!isOfficer || !user) return 0;
-    return citizens.filter(c => c.registeredBy === user.employeeId).length;
+    return (citizens || []).filter(c => c.registeredBy === user.employeeId).length;
   }, [citizens, isOfficer, user]);
 
   const CHART_COLORS = ['#1e3a5f', '#2d6a4f', '#7c3aed', '#d97706', '#0b7e4b', '#2563eb'];
 
-  // Custom tooltip for charts - memoized to prevent recreation
+  // Custom tooltip
   const CustomTooltip = useCallback(({ active, payload, label }) => {
     if (active && payload && payload.length) {
       return (
@@ -204,7 +210,6 @@ function Dashboard({
     return null;
   }, []);
 
-  // Pre-compute chart data to prevent recreation
   const registrationChartData = useMemo(() => {
     return chartData.data.map(d => ({ name: d.date, value: d.value }));
   }, [chartData.data]);
@@ -219,7 +224,7 @@ function Dashboard({
     return officerPerformanceData.map(d => ({ date: d.date, value: d.efficiency }));
   }, [officerPerformanceData, isOfficer, user]);
 
-  // Memoized chart render function
+  // Chart render function
   const renderChart = useCallback((type, data, colors = CHART_COLORS, xAxisKey = 'name') => {
     if (!data || data.length === 0) {
       return (
@@ -294,7 +299,7 @@ function Dashboard({
     }
   }, [CustomTooltip]);
 
-  // Chart wrapper component
+  // Chart wrapper
   const ChartWrapper = useCallback(({ children, title, subtitle }) => (
     <div style={{
       background: 'white',
@@ -312,7 +317,7 @@ function Dashboard({
     </div>
   ), []);
 
-  // Stats Card component
+  // Stats Card
   const StatsCard = useCallback(({ label, value, color, icon }) => (
     <div style={{
       background: `linear-gradient(135deg, ${color}, ${color}dd)`,
@@ -338,6 +343,67 @@ function Dashboard({
 
   return (
     <div className="dashboard-view" style={{ padding: '0 4px' }}>
+      
+      {/* ===== VERIFICATION POPUP FOR FIELD OFFICER ===== */}
+      {isOfficer && showPopup && (
+        <VerificationPopup
+          officerId={user?.id}
+          officerName={user?.name}
+          onAnswer={handleAnswer}
+          onClose={handleClose}
+        />
+      )}
+
+      {/* ===== OFFICER VERIFICATION SCORE BADGE ===== */}
+      {isOfficer && (
+        <div style={{
+          display: 'flex',
+          justifyContent: 'flex-end',
+          marginBottom: '12px',
+          gap: '12px',
+          flexWrap: 'wrap'
+        }}>
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+            padding: '6px 14px',
+            background: (verificationScore || 0) >= 80 ? '#d1fae5' : (verificationScore || 0) >= 60 ? '#fef3c7' : '#fee2e2',
+            borderRadius: '20px',
+            border: `1px solid ${(verificationScore || 0) >= 80 ? '#0b7e4b' : (verificationScore || 0) >= 60 ? '#f59e0b' : '#dc2626'}`
+          }}>
+            <span style={{ fontSize: '14px' }}>🎯</span>
+            <span style={{ fontSize: '13px', fontWeight: '500', color: '#1a202c' }}>
+              Verification Score: <strong style={{
+                color: (verificationScore || 0) >= 80 ? '#0b7e4b' : (verificationScore || 0) >= 60 ? '#f59e0b' : '#dc2626'
+              }}>{verificationScore || 0}%</strong>
+            </span>
+            <span style={{
+              fontSize: '11px',
+              color: (verificationScore || 0) >= 80 ? '#0b7e4b' : (verificationScore || 0) >= 60 ? '#f59e0b' : '#dc2626',
+              fontWeight: '500'
+            }}>
+              {(verificationScore || 0) >= 80 ? '🟢 Verified' : (verificationScore || 0) >= 60 ? '🟡 Attention' : '🔴 Action Required'}
+            </span>
+          </div>
+          {lastVerified && (
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              padding: '6px 14px',
+              background: '#f8fafc',
+              borderRadius: '20px',
+              border: '1px solid #e5e7eb'
+            }}>
+              <span style={{ fontSize: '12px', color: '#64748b' }}>
+                Last Verified: {new Date(lastVerified).toLocaleTimeString()}
+              </span>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* ==================== MANAGER VIEW ==================== */}
       {isManager && (
         <>
@@ -379,16 +445,16 @@ function Dashboard({
 
           {/* Stats Grid */}
           <div style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '14px', marginBottom: '24px'}}>
-            <StatsCard label="Total Reports" value={totalReports} color="#1e3a5f" icon="📋" />
-            <StatsCard label="Citizens" value={totalRegistrations} color="#2d6a4f" icon="🆔" />
+            <StatsCard label="Total Reports" value={totalReports || 0} color="#1e3a5f" icon="📋" />
+            <StatsCard label="Citizens" value={totalRegistrations || 0} color="#2d6a4f" icon="🆔" />
             <StatsCard label="Supervisors" value={supervisors} color="#7c3aed" icon="👤" />
             <StatsCard label="Field Officers" value={fieldOfficers} color="#d97706" icon="👥" />
-            <StatsCard label="Attendance Rate" value={`${attendanceSummary.rate}%`} color="#0b7e4b" icon="⚡" />
-            <StatsCard label="Pending Leaves" value={pendingLeaves} color="#dc2626" icon="📅" />
-            <StatsCard label="Pending Permissions" value={pendingPermissions} color="#2563eb" icon="📋" />
+            <StatsCard label="Attendance Rate" value={`${attendanceSummary?.rate || 0}%`} color="#0b7e4b" icon="⚡" />
+            <StatsCard label="Pending Leaves" value={pendingLeaves || 0} color="#dc2626" icon="📅" />
+            <StatsCard label="Pending Permissions" value={pendingPermissions || 0} color="#2563eb" icon="📋" />
           </div>
 
-          {/* Charts Row - Real Data Only */}
+          {/* Charts Row */}
           <div style={{
             display: 'grid',
             gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))',
@@ -446,7 +512,7 @@ function Dashboard({
           }}>
             <h3 style={{fontSize: '15px', fontWeight: '600', marginBottom: '16px', color: '#1a202c'}}>🏆 Top Performing Officers</h3>
             <div style={{display: 'flex', flexDirection: 'column', gap: '6px'}}>
-              {topPerformers.length === 0 ? (
+              {(!topPerformers || topPerformers.length === 0) ? (
                 <div style={{textAlign: 'center', padding: '20px', color: '#64748b', fontSize: '14px'}}>No performance data available</div>
               ) : (
                 topPerformers.map((emp, i) => (
@@ -469,9 +535,9 @@ function Dashboard({
                     </span>
                     <span style={{fontWeight: '600', flex: 1}}>{emp.employeeName}</span>
                     <span style={{color: '#64748b'}}>{emp.region}</span>
-                    <span style={{color: '#2563eb', fontWeight: '500'}}>🆔 {emp.totalRegistrations}</span>
-                    <span style={{color: '#0b7e4b', fontWeight: '600'}}>{emp.avgEfficiency}%</span>
-                    <span style={{color: '#7c3aed'}}>📊 {Math.round(emp.attendanceRate)}%</span>
+                    <span style={{color: '#2563eb', fontWeight: '500'}}>🆔 {emp.totalRegistrations || 0}</span>
+                    <span style={{color: '#0b7e4b', fontWeight: '600'}}>{emp.avgEfficiency || 0}%</span>
+                    <span style={{color: '#7c3aed'}}>📊 {Math.round(emp.attendanceRate || 0)}%</span>
                   </div>
                 ))
               )}
@@ -521,13 +587,13 @@ function Dashboard({
 
           {/* Stats Grid */}
           <div style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '14px', marginBottom: '24px'}}>
-            <StatsCard label="Team Members" value={teamMembers.length} color="#7c3aed" icon="👥" />
+            <StatsCard label="Team Members" value={teamMembers?.length || 0} color="#7c3aed" icon="👥" />
             <StatsCard label="Team Reports" value={teamReportsCount} color="#2563eb" icon="📋" />
             <StatsCard label="Team Registrations" value={teamCitizenCount} color="#0b7e4b" icon="🆔" />
-            <StatsCard label="Pending Leaves" value={pendingLeaves} color="#dc2626" icon="📅" />
+            <StatsCard label="Pending Leaves" value={pendingLeaves || 0} color="#dc2626" icon="📅" />
           </div>
 
-          {/* Charts - Real Data Only */}
+          {/* Charts */}
           <div style={{
             display: 'grid',
             gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))',
@@ -572,7 +638,7 @@ function Dashboard({
             border: '1px solid #e5e7eb'
           }}>
             <h3 style={{fontSize: '15px', fontWeight: '600', marginBottom: '16px', color: '#1a202c'}}>🏆 Team Performance</h3>
-            {teamPerformance.length === 0 ? (
+            {(!teamPerformance || teamPerformance.length === 0) ? (
               <div style={{textAlign: 'center', padding: '20px', color: '#64748b', fontSize: '14px'}}>No team performance data yet</div>
             ) : (
               <div style={{display: 'flex', flexDirection: 'column', gap: '6px'}}>
@@ -596,9 +662,9 @@ function Dashboard({
                     </span>
                     <span style={{fontWeight: '600', flex: 1}}>{emp.employeeName}</span>
                     <span style={{color: '#64748b'}}>{emp.region}</span>
-                    <span style={{color: '#2563eb', fontWeight: '500'}}>🆔 {emp.totalRegistrations}</span>
-                    <span style={{color: '#0b7e4b', fontWeight: '600'}}>{emp.avgEfficiency}%</span>
-                    <span style={{color: '#7c3aed'}}>📊 {Math.round(emp.attendanceRate)}%</span>
+                    <span style={{color: '#2563eb', fontWeight: '500'}}>🆔 {emp.totalRegistrations || 0}</span>
+                    <span style={{color: '#0b7e4b', fontWeight: '600'}}>{emp.avgEfficiency || 0}%</span>
+                    <span style={{color: '#7c3aed'}}>📊 {Math.round(emp.attendanceRate || 0)}%</span>
                   </div>
                 ))}
               </div>
@@ -650,18 +716,17 @@ function Dashboard({
           <div style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '14px', marginBottom: '24px'}}>
             <StatsCard label="My Reports" value={officerReportsCount} color="#2563eb" icon="📋" />
             <StatsCard label="Citizens Registered" value={officerTotalRegistrations} color="#0b7e4b" icon="🆔" />
-            <StatsCard label="Pending Leaves" value={pendingLeaves} color="#dc2626" icon="📅" />
-            <StatsCard label="Pending Permissions" value={pendingPermissions} color="#d97706" icon="📋" />
+            <StatsCard label="Pending Leaves" value={pendingLeaves || 0} color="#dc2626" icon="📅" />
+            <StatsCard label="Pending Permissions" value={pendingPermissions || 0} color="#d97706" icon="📋" />
           </div>
 
           {/* Quick Stats */}
           <div style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '10px', marginBottom: '24px'}}>
             {[
-              { label: "Today's Reports", value: reports.filter(r => r.employeeId === user.employeeId && r.reportDate === getToday()).length },
+              { label: "Today's Reports", value: (reports || []).filter(r => r.employeeId === user.employeeId && r.reportDate === getToday()).length },
               { label: "Today's Registrations", value: officerTodayRegistrations },
               { label: 'Efficiency', value: `${Math.round((officerTotalRegistrations / (officerReportsCount || 1) / 100) * 100)}%` },
-              { label: 'Attendance', value: todayAttendance?.status || 'Not Marked' },
-              { label: 'Trust Score', value: `${screenTime.find(s => s.employeeId === user.employeeId && s.date === getToday())?.trustScore || 0}%` }
+              { label: 'Attendance', value: todayAttendance?.status || 'Not Marked' }
             ].map((stat, index) => (
               <div 
                 key={index}

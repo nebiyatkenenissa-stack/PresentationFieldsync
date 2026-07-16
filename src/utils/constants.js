@@ -1,3 +1,5 @@
+// src/utils/constants.js
+
 export const SAMPLE_USERS = [
   { id: 'm1', employeeId: 'MGR001', name: 'አበበ በቀለ', email: 'abebe@fieldsync.com', password: 'manager123', role: 'manager', region: 'All', status: 'active', phone: '+251-911-000001', shift: 'Day', department: 'Administration' },
   { id: 's1', employeeId: 'SUP001', name: 'ብርሃን ገብረእግዚአብሔር', email: 'birhan@fieldsync.com', password: 'super123', role: 'supervisor', region: 'North', managerId: 'm1', status: 'active', phone: '+251-911-000101', shift: 'Day' },
@@ -16,3 +18,32 @@ export const SAMPLE_USERS = [
   { id: 'o11', employeeId: 'FO011', name: 'ዳዊት ገብረእግዚአብሔር', email: 'dawit@fieldsync.com', password: 'officer123', role: 'field_officer', region: 'South', supervisorId: 's2', assignedSites: ['Site R', 'Site S'], status: 'active', phone: '+251-911-000211', shift: 'Day' },
   { id: 'o12', employeeId: 'FO012', name: 'ረሃቤል ተሰማ', email: 'rehabel@fieldsync.com', password: 'officer123', role: 'field_officer', region: 'North', supervisorId: 's1', assignedSites: ['Site T', 'Site U'], status: 'active', phone: '+251-911-000212', shift: 'Day' }
 ];
+
+// Login credentials summary
+export const LOGIN_INFO = {
+  manager: { email: 'abebe@fieldsync.com', password: 'manager123', name: 'አበበ በቀለ' },
+  supervisor: { email: 'birhan@fieldsync.com', password: 'super123', name: 'ብርሃን ገብረእግዚአብሔር' },
+  officer: { email: 'meseret@fieldsync.com', password: 'officer123', name: 'መሠረት አለሙ', pin: '1234' }
+};
+
+export const REGIONS = ['North', 'South', 'East', 'West', 'Central', 'All'];
+
+export const ROLES = ['manager', 'supervisor', 'field_officer'];
+
+export const SHIFTS = ['Day', 'Night', 'Flexible'];
+
+export const ATTENDANCE_STATUSES = ['present', 'late', 'half_day', 'absent', 'pending'];
+
+export const REPORT_STATUSES = ['Active', 'Inactive', 'Under Maintenance'];
+
+export const TASK_PRIORITIES = ['low', 'medium', 'high'];
+
+export const TASK_STATUSES = ['pending', 'in_progress', 'completed'];
+
+export const LEAVE_TYPES = ['annual', 'sick', 'personal', 'other'];
+
+export const LEAVE_STATUSES = ['pending', 'approved', 'rejected'];
+
+export const PERMISSION_TYPES = ['Work Permission', 'Personal Permission', 'Medical Permission', 'Other'];
+
+export const ALERT_PRIORITIES = ['low', 'medium', 'high', 'critical'];

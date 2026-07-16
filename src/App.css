@@ -2846,3 +2846,52 @@ tr:hover {
 .log-entry:last-child {
   border-bottom: none;
 }
+/* Add to your CSS file */
+
+.kiosk-start-btn {
+  padding: 8px 16px;
+  background: #3b82f6;
+  color: white;
+  border: none;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.kiosk-start-btn:hover {
+  background: #2563eb;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
+}
+
+.kiosk-status-badge {
+  padding: 8px 16px;
+  background: #d1fae5;
+  color: #065f37;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 2px solid #0b7e4b;
+}
+
+/* Add to existing styles */
+.kiosk-active-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  pointer-events: none;
+  z-index: 9998;
+  border: 3px solid #3b82f6;
+  border-style: dashed;
+  opacity: 0.3;
+}

@@ -1,15 +1,15 @@
 // components/reports/ReportForm.js
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { syncQueue, checkRealInternet } from '../../services/database';
 import { uid } from '../../utils/helpers';
 
-function ReportForm({ form, setForm, handleSubmit, user, isOfficer, isSupervisor, addNotification }) {
+function ReportForm({ form, setForm, handleSubmit, user, isOfficer, isSupervisor, addNotification, users }) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isOnline, setIsOnline] = useState(navigator.onLine);
 
   // Check online status
-  React.useEffect(() => {
+  useEffect(() => {
     const checkStatus = async () => {
       const online = await checkRealInternet();
       setIsOnline(online);

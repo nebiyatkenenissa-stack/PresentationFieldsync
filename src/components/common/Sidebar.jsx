@@ -1,6 +1,14 @@
+// components/common/Sidebar.jsx
+
 import React from 'react';
 
-function Sidebar({ activeTab, setActiveTab, user, pendingSync, onLogout }) {
+function Sidebar({ 
+  activeTab, 
+  setActiveTab, 
+  user, 
+  pendingSync, 
+  onLogout
+}) {
   const isManager = user?.role === 'manager';
   const isSupervisor = user?.role === 'supervisor';
   const isOfficer = user?.role === 'field_officer';
@@ -9,18 +17,19 @@ function Sidebar({ activeTab, setActiveTab, user, pendingSync, onLogout }) {
   const getNavItems = () => {
     const items = [{ id: 'dashboard', label: '📊 Dashboard' }];
 
+    // Field Officer
     if (isOfficer) {
       items.push(
         { id: 'register', label: '🆔 Register' },
         { id: 'reports', label: '📋 Reports' },
         { id: 'report_new', label: '📝 New Report' },
-        // ❌ Attendance REMOVED from Officer sidebar
-        // ❌ Tasks REMOVED from Officer sidebar
         { id: 'leaves', label: '📅 Leaves' },
         { id: 'permissions', label: '📋 Permissions' }
       );
+      return items;
     }
 
+    // Supervisor
     if (isSupervisor) {
       items.push(
         { id: 'attendance', label: '📋 Attendance' },
@@ -32,43 +41,26 @@ function Sidebar({ activeTab, setActiveTab, user, pendingSync, onLogout }) {
         { id: 'reports', label: '📋 Reports' },
         { id: 'screentime', label: '📱 Screen Time' }
       );
+      return items;
     }
 
+    // Manager
     if (isManager) {
       items.push(
-        // User Management
         { id: 'users', label: '👤 Users' },
-        
-        // Attendance Management - Manager reviews all attendance
         { id: 'manager_attendance', label: '📋 Attendance Review' },
-        
-        // Reports Management
         { id: 'all_reports', label: '📋 All Reports' },
-        
-        // Task Management
         { id: 'tasks', label: '📋 Tasks' },
-        
-        // Leave Management
         { id: 'leaves', label: '📅 Leaves' },
-        
-        // Permission Management
         { id: 'permissions', label: '📋 Permissions' },
-        
-        // Screen Time Management - Manager monitors all officers
         { id: 'screentime', label: '📱 Screen Time' },
-        
-        // Citizens Database
         { id: 'citizens', label: '🆔 Citizens' },
-        
-        // Analytics
         { id: 'analytics', label: '📈 Analytics' },
-        
-        // Audit Log
         { id: 'audit', label: '📜 Audit' },
-        
-        // Alerts
-        { id: 'alerts', label: '🔔 Alerts' }
+        { id: 'alerts', label: '🔔 Alerts' },
+        { id: 'verification', label: '🔍 Verification' }
       );
+      return items;
     }
 
     return items;
@@ -82,6 +74,7 @@ function Sidebar({ activeTab, setActiveTab, user, pendingSync, onLogout }) {
         <div className="brand-icon-small">📡</div>
         <span>FieldSync</span>
       </div>
+      
       <nav className="sidebar-nav">
         {navItems.map((item) => (
           <button

@@ -5,15 +5,18 @@ import { uid } from '../../utils/helpers';
 import { db } from '../../services/database';
 import { syncQueue, checkRealInternet } from '../../services/database';
 
-function TaskManagement({ 
-  filteredTasks, 
-  tasks, 
-  users, 
-  user, 
-  isManager, 
-  isSupervisor, 
-  isOfficer, 
-  teamMembers, 
+// Set your API base URL (adjust to your backend)
+const API_BASE_URL = 'http://localhost:5000/api';
+
+function TaskManagement({
+  filteredTasks,
+  tasks,
+  users,
+  user,
+  isManager,
+  isSupervisor,
+  isOfficer,
+  teamMembers,
   addNotification,
   setTasks
 }) {
@@ -55,27 +58,53 @@ function TaskManagement({
     };
   }, []);
 
+  // ===== HELPERS TO CALL SERVER =====
+  const sendTaskToServer = async (task) => {
+    const response = await fetch(`${API_BASE_URL}/tasks`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(task)
+    });
+    if (!response.ok) {
+      throw new Error(`Server error: ${response.status}`);
+    }
+    return await response.json();
+  };
+
+  const sendTaskUpdateToServer = async (taskId, updateData) => {
+    const response = await fetch(`${API_BASE_URL}/tasks/${taskId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(updateData)
+    });
+    if (!response.ok) {
+      throw new Error(`Server error: ${response.status}`);
+    }
+    return await response.json();
+  };
+
+  // ===== FILTER LOGIC =====
   const getFilteredTasks = () => {
     let filtered = tasks;
-    
+
     if (isOfficer && user) {
       filtered = tasks.filter(t => t.employeeId === user.employeeId);
     } else if (isSupervisor && user) {
       const teamIds = teamMembers.map(m => m.employeeId);
       filtered = tasks.filter(t => teamIds.includes(t.employeeId) || t.employeeId === user.employeeId);
     }
-    
+
     if (taskFilter !== 'all') {
       filtered = filtered.filter(t => t.status === taskFilter);
     }
-    
+
     return filtered;
   };
 
-  // ===== CREATE TASK (OFFLINE SUPPORT) =====
+  // ===== CREATE TASK (OFFLINE + ONLINE) =====
   const handleCreateTask = async (e) => {
     e.preventDefault();
-    
+
     if (!newTask.employeeId || !newTask.title || !newTask.deadline) {
       alert('Please fill all required fields');
       return;
@@ -101,13 +130,41 @@ function TaskManagement({
     };
 
     try {
+      // 1. Save to IndexedDB
       await db.tasks.add(task);
-      
+
       if (setTasks) {
         setTasks(prev => [task, ...prev]);
       }
 
-      if (!online) {
+      // 2. If online, try to sync to server
+      if (online) {
+        try {
+          await sendTaskToServer(task);
+          // Optionally mark as synced (already true)
+        } catch (serverError) {
+          console.error('Server sync failed:', serverError);
+          // Mark as unsynced and queue for retry
+          await db.tasks.update(task.id, { synced: false });
+          syncQueue.add({
+            type: 'task',
+            id: task.id,
+            data: task
+          });
+          setPendingCount(syncQueue.count());
+          alert('⚠️ Task saved locally but server sync failed. Will retry later.');
+          if (addNotification) {
+            await addNotification(
+              user.id,
+              '⚠️ Sync Failed',
+              `Task "${task.title}" saved locally but could not reach server.`,
+              'warning'
+            );
+          }
+          return; // exit early to avoid double alert
+        }
+      } else {
+        // Offline: queue for later sync
         syncQueue.add({
           type: 'task',
           id: task.id,
@@ -115,7 +172,6 @@ function TaskManagement({
         });
         setPendingCount(syncQueue.count());
         alert('📋 Task saved OFFLINE! Will sync when online.');
-        
         if (addNotification) {
           await addNotification(
             user.id,
@@ -124,18 +180,20 @@ function TaskManagement({
             'warning'
           );
         }
-      } else {
-        const assignedUser = users.find(u => u.employeeId === task.employeeId);
-        if (assignedUser && addNotification) {
-          await addNotification(
-            assignedUser.id,
-            '📋 New Task Assigned',
-            `Task "${task.title}" has been assigned to you by ${user.name}`,
-            'info'
-          );
-        }
-        alert('✅ Task assigned successfully!');
+        return;
       }
+
+      // 3. Online + server success → send notifications
+      const assignedUser = users.find(u => u.employeeId === task.employeeId);
+      if (assignedUser && addNotification) {
+        await addNotification(
+          assignedUser.id,
+          '📋 New Task Assigned',
+          `Task "${task.title}" has been assigned to you by ${user.name}`,
+          'info'
+        );
+      }
+      alert('✅ Task assigned successfully!');
 
       setShowModal(false);
       setNewTask({ employeeId: '', title: '', description: '', deadline: '', priority: 'medium' });
@@ -145,7 +203,7 @@ function TaskManagement({
     }
   };
 
-  // ===== UPDATE TASK STATUS (OFFLINE SUPPORT) =====
+  // ===== UPDATE TASK STATUS (OFFLINE + ONLINE) =====
   const updateTaskStatus = async (taskId, newStatus) => {
     if (isUpdating) return;
     setIsUpdating(true);
@@ -187,23 +245,50 @@ function TaskManagement({
         synced: online ? true : false
       };
 
+      // 1. Update IndexedDB
       await db.tasks.update(taskId, updatedTask);
-      
+
       if (setTasks) {
-        setTasks(prev => prev.map(t => 
+        setTasks(prev => prev.map(t =>
           t.id === taskId ? updatedTask : t
         ));
       }
 
-      if (!online) {
+      // 2. If online, try to sync to server
+      if (online) {
+        try {
+          const updatePayload = { status: newStatus };
+          await sendTaskUpdateToServer(taskId, updatePayload);
+        } catch (serverError) {
+          console.error('Server update failed:', serverError);
+          await db.tasks.update(taskId, { synced: false });
+          syncQueue.add({
+            type: 'task_update',
+            id: taskId,
+            data: { taskId, status: newStatus }
+          });
+          setPendingCount(syncQueue.count());
+          alert('⚠️ Task update saved locally but server sync failed. Will retry later.');
+          if (addNotification) {
+            await addNotification(
+              user.id,
+              '⚠️ Sync Failed',
+              `Task "${task.title}" status updated locally but could not reach server.`,
+              'warning'
+            );
+          }
+          setIsUpdating(false);
+          return;
+        }
+      } else {
+        // Offline: queue for later
         syncQueue.add({
           type: 'task_update',
           id: taskId,
           data: { taskId, status: newStatus }
         });
         setPendingCount(syncQueue.count());
-        alert(`📋 Task status updated OFFLINE! Will sync when online.`);
-        
+        alert('📋 Task status updated OFFLINE! Will sync when online.');
         if (addNotification) {
           await addNotification(
             user.id,
@@ -212,12 +297,11 @@ function TaskManagement({
             'warning'
           );
         }
-        
         setIsUpdating(false);
         return;
       }
 
-      // Online - send notifications
+      // 3. Online + server success → send notifications
       const assignedUser = users.find(u => u.employeeId === task.employeeId);
       if (assignedUser && addNotification && assignedUser.id !== user.id) {
         await addNotification(
@@ -247,6 +331,7 @@ function TaskManagement({
     }
   };
 
+  // ===== STYLING HELPERS =====
   const getStatusBadgeStyle = (status) => {
     const styles = {
       pending: { background: '#fef3c7', color: '#92400e' },
@@ -274,9 +359,10 @@ function TaskManagement({
     completed: displayTasks.filter(t => t.status === 'completed').length
   };
 
+  // ===== RENDER =====
   return (
     <div className="tasks-view" style={{ padding: '20px' }}>
-      {/* ===== STATUS BAR ===== */}
+      {/* Status bar */}
       <div style={{
         display: 'flex',
         justifyContent: 'space-between',
@@ -305,7 +391,7 @@ function TaskManagement({
         )}
       </div>
 
-      {/* ===== OFFLINE BANNER ===== */}
+      {/* Offline banner */}
       {!isOnline && (
         <div style={{
           background: '#fef3c7',
@@ -339,6 +425,7 @@ function TaskManagement({
         boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
         overflow: 'hidden'
       }}>
+        {/* Header */}
         <div className="form-header" style={{
           padding: '20px 24px',
           borderBottom: '1px solid #e5e7eb',
@@ -372,28 +459,27 @@ function TaskManagement({
           </div>
         </div>
 
+        {/* Controls */}
         <div className="tasks-management" style={{ padding: '20px 24px' }}>
-          <div className="tasks-header" style={{ 
-            display: 'flex', 
-            justifyContent: 'space-between', 
+          <div className="tasks-header" style={{
+            display: 'flex',
+            justifyContent: 'space-between',
             alignItems: 'center',
             flexWrap: 'wrap',
             gap: '12px',
             marginBottom: '16px'
           }}>
             <div className="tasks-filters">
-              <select 
-                value={taskFilter} 
-                onChange={e => setTaskFilter(e.target.value)} 
+              <select
+                value={taskFilter}
+                onChange={e => setTaskFilter(e.target.value)}
                 className="filter-select"
                 style={{
                   padding: '6px 12px',
                   border: '1px solid #d1d5db',
                   borderRadius: '6px',
                   fontSize: '13px',
-                  background: 'white',
-                  opacity: 1,
-                  visibility: 'visible'
+                  background: 'white'
                 }}
               >
                 <option value="all">All Tasks ({taskStats.total})</option>
@@ -404,12 +490,10 @@ function TaskManagement({
             </div>
             <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
               {(isManager || isSupervisor) && (
-                <button 
-                  className="btn-primary" 
+                <button
+                  className="btn-primary"
                   onClick={() => setShowModal(true)}
                   style={{
-                    opacity: 1,
-                    visibility: 'visible',
                     display: 'inline-flex',
                     alignItems: 'center',
                     gap: '8px',
@@ -446,6 +530,7 @@ function TaskManagement({
             </div>
           </div>
 
+          {/* Table */}
           <div className="table-wrapper" style={{ overflowX: 'auto' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
               <thead>
@@ -531,15 +616,12 @@ function TaskManagement({
                       </td>
                       <td style={{ padding: '12px 16px' }}>
                         {canUpdate ? (
-                          <select 
-                            value={t.status} 
+                          <select
+                            value={t.status}
                             onChange={(e) => updateTaskStatus(t.id, e.target.value)}
                             disabled={isUpdating}
                             className="task-status-select"
                             style={{
-                              opacity: 1,
-                              visibility: 'visible',
-                              display: 'inline-block',
                               padding: '4px 8px',
                               border: '1px solid #d1d5db',
                               borderRadius: '4px',
@@ -566,7 +648,6 @@ function TaskManagement({
             </table>
           </div>
 
-          {/* Footer with pending count */}
           {pendingCount > 0 && (
             <div style={{
               padding: '12px 16px',
@@ -602,7 +683,7 @@ function TaskManagement({
         </div>
       </div>
 
-      {/* ===== MODAL ===== */}
+      {/* Modal */}
       {showModal && (
         <div className="modal-overlay" onClick={() => setShowModal(false)}>
           <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{
@@ -614,27 +695,24 @@ function TaskManagement({
             maxHeight: '90vh',
             overflowY: 'auto'
           }}>
-            <div className="modal-header" style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px'}}>
-              <h3 style={{fontSize: '20px', fontWeight: '600'}}>
+            <div className="modal-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+              <h3 style={{ fontSize: '20px', fontWeight: '600' }}>
                 Assign New Task
-                {!isOnline && <span style={{fontSize: '12px', color: '#f59e0b', marginLeft: '8px'}}>📡 Offline</span>}
+                {!isOnline && <span style={{ fontSize: '12px', color: '#f59e0b', marginLeft: '8px' }}>📡 Offline</span>}
               </h3>
-              <button 
-                className="modal-close" 
+              <button
+                className="modal-close"
                 onClick={() => setShowModal(false)}
                 style={{
                   background: 'transparent',
                   border: 'none',
                   fontSize: '24px',
                   cursor: 'pointer',
-                  color: '#64748b',
-                  opacity: 1,
-                  visibility: 'visible'
+                  color: '#64748b'
                 }}
               >✕</button>
             </div>
 
-            {/* Offline Warning in Modal */}
             {!isOnline && (
               <div style={{
                 padding: '12px 16px',
@@ -652,21 +730,18 @@ function TaskManagement({
               </div>
             )}
 
-            <form onSubmit={handleCreateTask} className="modal-form" style={{display: 'flex', flexDirection: 'column', gap: '16px'}}>
-              <div className="form-group" style={{display: 'flex', flexDirection: 'column', gap: '4px'}}>
-                <label style={{fontSize: '13px', fontWeight: '500', color: '#374151'}}>Assign To *</label>
-                <select 
-                  value={newTask.employeeId} 
-                  onChange={e => setNewTask({...newTask, employeeId: e.target.value})}
+            <form onSubmit={handleCreateTask} className="modal-form" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              <div className="form-group" style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                <label style={{ fontSize: '13px', fontWeight: '500', color: '#374151' }}>Assign To *</label>
+                <select
+                  value={newTask.employeeId}
+                  onChange={e => setNewTask({ ...newTask, employeeId: e.target.value })}
                   required
                   style={{
                     padding: '8px 12px',
                     border: '1px solid #d1d5db',
                     borderRadius: '6px',
                     fontSize: '14px',
-                    opacity: 1,
-                    visibility: 'visible',
-                    display: 'block',
                     width: '100%',
                     background: 'white'
                   }}
@@ -677,80 +752,68 @@ function TaskManagement({
                   ))}
                 </select>
               </div>
-              <div className="form-group" style={{display: 'flex', flexDirection: 'column', gap: '4px'}}>
-                <label style={{fontSize: '13px', fontWeight: '500', color: '#374151'}}>Task Title *</label>
-                <input 
-                  type="text" 
-                  value={newTask.title} 
-                  onChange={e => setNewTask({...newTask, title: e.target.value})}
-                  placeholder="Enter task title" 
-                  required 
+              <div className="form-group" style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                <label style={{ fontSize: '13px', fontWeight: '500', color: '#374151' }}>Task Title *</label>
+                <input
+                  type="text"
+                  value={newTask.title}
+                  onChange={e => setNewTask({ ...newTask, title: e.target.value })}
+                  placeholder="Enter task title"
+                  required
                   style={{
                     padding: '8px 12px',
                     border: '1px solid #d1d5db',
                     borderRadius: '6px',
                     fontSize: '14px',
-                    opacity: 1,
-                    visibility: 'visible',
-                    display: 'block',
                     width: '100%'
                   }}
                 />
               </div>
-              <div className="form-group" style={{display: 'flex', flexDirection: 'column', gap: '4px'}}>
-                <label style={{fontSize: '13px', fontWeight: '500', color: '#374151'}}>Description</label>
-                <textarea 
-                  value={newTask.description} 
-                  onChange={e => setNewTask({...newTask, description: e.target.value})}
-                  placeholder="Enter task description" 
+              <div className="form-group" style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                <label style={{ fontSize: '13px', fontWeight: '500', color: '#374151' }}>Description</label>
+                <textarea
+                  value={newTask.description}
+                  onChange={e => setNewTask({ ...newTask, description: e.target.value })}
+                  placeholder="Enter task description"
                   rows="3"
                   style={{
                     padding: '8px 12px',
                     border: '1px solid #d1d5db',
                     borderRadius: '6px',
                     fontSize: '14px',
-                    opacity: 1,
-                    visibility: 'visible',
-                    display: 'block',
                     width: '100%',
                     resize: 'vertical',
                     minHeight: '60px'
                   }}
                 />
               </div>
-              <div className="form-row" style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px'}}>
-                <div className="form-group" style={{display: 'flex', flexDirection: 'column', gap: '4px'}}>
-                  <label style={{fontSize: '13px', fontWeight: '500', color: '#374151'}}>Deadline *</label>
-                  <input 
-                    type="date" 
-                    value={newTask.deadline} 
-                    onChange={e => setNewTask({...newTask, deadline: e.target.value})}
+              <div className="form-row" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+                <div className="form-group" style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                  <label style={{ fontSize: '13px', fontWeight: '500', color: '#374151' }}>Deadline *</label>
+                  <input
+                    type="date"
+                    value={newTask.deadline}
+                    onChange={e => setNewTask({ ...newTask, deadline: e.target.value })}
                     required
                     style={{
                       padding: '8px 12px',
                       border: '1px solid #d1d5db',
                       borderRadius: '6px',
                       fontSize: '14px',
-                      opacity: 1,
-                      visibility: 'visible',
-                      display: 'block',
                       width: '100%'
                     }}
                   />
                 </div>
-                <div className="form-group" style={{display: 'flex', flexDirection: 'column', gap: '4px'}}>
-                  <label style={{fontSize: '13px', fontWeight: '500', color: '#374151'}}>Priority</label>
-                  <select 
-                    value={newTask.priority} 
-                    onChange={e => setNewTask({...newTask, priority: e.target.value})}
+                <div className="form-group" style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                  <label style={{ fontSize: '13px', fontWeight: '500', color: '#374151' }}>Priority</label>
+                  <select
+                    value={newTask.priority}
+                    onChange={e => setNewTask({ ...newTask, priority: e.target.value })}
                     style={{
                       padding: '8px 12px',
                       border: '1px solid #d1d5db',
                       borderRadius: '6px',
                       fontSize: '14px',
-                      opacity: 1,
-                      visibility: 'visible',
-                      display: 'block',
                       width: '100%',
                       background: 'white'
                     }}
@@ -769,17 +832,15 @@ function TaskManagement({
                 color: !isOnline ? '#92400e' : '#1e40af'
               }}>
                 <strong>ℹ️ {isOnline ? 'Online' : 'Offline'}:</strong>
-                {isOnline 
-                  ? ' This task will be assigned immediately.' 
+                {isOnline
+                  ? ' This task will be assigned immediately.'
                   : ' This task will be saved offline and synced when online.'}
               </div>
-              <div className="modal-actions" style={{display: 'flex', gap: '12px', marginTop: '8px'}}>
-                <button 
-                  type="submit" 
+              <div className="modal-actions" style={{ display: 'flex', gap: '12px', marginTop: '8px' }}>
+                <button
+                  type="submit"
                   className="btn-submit"
                   style={{
-                    opacity: 1,
-                    visibility: 'visible',
                     display: 'inline-flex',
                     alignItems: 'center',
                     justifyContent: 'center',
@@ -795,13 +856,11 @@ function TaskManagement({
                 >
                   {isOnline ? '➕ Assign Task' : '💾 Save Offline'}
                 </button>
-                <button 
-                  type="button" 
-                  className="btn-cancel" 
+                <button
+                  type="button"
+                  className="btn-cancel"
                   onClick={() => setShowModal(false)}
                   style={{
-                    opacity: 1,
-                    visibility: 'visible',
                     display: 'inline-flex',
                     alignItems: 'center',
                     justifyContent: 'center',

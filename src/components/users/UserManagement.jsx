@@ -1,7 +1,7 @@
-// components/users/UserManagement.js
+// components/users/UserManagement.js - FIXED - Syncs to PostgreSQL
 
 import React, { useState } from 'react';
-import { db } from '../../services/database';
+import { db, syncQueue, checkRealInternet } from '../../services/database';
 import { uid } from '../../utils/helpers';
 import { useUserLanguage } from '../context/UserLanguageContext';
 import UserLanguageSelector from './UserLanguageSelector';
@@ -26,7 +26,7 @@ function UserManagement({
     department: ''
   });
 
-  // ===== CREATE USER =====
+  // ===== CREATE USER (IndexedDB + PostgreSQL Sync) =====
   const handleSubmit = async (e) => {
     e.preventDefault();
     setIsSubmitting(true);
@@ -45,6 +45,8 @@ function UserManagement({
         return;
       }
 
+      const online = await checkRealInternet();
+
       const newUserObj = {
         id: uid(),
         employeeId: localNewUser.role === 'supervisor'
@@ -62,11 +64,35 @@ function UserManagement({
         managerId: 'm1',
         shift: localNewUser.shift || 'Day',
         department: localNewUser.department || '',
-        createdAt: new Date().toISOString()
+        createdAt: new Date().toISOString(),
+        synced: online
       };
 
+      // Save to IndexedDB
       await db.users.add(newUserObj);
       setUsers([...users, newUserObj]);
+
+      // Sync to PostgreSQL
+      if (online) {
+        try {
+          const response = await fetch('http://localhost:5000/api/users', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(newUserObj)
+          });
+          
+          if (response.ok) {
+            await db.users.update(newUserObj.id, { synced: true });
+            console.log('✅ User synced to PostgreSQL');
+          }
+        } catch (err) {
+          console.log('📡 User saved offline, will sync later');
+          syncQueue.add({ type: 'user', id: newUserObj.id, data: newUserObj });
+        }
+      } else {
+        syncQueue.add({ type: 'user', id: newUserObj.id, data: newUserObj });
+        console.log('📡 User queued for sync');
+      }
 
       if (addNotification) {
         addNotification(
@@ -114,6 +140,22 @@ function UserManagement({
         setUsers(prev => prev.map(u => u.id === userId ? updatedUser : u));
       }
 
+      // Sync status change to PostgreSQL
+      const online = await checkRealInternet();
+      if (online) {
+        try {
+          await fetch(`http://localhost:5000/api/users/${userId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ status: newStatus })
+          });
+        } catch (err) {
+          syncQueue.add({ type: 'user_status_update', id: userId, data: { userId, status: newStatus } });
+        }
+      } else {
+        syncQueue.add({ type: 'user_status_update', id: userId, data: { userId, status: newStatus } });
+      }
+
       if (addNotification) {
         addNotification(
           userId, 
@@ -141,6 +183,20 @@ function UserManagement({
       
       if (setUsers) {
         setUsers(prev => prev.filter(u => u.id !== userId));
+      }
+
+      // Sync delete to PostgreSQL
+      const online = await checkRealInternet();
+      if (online) {
+        try {
+          await fetch(`http://localhost:5000/api/users/${userId}`, {
+            method: 'DELETE'
+          });
+        } catch (err) {
+          syncQueue.add({ type: 'user_delete', id: userId, data: { userId } });
+        }
+      } else {
+        syncQueue.add({ type: 'user_delete', id: userId, data: { userId } });
       }
 
       alert(`✅ User ${user.name} deleted successfully!`);
