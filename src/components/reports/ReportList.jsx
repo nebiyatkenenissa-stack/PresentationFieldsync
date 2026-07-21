@@ -1,4 +1,4 @@
-// components/reports/ReportList.js
+// components/reports/ReportList.js – Enhanced with NEW badge and time display
 
 import React, { useState, useEffect } from 'react';
 import { syncQueue, checkRealInternet } from '../../services/database';
@@ -55,12 +55,35 @@ function ReportList({ reports, user, isOfficer, isSupervisor, addNotification })
       }
       return true;
     })
-    // ⭐ FIXED: Sort by submittedAt or createdAt - newest first
     .sort((a, b) => {
+      // Use submittedAt, fallback to createdAt, then reportDate
       const dateA = a.submittedAt || a.createdAt || a.reportDate;
       const dateB = b.submittedAt || b.createdAt || b.reportDate;
       return new Date(dateB) - new Date(dateA);
     });
+
+  // Helper to check if report is new (within last 24 hours)
+  const isNewReport = (report) => {
+    const dateStr = report.submittedAt || report.createdAt || report.reportDate;
+    if (!dateStr) return false;
+    const reportDate = new Date(dateStr);
+    const now = new Date();
+    const diffHours = (now - reportDate) / (1000 * 60 * 60);
+    return diffHours < 24;
+  };
+
+  // Helper to format date/time
+  const formatDateTime = (dateStr) => {
+    if (!dateStr) return 'N/A';
+    const date = new Date(dateStr);
+    return date.toLocaleString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+  };
 
   return (
     <div className="space-y-6">
@@ -159,7 +182,7 @@ function ReportList({ reports, user, isOfficer, isSupervisor, addNotification })
           <table className="w-full">
             <thead>
               <tr className="border-b border-gray-200">
-                <th className="text-left py-3 px-3 text-sm font-medium text-gray-500">Date</th>
+                <th className="text-left py-3 px-3 text-sm font-medium text-gray-500">Submitted</th>
                 <th className="text-left py-3 px-3 text-sm font-medium text-gray-500">Officer</th>
                 <th className="text-left py-3 px-3 text-sm font-medium text-gray-500">Site</th>
                 <th className="text-left py-3 px-3 text-sm font-medium text-gray-500">Region</th>
@@ -167,12 +190,13 @@ function ReportList({ reports, user, isOfficer, isSupervisor, addNotification })
                 <th className="text-left py-3 px-3 text-sm font-medium text-gray-500">Attendance</th>
                 <th className="text-left py-3 px-3 text-sm font-medium text-gray-500">Status</th>
                 <th className="text-left py-3 px-3 text-sm font-medium text-gray-500">Sync</th>
+                <th className="text-left py-3 px-3 text-sm font-medium text-gray-500">New</th>
               </tr>
             </thead>
             <tbody>
               {filteredReports.length === 0 ? (
                 <tr>
-                  <td colSpan="8" className="text-center py-8 text-gray-400">
+                  <td colSpan="9" className="text-center py-8 text-gray-400">
                     {pendingCount > 0 ? (
                       <div>
                         <div style={{ fontSize: '24px', marginBottom: '8px' }}>📡</div>
@@ -184,36 +208,59 @@ function ReportList({ reports, user, isOfficer, isSupervisor, addNotification })
                   </td>
                 </tr>
               ) : (
-                filteredReports.map(r => (
-                  <tr key={r.id} className="border-b border-gray-100 hover:bg-gray-50">
-                    <td className="py-3 px-3 text-sm">{r.reportDate}</td>
-                    <td className="py-3 px-3 text-sm font-medium">{r.employeeName}</td>
-                    <td className="py-3 px-3 text-sm font-medium">{r.siteName}</td>
-                    <td className="py-3 px-3 text-sm">
-                      <span className="bg-blue-50 text-blue-700 px-2 py-1 rounded-full text-xs">{r.region}</span>
-                    </td>
-                    <td className="py-3 px-3 text-sm">{r.registrations}</td>
-                    <td className="py-3 px-3 text-sm">
-                      <span className={`px-2 py-1 rounded-full text-xs ${
-                        r.attendance === 'present' ? 'bg-green-100 text-green-700' :
-                        r.attendance === 'late' ? 'bg-yellow-100 text-yellow-700' :
-                        'bg-red-100 text-red-700'
-                      }`}>
-                        {r.attendance || 'Present'}
-                      </span>
-                    </td>
-                    <td className="py-3 px-3 text-sm">
-                      <span className="bg-gray-100 text-gray-700 px-2 py-1 rounded-full text-xs">{r.operationalStatus}</span>
-                    </td>
-                    <td className="py-3 px-3 text-sm">
-                      <span className={`px-2 py-1 rounded-full text-xs ${
-                        r.synced ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'
-                      }`}>
-                        {r.synced ? '✅ Synced' : '⏳ Pending'}
-                      </span>
-                    </td>
-                  </tr>
-                ))
+                filteredReports.map(r => {
+                  const isNew = isNewReport(r);
+                  const submittedAt = r.submittedAt || r.createdAt || r.reportDate;
+                  const displayDate = formatDateTime(submittedAt);
+                  
+                  return (
+                    <tr key={r.id} className="border-b border-gray-100 hover:bg-gray-50">
+                      <td className="py-3 px-3 text-sm" style={{ whiteSpace: 'nowrap' }}>
+                        {displayDate}
+                      </td>
+                      <td className="py-3 px-3 text-sm font-medium">{r.employeeName}</td>
+                      <td className="py-3 px-3 text-sm font-medium">{r.siteName}</td>
+                      <td className="py-3 px-3 text-sm">
+                        <span className="bg-blue-50 text-blue-700 px-2 py-1 rounded-full text-xs">{r.region}</span>
+                      </td>
+                      <td className="py-3 px-3 text-sm">{r.registrations}</td>
+                      <td className="py-3 px-3 text-sm">
+                        <span className={`px-2 py-1 rounded-full text-xs ${
+                          r.attendance === 'present' ? 'bg-green-100 text-green-700' :
+                          r.attendance === 'late' ? 'bg-yellow-100 text-yellow-700' :
+                          'bg-red-100 text-red-700'
+                        }`}>
+                          {r.attendance || 'Present'}
+                        </span>
+                      </td>
+                      <td className="py-3 px-3 text-sm">
+                        <span className="bg-gray-100 text-gray-700 px-2 py-1 rounded-full text-xs">{r.operationalStatus}</span>
+                      </td>
+                      <td className="py-3 px-3 text-sm">
+                        <span className={`px-2 py-1 rounded-full text-xs ${
+                          r.synced ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'
+                        }`}>
+                          {r.synced ? '✅ Synced' : '⏳ Pending'}
+                        </span>
+                      </td>
+                      <td className="py-3 px-3 text-sm">
+                        {isNew && (
+                          <span style={{
+                            background: '#dc2626',
+                            color: 'white',
+                            padding: '2px 10px',
+                            borderRadius: '12px',
+                            fontSize: '10px',
+                            fontWeight: '700',
+                            textTransform: 'uppercase'
+                          }}>
+                            NEW
+                          </span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>

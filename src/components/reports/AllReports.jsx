@@ -1,4 +1,5 @@
 // components/reports/AllReports.js
+// Enhanced with date/time, NEW badge, sorting, and clear distinction between self/officer reports
 
 import React, { useState, useMemo, useEffect } from 'react';
 import { exportCSV, exportJSON } from '../../utils/helpers';
@@ -33,11 +34,34 @@ function AllReports({ reports, users, supervisorReports }) {
     };
   }, []);
 
-  // ONLY show synced reports in manager view and sort by submittedAt (newest first)
+  // Helper: format date/time
+  const formatDateTime = (dateStr) => {
+    if (!dateStr) return 'N/A';
+    const date = new Date(dateStr);
+    return date.toLocaleString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+  };
+
+  // Helper: check if report is new (< 24h)
+  const isNewReport = (report) => {
+    const dateStr = report.submittedAt || report.createdAt || report.reportDate;
+    if (!dateStr) return false;
+    const reportDate = new Date(dateStr);
+    const now = new Date();
+    const diffHours = (now - reportDate) / (1000 * 60 * 60);
+    return diffHours < 24;
+  };
+
+  // ===== DAILY REPORTS =====
+  // ONLY show synced reports and sort by submittedAt (newest first)
   const syncedReports = useMemo(() => {
     return reports
       .filter(r => r.synced === true)
-      // ⭐ FIXED: Sort by submittedAt or createdAt - newest first
       .sort((a, b) => {
         const dateA = a.submittedAt || a.createdAt || a.reportDate;
         const dateB = b.submittedAt || b.createdAt || b.reportDate;
@@ -61,26 +85,30 @@ function AllReports({ reports, users, supervisorReports }) {
     }
 
     if (dateRange.start) {
-      filtered = filtered.filter(r => r.reportDate >= dateRange.start);
+      filtered = filtered.filter(r => (r.reportDate || r.submittedAt) >= dateRange.start);
     }
     if (dateRange.end) {
-      filtered = filtered.filter(r => r.reportDate <= dateRange.end);
+      filtered = filtered.filter(r => (r.reportDate || r.submittedAt) <= dateRange.end);
     }
 
     return filtered;
   }, [syncedReports, selectedRegion, searchTerm, dateRange]);
 
+  // ===== SUPERVISOR REPORTS =====
+  // Sort by submittedAt (newest first) and clearly differentiate type
   const filteredSupervisorReports = useMemo(() => {
     let filtered = supervisorReports || [];
     if (selectedRegion !== 'All') {
       filtered = filtered.filter(r => r.region === selectedRegion);
     }
     // Sort by submittedAt - newest first
-    return filtered.sort((a, b) => {
-      const dateA = a.submittedAt || a.createdAt || a.reportDate;
-      const dateB = b.submittedAt || b.createdAt || b.reportDate;
-      return new Date(dateB) - new Date(dateA);
-    });
+    return filtered
+      .filter(r => r.synced !== false) // show all synced or pending
+      .sort((a, b) => {
+        const dateA = a.submittedAt || a.createdAt || a.reportDate;
+        const dateB = b.submittedAt || b.createdAt || b.reportDate;
+        return new Date(dateB) - new Date(dateA);
+      });
   }, [supervisorReports, selectedRegion]);
 
   // Count offline reports
@@ -157,13 +185,14 @@ function AllReports({ reports, users, supervisorReports }) {
         )}
       </div>
 
+      {/* ===== DAILY REPORTS TABLE ===== */}
       <div className="table-card">
         <div className="table-header">
           <div>
-            <h3>All Daily Reports</h3>
+            <h3>📊 Daily Field Reports</h3>
             <p>{filteredReports.length} synced reports found</p>
           </div>
-          <div className="table-actions">
+          <div className="table-actions" style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
             <input 
               type="text" 
               placeholder="🔍 Search reports..." 
@@ -206,7 +235,7 @@ function AllReports({ reports, users, supervisorReports }) {
           <table>
             <thead>
               <tr>
-                <th>Date</th>
+                <th>Submitted</th>
                 <th>Officer</th>
                 <th>Supervisor</th>
                 <th>Site</th>
@@ -215,12 +244,13 @@ function AllReports({ reports, users, supervisorReports }) {
                 <th>Attendance</th>
                 <th>Status</th>
                 <th>Sync</th>
+                <th>New</th>
               </tr>
             </thead>
             <tbody>
               {filteredReports.length === 0 && (
                 <tr>
-                  <td colSpan="9" className="empty-state">
+                  <td colSpan="10" className="empty-state">
                     <div className="empty-icon">📋</div>
                     <div>
                       {offlineCount > 0 ? (
@@ -235,9 +265,10 @@ function AllReports({ reports, users, supervisorReports }) {
               )}
               {filteredReports.map(r => {
                 const supervisor = users?.find(u => u.id === r.supervisorId);
+                const isNew = isNewReport(r);
                 return (
                   <tr key={r.id}>
-                    <td>{r.reportDate}</td>
+                    <td style={{ whiteSpace: 'nowrap' }}>{formatDateTime(r.submittedAt || r.createdAt || r.reportDate)}</td>
                     <td><strong>{r.employeeName}</strong></td>
                     <td>{supervisor?.name || 'N/A'}</td>
                     <td><strong>{r.siteName}</strong></td>
@@ -255,6 +286,21 @@ function AllReports({ reports, users, supervisorReports }) {
                         <span className="sync-tag pending">⏳ Pending</span>
                       }
                     </td>
+                    <td>
+                      {isNew && (
+                        <span style={{
+                          background: '#dc2626',
+                          color: 'white',
+                          padding: '2px 10px',
+                          borderRadius: '12px',
+                          fontSize: '10px',
+                          fontWeight: '700',
+                          textTransform: 'uppercase'
+                        }}>
+                          NEW
+                        </span>
+                      )}
+                    </td>
                   </tr>
                 );
               })}
@@ -263,51 +309,125 @@ function AllReports({ reports, users, supervisorReports }) {
         </div>
       </div>
 
-      {/* Supervisor Reports Section */}
+      {/* ===== SUPERVISOR REPORTS TABLE ===== */}
       <div className="table-card" style={{marginTop: '24px'}}>
         <div className="table-header">
           <div>
-            <h3>Supervisor Reports</h3>
+            <h3>👤 Supervisor Reports</h3>
             <p>{filteredSupervisorReports.length} supervisor reports found</p>
           </div>
-          <button className="btn-export" onClick={() => exportCSV(filteredSupervisorReports, 'supervisor_reports_all')}>📥 CSV</button>
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <button className="btn-export" onClick={() => exportCSV(filteredSupervisorReports, 'supervisor_reports_all')}>📥 CSV</button>
+            <button className="btn-export" onClick={() => exportJSON(filteredSupervisorReports, 'supervisor_reports_all')}>📥 JSON</button>
+          </div>
         </div>
 
         <div className="table-wrapper">
           <table>
             <thead>
               <tr>
-                <th>Date</th>
+                <th>Submitted</th>
+                <th>Type</th>
                 <th>Supervisor</th>
-                <th>Officer</th>
+                <th>Officer / Self</th>
                 <th>Performance</th>
                 <th>Rating</th>
                 <th>Status</th>
+                <th>New</th>
               </tr>
             </thead>
             <tbody>
               {filteredSupervisorReports.length === 0 && (
                 <tr>
-                  <td colSpan="6" className="empty-state">
+                  <td colSpan="8" className="empty-state">
                     <div className="empty-icon">📋</div>
                     <div>No supervisor reports found</div>
                   </td>
                 </tr>
               )}
-              {filteredSupervisorReports.map(r => (
-                <tr key={r.id}>
-                  <td>{r.reportDate}</td>
-                  <td>{r.supervisorName}</td>
-                  <td>{r.type === 'self_report' ? r.supervisorName : r.officerName}</td>
-                  <td>
-                    <span className={`status-tag ${r.overallStatus || r.performance}`}>
-                      {r.overallStatus || r.performance}
-                    </span>
-                  </td>
-                  <td>{r.type === 'self_report' ? 'N/A' : `${r.overallRating}/5 ⭐`}</td>
-                  <td><span className="status-tag submitted">✅ Submitted</span></td>
-                </tr>
-              ))}
+              {filteredSupervisorReports.map(r => {
+                const isNew = isNewReport(r);
+                const isSelfReport = r.type === 'self_report';
+                const displayName = isSelfReport ? r.supervisorName : r.officerName;
+                return (
+                  <tr key={r.id}>
+                    <td style={{ whiteSpace: 'nowrap' }}>{formatDateTime(r.submittedAt || r.createdAt || r.reportDate)}</td>
+                    <td>
+                      {isSelfReport ? (
+                        <span style={{
+                          background: '#dbeafe',
+                          color: '#1e40af',
+                          padding: '2px 10px',
+                          borderRadius: '12px',
+                          fontSize: '11px',
+                          fontWeight: '500'
+                        }}>
+                          📋 Self Report
+                        </span>
+                      ) : (
+                        <span style={{
+                          background: '#fef3c7',
+                          color: '#92400e',
+                          padding: '2px 10px',
+                          borderRadius: '12px',
+                          fontSize: '11px',
+                          fontWeight: '500'
+                        }}>
+                          👤 Officer Report
+                        </span>
+                      )}
+                    </td>
+                    <td>{r.supervisorName}</td>
+                    <td><strong>{displayName}</strong></td>
+                    <td>
+                      <span className={`status-tag ${r.overallStatus || r.performance}`} style={{
+                        padding: '2px 10px',
+                        borderRadius: '12px',
+                        fontSize: '11px',
+                        fontWeight: '500',
+                        background: r.overallStatus === 'excellent' || r.performance === 'excellent' ? '#d1fae5' :
+                                  r.overallStatus === 'good' || r.performance === 'good' ? '#dbeafe' :
+                                  r.overallStatus === 'average' || r.performance === 'average' ? '#fef3c7' :
+                                  '#fee2e2',
+                        color: r.overallStatus === 'excellent' || r.performance === 'excellent' ? '#065f37' :
+                              r.overallStatus === 'good' || r.performance === 'good' ? '#1e40af' :
+                              r.overallStatus === 'average' || r.performance === 'average' ? '#92400e' :
+                              '#991b1b'
+                      }}>
+                        {r.overallStatus || r.performance}
+                      </span>
+                    </td>
+                    <td>{isSelfReport ? 'N/A' : `${r.overallRating}/5 ⭐`}</td>
+                    <td>
+                      <span className="status-tag submitted" style={{
+                        padding: '2px 10px',
+                        borderRadius: '12px',
+                        fontSize: '11px',
+                        fontWeight: '500',
+                        background: r.synced ? '#d1fae5' : '#fef3c7',
+                        color: r.synced ? '#065f37' : '#92400e'
+                      }}>
+                        {r.synced ? '✅ Synced' : '📡 Offline'}
+                      </span>
+                    </td>
+                    <td>
+                      {isNew && (
+                        <span style={{
+                          background: '#dc2626',
+                          color: 'white',
+                          padding: '2px 10px',
+                          borderRadius: '12px',
+                          fontSize: '10px',
+                          fontWeight: '700',
+                          textTransform: 'uppercase'
+                        }}>
+                          NEW
+                        </span>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>

@@ -1,4 +1,5 @@
 // services/database.js – FULL WITH VERIFICATION AND SUPERVISOR REPORTS SYNC
+// FIX: Added verification to sync queue processing and fixed verification_history schema
 
 import Dexie from 'dexie';
 import { SAMPLE_USERS } from '../utils/constants';
@@ -6,9 +7,12 @@ import { uid, getToday } from '../utils/helpers';
 
 const API_URL = 'http://localhost:5000/api';
 
-// Create Dexie database
+// ============================================================
+// Create Dexie database with corrected schema
+// ============================================================
 const db = new Dexie('FieldSyncDB');
 
+// Version 3 – with verification_history using string `id` as primary key
 db.version(3).stores({
   users: 'id, employeeId, email, role, region, status, pin',
   reports: 'id, reportId, employeeId, region, reportDate, synced',
@@ -26,8 +30,9 @@ db.version(3).stores({
   permissions: 'id, employeeId, status, startDate, endDate, synced',
   gps_locations: 'id, employeeId, date, timestamp, synced, latitude, longitude',
   check_ins: 'id, employeeId, date, type, checkInId, synced, timestamp',
-  verification_history: '++id, officerId, timestamp, questionId, success',
-  kiosk_sessions: '++id, officerId, startTime, endTime, status, synced'
+  // FIX: verification_history now uses string `id` as primary key and includes `synced`
+  verification_history: 'id, officerId, timestamp, questionId, success, synced',
+  kiosk_sessions: 'id, officerId, startTime, endTime, status, synced'
 });
 
 export { db };
@@ -226,7 +231,7 @@ export const isOnline = async () => {
 };
 
 // ============================================================
-// CLEAR STUCK SYNC ITEMS
+// CLEAR STUCK SYNC ITEMS (updated with verification_history)
 // ============================================================
 export const clearStuckSyncItems = async () => {
   try {
@@ -234,7 +239,7 @@ export const clearStuckSyncItems = async () => {
     
     const storesToCheck = [
       'reports', 'attendance', 'citizens', 'tasks', 
-      'leaves', 'permissions', 'supervisor_reports'
+      'leaves', 'permissions', 'supervisor_reports', 'verification_history'
     ];
     
     const stuckThreshold = Date.now() - 60000;
@@ -310,13 +315,18 @@ export const processSyncQueue = async (isOnline) => {
 
   for (const item of pending) {
     try {
+      // Store map – includes all types including 'verification'
       const storeMap = {
         'citizen': 'citizens',
         'report': 'reports',
         'attendance': 'attendance',
         'task': 'tasks',
         'leave_request': 'leaves',
+        'leave': 'leaves',
+        'leave_update': 'leaves',
         'permission_request': 'permissions',
+        'permission': 'permissions',
+        'permission_update': 'permissions',
         'supervisor_report': 'supervisor_reports',
         'user': 'users',
         'user_status_update': 'users',
@@ -326,7 +336,7 @@ export const processSyncQueue = async (isOnline) => {
         'screen_time': 'screen_time',
         'screen_time_update': 'screen_time',
         'audit': 'audit',
-        'verification': 'verification_history',
+        'verification': 'verification_history',   // <-- verification sync
         'gps_location': 'gps_locations',
         'check_in': 'check_ins',
         'check_out': 'check_ins',
@@ -335,6 +345,7 @@ export const processSyncQueue = async (isOnline) => {
       
       const store = storeMap[item.type];
       if (store && db[store]) {
+        // Mark as syncing
         await db[store].update(item.id, { 
           synced: 'syncing',
           lastSyncAttempt: Date.now()
@@ -342,6 +353,7 @@ export const processSyncQueue = async (isOnline) => {
         
         console.log(`🔄 Syncing to PostgreSQL: ${item.type} - ${item.id}`);
         
+        // Send to /api/sync
         const response = await fetch(`${API_URL}/sync`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -351,11 +363,33 @@ export const processSyncQueue = async (isOnline) => {
         if (response.ok) {
           const result = await response.json();
           
+          // Mark as fully synced
           await db[store].update(item.id, { 
             synced: true,
             syncedAt: new Date().toISOString(),
             serverId: result.data?.id || `server-${Date.now()}`
           });
+
+          // If verification, also update localStorage to keep sync
+          if (item.type === 'verification' && typeof window !== 'undefined') {
+            const officerId = item.data.officerId;
+            if (officerId) {
+              const saved = localStorage.getItem(`verification_${officerId}`);
+              if (saved) {
+                try {
+                  const parsed = JSON.parse(saved);
+                  if (parsed.history) {
+                    parsed.history = parsed.history.map(h =>
+                      h.id === item.id ? { ...h, synced: true } : h
+                    );
+                    localStorage.setItem(`verification_${officerId}`, JSON.stringify(parsed));
+                  }
+                } catch (e) {
+                  console.warn('Could not update localStorage verification history', e);
+                }
+              }
+            }
+          }
           
           syncQueue.remove(item.id);
           synced++;
@@ -366,6 +400,7 @@ export const processSyncQueue = async (isOnline) => {
         }
         
       } else {
+        // If store not found, just remove from queue to avoid infinite loop
         syncQueue.remove(item.id);
         synced++;
       }
@@ -373,13 +408,18 @@ export const processSyncQueue = async (isOnline) => {
       console.error(`❌ Failed to sync: ${item.type} - ${item.id}`, error.message);
       item.attempts = (item.attempts || 0) + 1;
       
+      // Update the item in IndexedDB to reflect the failure
       const storeMap = {
         'citizen': 'citizens',
         'report': 'reports',
         'attendance': 'attendance',
         'task': 'tasks',
         'leave_request': 'leaves',
+        'leave': 'leaves',
+        'leave_update': 'leaves',
         'permission_request': 'permissions',
+        'permission': 'permissions',
+        'permission_update': 'permissions',
         'supervisor_report': 'supervisor_reports',
         'user': 'users',
         'user_status_update': 'users',
@@ -410,6 +450,7 @@ export const processSyncQueue = async (isOnline) => {
         syncQueue.remove(item.id);
         failed++;
       } else {
+        // Update the item in the queue for retry
         const index = syncQueue.pending.findIndex(q => q.id === item.id);
         if (index !== -1) {
           syncQueue.pending[index] = item;
@@ -639,7 +680,7 @@ export const pullAlertsFromServer = async () => {
 };
 
 // ============================================================
-// PULL VERIFICATION FROM SERVER
+// PULL VERIFICATION FROM SERVER (updated to use string ID)
 // ============================================================
 export const pullVerificationFromServer = async () => {
   const online = await checkRealInternet();
@@ -658,7 +699,7 @@ export const pullVerificationFromServer = async () => {
 
     for (const record of serverRecords) {
       const localRecord = {
-        id: record.id,
+        id: record.id,                      // string ID from server
         officerId: record.officer_id,
         officerName: record.officer_name,
         question: record.question,
@@ -672,9 +713,9 @@ export const pullVerificationFromServer = async () => {
         synced: true
       };
       const existing = await db.verification_history.get(record.id);
-      if (!existing) {
-        await db.verification_history.add(localRecord);
-        console.log(`🔄 Added verification record for ${record.officer_name}`);
+      if (!existing || new Date(existing.timestamp) < new Date(record.timestamp)) {
+        await db.verification_history.put(localRecord);
+        console.log(`🔄 Added/updated verification record for ${record.officer_name}`);
       }
     }
     console.log('✅ Verification pull completed');
@@ -684,7 +725,7 @@ export const pullVerificationFromServer = async () => {
 };
 
 // ============================================================
-// PULL SUPERVISOR REPORTS FROM SERVER (NEW)
+// PULL SUPERVISOR REPORTS FROM SERVER
 // ============================================================
 export const pullSupervisorReportsFromServer = async () => {
   const online = await checkRealInternet();
@@ -738,7 +779,7 @@ export const pullSupervisorReportsFromServer = async () => {
 };
 
 // ============================================================
-// INITIALIZE DATA (unchanged)
+// INITIALIZE DATA (unchanged, but ensures verification_history has synced)
 // ============================================================
 export const initializeAllData = async () => {
   try {
@@ -945,6 +986,7 @@ export const initializeAllData = async () => {
     }));
     await db.check_ins.bulkAdd(checkIns);
 
+    // Initialize verification_history with synced records
     const verificationHistory = fieldOfficers.map(o => ({
       id: uid(),
       officerId: o.id,
@@ -957,7 +999,8 @@ export const initializeAllData = async () => {
       penalties: [],
       questionId: 'q1',
       success: true,
-      message: '✅ Verification passed!'
+      message: '✅ Verification passed!',
+      synced: true
     }));
     await db.verification_history.bulkAdd(verificationHistory);
 

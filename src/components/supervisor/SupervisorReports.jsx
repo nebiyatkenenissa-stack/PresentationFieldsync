@@ -1,21 +1,24 @@
-// components/supervisor/SupervisorReports.js
+// components/supervisor/SupervisorReports.js – FULLY FIXED (auto-display newest reports, refresh works)
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { getToday, uid } from '../../utils/helpers';
 import { db, syncQueue, checkRealInternet, pullSupervisorReportsFromServer } from '../../services/database';
+
+const API_URL = 'http://localhost:5000/api';
 
 function SupervisorReports({ 
   supervisorReports, 
   users, 
   user, 
   teamMembers,
-  setSupervisorReports
+  setSupervisorReports   // passed from parent to update global state
 }) {
   const [showOfficerReport, setShowOfficerReport] = useState(false);
   const [showSelfReport, setShowSelfReport] = useState(false);
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   const [pendingCount, setPendingCount] = useState(0);
   const [localReports, setLocalReports] = useState([]);
+  const [isLoading, setIsLoading] = useState(false);
   const [form, setForm] = useState({
     officerId: '',
     reportDate: getToday(),
@@ -68,36 +71,86 @@ function SupervisorReports({
     };
   }, []);
 
-  // ===== LOAD REPORTS FROM INDEXEDDB (fallback) =====
-  const loadReportsFromDB = async () => {
+  // ===== LOAD REPORTS FROM INDEXEDDB =====
+  const loadReportsFromDB = useCallback(async () => {
     try {
       const all = await db.supervisor_reports.toArray();
       const filtered = all.filter(r => r.supervisorId === user?.id);
       setLocalReports(filtered);
-      console.log('📥 Loaded reports from IndexedDB:', filtered.length);
       return filtered;
     } catch (error) {
       console.error('Error loading reports from IndexedDB:', error);
       return [];
     }
+  }, [user]);
+
+  // ===== REFRESH REPORTS (manual & after online) =====
+  const handleRefresh = useCallback(async () => {
+    setIsLoading(true);
+    try {
+      console.log('🔄 Manual refresh triggered');
+      if (isOnline) {
+        await pullSupervisorReportsFromServer();
+      }
+      const loaded = await loadReportsFromDB();
+      // Update parent state if setter provided
+      if (setSupervisorReports) {
+        setSupervisorReports(loaded);
+      }
+      // Also update local state (already done in loadReportsFromDB)
+      console.log('📥 Reports after refresh:', loaded.length);
+    } catch (error) {
+      console.error('Refresh error:', error);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [isOnline, loadReportsFromDB, setSupervisorReports]);
+
+  // ===== USE PROP OR LOCAL REPORTS (prioritise local to show new reports instantly) =====
+  const reports = useMemo(() => {
+    // If we have local reports, use them (they are the most up-to-date)
+    if (localReports.length > 0) {
+      return localReports;
+    }
+    // Fallback to parent prop if local is empty
+    if (supervisorReports && supervisorReports.length > 0) {
+      const filtered = supervisorReports.filter(r => r.supervisorId === user?.id);
+      return filtered;
+    }
+    return [];
+  }, [localReports, supervisorReports, user]);
+
+  // ===== SORTED REPORTS (newest first) =====
+  const sortedReports = useMemo(() => {
+    return [...reports].sort((a, b) => {
+      const dateA = a.submittedAt || a.reportDate || a.createdAt;
+      const dateB = b.submittedAt || b.reportDate || b.createdAt;
+      return new Date(dateB) - new Date(dateA);
+    });
+  }, [reports]);
+
+  // ===== HELPER: Check if report is NEW (within 24h) =====
+  const isNewReport = (report) => {
+    const dateStr = report.submittedAt || report.reportDate || report.createdAt;
+    if (!dateStr) return false;
+    const reportDate = new Date(dateStr);
+    const now = new Date();
+    const diffHours = (now - reportDate) / (1000 * 60 * 60);
+    return diffHours < 24;
   };
 
-  // ===== REFRESH REPORTS =====
-  const handleRefresh = async () => {
-    console.log('🔄 Manual refresh triggered');
-    if (isOnline) {
-      await pullSupervisorReportsFromServer();
-    }
-    const loaded = await loadReportsFromDB();
-    if (setSupervisorReports) {
-      setSupervisorReports(loaded);
-    }
+  // ===== HELPER: Format date/time =====
+  const formatDateTime = (dateStr) => {
+    if (!dateStr) return 'N/A';
+    const date = new Date(dateStr);
+    return date.toLocaleString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    });
   };
-
-  // ===== USE PROP OR LOCAL REPORTS =====
-  const reports = supervisorReports && supervisorReports.length > 0 
-    ? supervisorReports.filter(r => r.supervisorId === user?.id)
-    : localReports;
 
   // ===== HANDLE OFFICER REPORT SUBMIT =====
   const handleOfficerReportSubmit = async (e) => {
@@ -133,29 +186,63 @@ function SupervisorReports({
         submittedAt: new Date().toISOString(),
         region: officer.region,
         type: 'officer_report',
-        synced: online ? true : false
+        synced: false
       };
       
       console.log('📝 Saving officer report:', report);
       
+      // 1. Save to IndexedDB
       await db.supervisor_reports.add(report);
       console.log('✅ Officer report saved to IndexedDB');
       
-      setLocalReports(prev => [report, ...prev]);
+      // 2. Update local state (immediate display)
+      setLocalReports(prev => {
+        const updated = [report, ...prev];
+        console.log('📋 Updated local reports count:', updated.length);
+        return updated;
+      });
+      
+      // 3. Update parent state if setter provided
       if (setSupervisorReports) {
-        setSupervisorReports(prev => [report, ...prev]);
+        setSupervisorReports(prev => {
+          const updated = [report, ...prev];
+          console.log('📤 Updated parent reports count:', updated.length);
+          return updated;
+        });
       }
       
-      if (!online) {
-        syncQueue.add({
-          type: 'supervisor_report',
-          id: report.id,
-          data: report
-        });
+      // 4. If online, send to server
+      if (online) {
+        try {
+          const response = await fetch(`${API_URL}/sync`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ type: 'supervisor_report', data: report })
+          });
+          
+          if (response.ok) {
+            await db.supervisor_reports.update(report.id, { synced: true });
+            // Update both local and parent states to reflect synced status
+            setLocalReports(prev => prev.map(r => r.id === report.id ? { ...r, synced: true } : r));
+            if (setSupervisorReports) {
+              setSupervisorReports(prev => prev.map(r => r.id === report.id ? { ...r, synced: true } : r));
+            }
+            alert('✅ Supervisor report submitted successfully!');
+          } else {
+            throw new Error('Server error');
+          }
+        } catch (err) {
+          console.warn('Server unreachable, queueing report:', err.message);
+          syncQueue.add({ type: 'supervisor_report', id: report.id, data: report });
+          setPendingCount(syncQueue.count());
+          alert('⚠️ Server unreachable. Report saved and will sync later.');
+        }
+      } else {
+        // Offline – queue immediately
+        console.warn('Offline, queueing report...');
+        syncQueue.add({ type: 'supervisor_report', id: report.id, data: report });
         setPendingCount(syncQueue.count());
         alert('📋 Supervisor report saved OFFLINE! Will sync when online.');
-      } else {
-        alert('✅ Supervisor report submitted successfully!');
       }
       
       setShowOfficerReport(false);
@@ -202,29 +289,61 @@ function SupervisorReports({
         overallStatus: selfForm.overallStatus,
         submittedAt: new Date().toISOString(),
         type: 'self_report',
-        synced: online ? true : false
+        synced: false
       };
       
       console.log('📝 Saving self report:', report);
       
+      // 1. Save to IndexedDB
       await db.supervisor_reports.add(report);
       console.log('✅ Self report saved to IndexedDB');
       
-      setLocalReports(prev => [report, ...prev]);
+      // 2. Update local state (immediate display)
+      setLocalReports(prev => {
+        const updated = [report, ...prev];
+        console.log('📋 Updated local reports count:', updated.length);
+        return updated;
+      });
+      
+      // 3. Update parent state if setter provided
       if (setSupervisorReports) {
-        setSupervisorReports(prev => [report, ...prev]);
+        setSupervisorReports(prev => {
+          const updated = [report, ...prev];
+          console.log('📤 Updated parent reports count:', updated.length);
+          return updated;
+        });
       }
       
-      if (!online) {
-        syncQueue.add({
-          type: 'supervisor_report',
-          id: report.id,
-          data: report
-        });
+      // 4. If online, send to server
+      if (online) {
+        try {
+          const response = await fetch(`${API_URL}/sync`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ type: 'supervisor_report', data: report })
+          });
+          
+          if (response.ok) {
+            await db.supervisor_reports.update(report.id, { synced: true });
+            setLocalReports(prev => prev.map(r => r.id === report.id ? { ...r, synced: true } : r));
+            if (setSupervisorReports) {
+              setSupervisorReports(prev => prev.map(r => r.id === report.id ? { ...r, synced: true } : r));
+            }
+            alert('✅ Self report submitted successfully!');
+          } else {
+            throw new Error('Server error');
+          }
+        } catch (err) {
+          console.warn('Server unreachable, queueing self report:', err.message);
+          syncQueue.add({ type: 'supervisor_report', id: report.id, data: report });
+          setPendingCount(syncQueue.count());
+          alert('⚠️ Server unreachable. Self report saved and will sync later.');
+        }
+      } else {
+        console.warn('Offline, queueing self report...');
+        syncQueue.add({ type: 'supervisor_report', id: report.id, data: report });
         setPendingCount(syncQueue.count());
         alert('📋 Self report saved OFFLINE! Will sync when online.');
-      } else {
-        alert('✅ Self report submitted successfully!');
       }
       
       setShowSelfReport(false);
@@ -249,12 +368,19 @@ function SupervisorReports({
   // ===== INITIAL LOAD (fallback) =====
   useEffect(() => {
     if (user) {
-      loadReportsFromDB();
+      loadReportsFromDB().then(loaded => {
+        // If parent doesn't have reports, set local
+        if (!supervisorReports || supervisorReports.length === 0) {
+          setLocalReports(loaded);
+        }
+      });
     }
-  }, [user]);
+  }, [user, loadReportsFromDB, supervisorReports]);
 
   // ===== LOG REPORTS FOR DEBUGGING =====
-  console.log('📋 SupervisorReports rendering, reports count:', reports.length);
+  console.log('📋 SupervisorReports rendering, local reports:', localReports.length);
+  console.log('📋 SupervisorReports rendering, sorted reports:', sortedReports.length);
+  console.log('📋 First 3 sorted reports:', sortedReports.slice(0, 3).map(r => ({ id: r.id, type: r.type, submittedAt: r.submittedAt })));
 
   return (
     <div className="supervisor-reports-view" style={{ padding: '20px' }}>
@@ -283,6 +409,17 @@ function SupervisorReports({
             fontSize: '12px'
           }}>
             ⏳ {pendingCount} pending sync
+          </span>
+        )}
+        {isLoading && (
+          <span style={{
+            background: '#dbeafe',
+            color: '#1e40af',
+            padding: '2px 12px',
+            borderRadius: '12px',
+            fontSize: '12px'
+          }}>
+            🔄 Loading...
           </span>
         )}
       </div>
@@ -353,18 +490,20 @@ function SupervisorReports({
             )}
             <button
               onClick={handleRefresh}
+              disabled={isLoading}
               style={{
-                background: '#3b82f6',
+                background: isLoading ? '#9ca3af' : '#3b82f6',
                 color: 'white',
                 border: 'none',
                 padding: '4px 12px',
                 borderRadius: '6px',
-                cursor: 'pointer',
+                cursor: isLoading ? 'not-allowed' : 'pointer',
                 fontSize: '12px',
-                fontWeight: '500'
+                fontWeight: '500',
+                opacity: isLoading ? 0.6 : 1
               }}
             >
-              🔄 Refresh
+              {isLoading ? '⏳ Loading...' : '🔄 Refresh'}
             </button>
           </div>
         </div>
@@ -420,7 +559,7 @@ function SupervisorReports({
         </div>
       </div>
 
-      {/* ===== REPORTS TABLE ===== */}
+      {/* ===== REPORTS TABLE (Enhanced) ===== */}
       <div className="table-card" style={{
         background: 'white',
         borderRadius: '12px',
@@ -439,7 +578,7 @@ function SupervisorReports({
           <div>
             <h3 style={{ margin: '0', fontSize: '16px', fontWeight: '600' }}>My Supervisor Reports</h3>
             <p style={{ margin: '2px 0 0 0', color: '#6b7280', fontSize: '13px' }}>
-              {reports.length} reports submitted
+              {sortedReports.length} reports submitted
             </p>
           </div>
           {pendingCount > 0 && (
@@ -460,18 +599,19 @@ function SupervisorReports({
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead>
               <tr style={{ background: '#f8fafc' }}>
-                <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: '600', fontSize: '12px', color: '#6b7280' }}>Date</th>
+                <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: '600', fontSize: '12px', color: '#6b7280' }}>Submitted</th>
                 <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: '600', fontSize: '12px', color: '#6b7280' }}>Type</th>
                 <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: '600', fontSize: '12px', color: '#6b7280' }}>Officer / Self</th>
                 <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: '600', fontSize: '12px', color: '#6b7280' }}>Performance</th>
                 <th style={{ padding: '12px 16px', textAlign: 'center', fontWeight: '600', fontSize: '12px', color: '#6b7280' }}>Rating</th>
                 <th style={{ padding: '12px 16px', textAlign: 'center', fontWeight: '600', fontSize: '12px', color: '#6b7280' }}>Status</th>
+                <th style={{ padding: '12px 16px', textAlign: 'center', fontWeight: '600', fontSize: '12px', color: '#6b7280' }}>New</th>
               </tr>
             </thead>
             <tbody>
-              {reports.length === 0 && (
+              {sortedReports.length === 0 && (
                 <tr>
-                  <td colSpan="6" className="empty-state" style={{
+                  <td colSpan="7" className="empty-state" style={{
                     padding: '40px',
                     textAlign: 'center',
                     color: '#6b7280'
@@ -482,53 +622,74 @@ function SupervisorReports({
                   </td>
                 </tr>
               )}
-              {reports.map((r, index) => (
-                <tr key={r.id || index} style={{ borderBottom: '1px solid #f3f4f6' }}>
-                  <td style={{ padding: '12px 16px', fontSize: '13px' }}>{r.reportDate}</td>
-                  <td style={{ padding: '12px 16px', fontSize: '13px' }}>
-                    {r.type === 'self_report' ? '📋 Self Report' : '👤 Officer Report'}
-                  </td>
-                  <td style={{ padding: '12px 16px', fontSize: '13px', fontWeight: '500' }}>
-                    {r.type === 'self_report' ? r.supervisorName : r.officerName}
-                  </td>
-                  <td style={{ padding: '12px 16px', fontSize: '13px' }}>
-                    <span className={`status-tag ${r.overallStatus || r.performance}`} style={{
-                      padding: '2px 10px',
-                      borderRadius: '12px',
-                      fontSize: '11px',
-                      fontWeight: '500',
-                      background: r.overallStatus === 'excellent' || r.performance === 'excellent' ? '#d1fae5' :
-                                r.overallStatus === 'good' || r.performance === 'good' ? '#dbeafe' :
-                                r.overallStatus === 'average' || r.performance === 'average' ? '#fef3c7' :
-                                '#fee2e2',
-                      color: r.overallStatus === 'excellent' || r.performance === 'excellent' ? '#065f37' :
-                            r.overallStatus === 'good' || r.performance === 'good' ? '#1e40af' :
-                            r.overallStatus === 'average' || r.performance === 'average' ? '#92400e' :
-                            '#991b1b'
-                    }}>
-                      {r.overallStatus || r.performance}
-                    </span>
-                  </td>
-                  <td style={{ padding: '12px 16px', fontSize: '13px', textAlign: 'center' }}>
-                    {r.type === 'self_report' ? 'N/A' : `${r.overallRating}/5 ⭐`}
-                  </td>
-                  <td style={{ padding: '12px 16px', textAlign: 'center', fontSize: '13px' }}>
-                    <span className="status-tag submitted" style={{
-                      padding: '2px 10px',
-                      borderRadius: '12px',
-                      fontSize: '11px',
-                      fontWeight: '500',
-                      background: r.synced ? '#d1fae5' : '#fef3c7',
-                      color: r.synced ? '#065f37' : '#92400e',
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: '4px'
-                    }}>
-                      {r.synced ? '✅ Synced' : '📡 Offline'}
-                    </span>
-                  </td>
-                </tr>
-              ))}
+              {sortedReports.map((r, index) => {
+                const isNew = isNewReport(r);
+                const displayDate = formatDateTime(r.submittedAt || r.reportDate || r.createdAt);
+                return (
+                  <tr key={r.id || index} style={{ borderBottom: '1px solid #f3f4f6' }}>
+                    <td style={{ padding: '12px 16px', fontSize: '13px', whiteSpace: 'nowrap' }}>
+                      {displayDate}
+                    </td>
+                    <td style={{ padding: '12px 16px', fontSize: '13px' }}>
+                      {r.type === 'self_report' ? '📋 Self Report' : '👤 Officer Report'}
+                    </td>
+                    <td style={{ padding: '12px 16px', fontSize: '13px', fontWeight: '500' }}>
+                      {r.type === 'self_report' ? r.supervisorName : r.officerName}
+                    </td>
+                    <td style={{ padding: '12px 16px', fontSize: '13px' }}>
+                      <span className={`status-tag ${r.overallStatus || r.performance}`} style={{
+                        padding: '2px 10px',
+                        borderRadius: '12px',
+                        fontSize: '11px',
+                        fontWeight: '500',
+                        background: r.overallStatus === 'excellent' || r.performance === 'excellent' ? '#d1fae5' :
+                                  r.overallStatus === 'good' || r.performance === 'good' ? '#dbeafe' :
+                                  r.overallStatus === 'average' || r.performance === 'average' ? '#fef3c7' :
+                                  '#fee2e2',
+                        color: r.overallStatus === 'excellent' || r.performance === 'excellent' ? '#065f37' :
+                              r.overallStatus === 'good' || r.performance === 'good' ? '#1e40af' :
+                              r.overallStatus === 'average' || r.performance === 'average' ? '#92400e' :
+                              '#991b1b'
+                      }}>
+                        {r.overallStatus || r.performance}
+                      </span>
+                    </td>
+                    <td style={{ padding: '12px 16px', fontSize: '13px', textAlign: 'center' }}>
+                      {r.type === 'self_report' ? 'N/A' : `${r.overallRating}/5 ⭐`}
+                    </td>
+                    <td style={{ padding: '12px 16px', textAlign: 'center', fontSize: '13px' }}>
+                      <span className="status-tag submitted" style={{
+                        padding: '2px 10px',
+                        borderRadius: '12px',
+                        fontSize: '11px',
+                        fontWeight: '500',
+                        background: r.synced ? '#d1fae5' : '#fef3c7',
+                        color: r.synced ? '#065f37' : '#92400e',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '4px'
+                      }}>
+                        {r.synced ? '✅ Synced' : '📡 Offline'}
+                      </span>
+                    </td>
+                    <td style={{ padding: '12px 16px', textAlign: 'center', fontSize: '13px' }}>
+                      {isNew && (
+                        <span style={{
+                          background: '#dc2626',
+                          color: 'white',
+                          padding: '2px 10px',
+                          borderRadius: '12px',
+                          fontSize: '10px',
+                          fontWeight: '700',
+                          textTransform: 'uppercase'
+                        }}>
+                          NEW
+                        </span>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -566,7 +727,7 @@ function SupervisorReports({
         )}
       </div>
 
-      {/* ===== OFFICER REPORT MODAL (FULL) ===== */}
+      {/* ===== OFFICER REPORT MODAL ===== */}
       {showOfficerReport && (
         <div className="modal-overlay" onClick={() => setShowOfficerReport(false)}>
           <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{
@@ -928,7 +1089,7 @@ function SupervisorReports({
         </div>
       )}
 
-      {/* ===== SELF REPORT MODAL (FULL) ===== */}
+      {/* ===== SELF REPORT MODAL ===== */}
       {showSelfReport && (
         <div className="modal-overlay" onClick={() => setShowSelfReport(false)}>
           <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{

@@ -1,5 +1,5 @@
-// server.js - COMPLETE WITH ALL ROUTES (REPORTS, ATTENDANCE, CITIZENS, USERS, LEAVES, PERMISSIONS, TASKS, SCREEN TIME, AUDIT, ALERTS, VERIFICATION, SUPERVISOR REPORTS)
-// AND SYNC CASES FOR ALL ENTITIES
+// server.js – COMPLETE WITH ALL ROUTES (REPORTS, ATTENDANCE, CITIZENS, USERS, LEAVES, PERMISSIONS, TASKS, SCREEN TIME, AUDIT, ALERTS, VERIFICATION, SUPERVISOR REPORTS)
+// AND SYNC CASES FOR ALL ENTITIES INCLUDING leave_update, permission_update, AND verification
 
 const express = require('express');
 const cors = require('cors');
@@ -47,7 +47,7 @@ const screenTimeRouter = require('./routes/screenTime');
 const auditRouter = require('./routes/audit');
 const alertsRouter = require('./routes/alerts');
 const verificationRouter = require('./routes/verification');
-const supervisorReportsRouter = require('./routes/supervisorReports'); // NEW
+const supervisorReportsRouter = require('./routes/supervisorReports');
 
 // Mount routers
 app.use('/api/tasks', tasksRouter);
@@ -55,10 +55,10 @@ app.use('/api/screen-time', screenTimeRouter);
 app.use('/api/audit', auditRouter);
 app.use('/api/alerts', alertsRouter);
 app.use('/api/verification', verificationRouter);
-app.use('/api/supervisor-reports', supervisorReportsRouter); // NEW
+app.use('/api/supervisor-reports', supervisorReportsRouter);
 
 // ============================================================
-// REPORT ROUTES (unchanged)
+// REPORT ROUTES
 // ============================================================
 app.get('/api/reports', async (req, res) => {
     try {
@@ -167,7 +167,7 @@ app.delete('/api/reports/:id', async (req, res) => {
 });
 
 // ============================================================
-// ATTENDANCE ROUTES (unchanged)
+// ATTENDANCE ROUTES
 // ============================================================
 app.get('/api/attendance', async (req, res) => {
     try {
@@ -239,7 +239,7 @@ app.put('/api/attendance/:id', async (req, res) => {
 });
 
 // ============================================================
-// CITIZEN ROUTES (unchanged)
+// CITIZEN ROUTES
 // ============================================================
 app.get('/api/citizens', async (req, res) => {
     try {
@@ -292,7 +292,7 @@ app.post('/api/citizens', async (req, res) => {
 });
 
 // ============================================================
-// USER ROUTES (unchanged)
+// USER ROUTES
 // ============================================================
 app.get('/api/users', async (req, res) => {
     try {
@@ -380,7 +380,7 @@ app.delete('/api/users/:id', async (req, res) => {
 });
 
 // ============================================================
-// LEAVE ROUTES (unchanged)
+// LEAVE ROUTES (UPDATED POST + PUT)
 // ============================================================
 app.get('/api/leaves', async (req, res) => {
     try {
@@ -396,24 +396,88 @@ app.post('/api/leaves', async (req, res) => {
         const data = req.body;
         const result = await pool.query(
             `INSERT INTO leaves (
-                employee_id, employee_name, start_date, end_date,
-                reason, type, status, created_at
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                id, employee_id, employee_name, start_date, end_date,
+                reason, type, status, created_at, approved_by, approved_at, synced
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+            ON CONFLICT (id) DO UPDATE SET
+                employee_id = EXCLUDED.employee_id,
+                employee_name = EXCLUDED.employee_name,
+                start_date = EXCLUDED.start_date,
+                end_date = EXCLUDED.end_date,
+                reason = EXCLUDED.reason,
+                type = EXCLUDED.type,
+                status = EXCLUDED.status,
+                approved_by = EXCLUDED.approved_by,
+                approved_at = EXCLUDED.approved_at,
+                synced = EXCLUDED.synced,
+                updated_at = CURRENT_TIMESTAMP
             RETURNING *`,
             [
-                data.employeeId, data.employeeName, data.startDate,
-                data.endDate, data.reason, data.type,
-                data.status || 'pending', data.createdAt || new Date().toISOString()
+                data.id,
+                data.employeeId,
+                data.employeeName,
+                data.startDate,
+                data.endDate,
+                data.reason,
+                data.type,
+                data.status || 'pending',
+                data.createdAt || new Date().toISOString(),
+                data.approvedBy || null,
+                data.approvedAt || null,
+                data.synced || false
             ]
         );
         res.status(201).json(result.rows[0]);
     } catch (error) {
+        console.error('Error creating leave:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+app.put('/api/leaves/:id', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const data = req.body;
+        const result = await pool.query(
+            `UPDATE leaves SET
+                employee_id = $1,
+                employee_name = $2,
+                start_date = $3,
+                end_date = $4,
+                reason = $5,
+                type = $6,
+                status = $7,
+                approved_by = $8,
+                approved_at = $9,
+                synced = $10
+            WHERE id = $11
+            RETURNING *`,
+            [
+                data.employeeId,
+                data.employeeName,
+                data.startDate,
+                data.endDate,
+                data.reason,
+                data.type,
+                data.status,
+                data.approvedBy,
+                data.approvedAt,
+                true,
+                id
+            ]
+        );
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: 'Leave not found' });
+        }
+        res.json(result.rows[0]);
+    } catch (error) {
+        console.error('Error updating leave:', error);
         res.status(500).json({ error: error.message });
     }
 });
 
 // ============================================================
-// PERMISSION ROUTES (unchanged)
+// PERMISSION ROUTES (UPDATED POST + PUT)
 // ============================================================
 app.get('/api/permissions', async (req, res) => {
     try {
@@ -429,24 +493,89 @@ app.post('/api/permissions', async (req, res) => {
         const data = req.body;
         const result = await pool.query(
             `INSERT INTO permissions (
-                employee_id, employee_name, permission_type,
-                start_date, end_date, reason, status, requested_at
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                id, employee_id, employee_name, permission_type,
+                start_date, end_date, reason, status, requested_at,
+                approved_by, approved_at, synced
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+            ON CONFLICT (id) DO UPDATE SET
+                employee_id = EXCLUDED.employee_id,
+                employee_name = EXCLUDED.employee_name,
+                permission_type = EXCLUDED.permission_type,
+                start_date = EXCLUDED.start_date,
+                end_date = EXCLUDED.end_date,
+                reason = EXCLUDED.reason,
+                status = EXCLUDED.status,
+                approved_by = EXCLUDED.approved_by,
+                approved_at = EXCLUDED.approved_at,
+                synced = EXCLUDED.synced,
+                updated_at = CURRENT_TIMESTAMP
             RETURNING *`,
             [
-                data.employeeId, data.employeeName, data.permissionType,
-                data.startDate, data.endDate, data.reason,
-                data.status || 'pending', data.requestedAt || new Date().toISOString()
+                data.id,
+                data.employeeId,
+                data.employeeName,
+                data.permissionType,
+                data.startDate,
+                data.endDate,
+                data.reason,
+                data.status || 'pending',
+                data.requestedAt || new Date().toISOString(),
+                data.approvedBy || null,
+                data.approvedAt || null,
+                data.synced || false
             ]
         );
         res.status(201).json(result.rows[0]);
     } catch (error) {
+        console.error('Error creating permission:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+app.put('/api/permissions/:id', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const data = req.body;
+        const result = await pool.query(
+            `UPDATE permissions SET
+                employee_id = $1,
+                employee_name = $2,
+                permission_type = $3,
+                start_date = $4,
+                end_date = $5,
+                reason = $6,
+                status = $7,
+                approved_by = $8,
+                approved_at = $9,
+                synced = $10
+            WHERE id = $11
+            RETURNING *`,
+            [
+                data.employeeId,
+                data.employeeName,
+                data.permissionType,
+                data.startDate,
+                data.endDate,
+                data.reason,
+                data.status,
+                data.approvedBy,
+                data.approvedAt,
+                true,
+                id
+            ]
+        );
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: 'Permission not found' });
+        }
+        res.json(result.rows[0]);
+    } catch (error) {
+        console.error('Error updating permission:', error);
         res.status(500).json({ error: error.message });
     }
 });
 
 // ============================================================
-// SYNC ROUTE – EXTENDED WITH TASKS, SCREEN TIME, AUDIT, ALERTS, VERIFICATION, SUPERVISOR REPORTS
+// SYNC ROUTE – EXTENDED WITH leave_update, permission_update, AND verification
 // ============================================================
 app.post('/api/sync', async (req, res) => {
     try {
@@ -536,14 +665,53 @@ app.post('/api/sync', async (req, res) => {
             case 'leave':
                 result = await pool.query(
                     `INSERT INTO leaves (
-                        employee_id, employee_name, start_date, end_date,
-                        reason, type, status, created_at
-                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                        id, employee_id, employee_name, start_date, end_date,
+                        reason, type, status, created_at, approved_by, approved_at, synced
+                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+                    ON CONFLICT (id) DO UPDATE SET
+                        employee_id = EXCLUDED.employee_id,
+                        employee_name = EXCLUDED.employee_name,
+                        start_date = EXCLUDED.start_date,
+                        end_date = EXCLUDED.end_date,
+                        reason = EXCLUDED.reason,
+                        type = EXCLUDED.type,
+                        status = EXCLUDED.status,
+                        approved_by = EXCLUDED.approved_by,
+                        approved_at = EXCLUDED.approved_at,
+                        synced = EXCLUDED.synced,
+                        updated_at = CURRENT_TIMESTAMP
                     RETURNING *`,
                     [
-                        data.employeeId, data.employeeName, data.startDate,
-                        data.endDate, data.reason, data.type,
-                        data.status || 'pending', data.createdAt || new Date().toISOString()
+                        data.id,
+                        data.employeeId,
+                        data.employeeName,
+                        data.startDate,
+                        data.endDate,
+                        data.reason,
+                        data.type,
+                        data.status || 'pending',
+                        data.createdAt || new Date().toISOString(),
+                        data.approvedBy || null,
+                        data.approvedAt || null,
+                        data.synced || false
+                    ]
+                );
+                break;
+
+            case 'leave_update':
+                result = await pool.query(
+                    `UPDATE leaves SET
+                        status = $1,
+                        approved_by = $2,
+                        approved_at = $3,
+                        synced = true
+                    WHERE id = $4
+                    RETURNING *`,
+                    [
+                        data.status,
+                        data.approvedBy,
+                        data.approvedAt || new Date().toISOString(),
+                        data.id
                     ]
                 );
                 break;
@@ -551,14 +719,54 @@ app.post('/api/sync', async (req, res) => {
             case 'permission':
                 result = await pool.query(
                     `INSERT INTO permissions (
-                        employee_id, employee_name, permission_type,
-                        start_date, end_date, reason, status, requested_at
-                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                        id, employee_id, employee_name, permission_type,
+                        start_date, end_date, reason, status, requested_at,
+                        approved_by, approved_at, synced
+                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+                    ON CONFLICT (id) DO UPDATE SET
+                        employee_id = EXCLUDED.employee_id,
+                        employee_name = EXCLUDED.employee_name,
+                        permission_type = EXCLUDED.permission_type,
+                        start_date = EXCLUDED.start_date,
+                        end_date = EXCLUDED.end_date,
+                        reason = EXCLUDED.reason,
+                        status = EXCLUDED.status,
+                        approved_by = EXCLUDED.approved_by,
+                        approved_at = EXCLUDED.approved_at,
+                        synced = EXCLUDED.synced,
+                        updated_at = CURRENT_TIMESTAMP
                     RETURNING *`,
                     [
-                        data.employeeId, data.employeeName, data.permissionType,
-                        data.startDate, data.endDate, data.reason,
-                        data.status || 'pending', data.requestedAt || new Date().toISOString()
+                        data.id,
+                        data.employeeId,
+                        data.employeeName,
+                        data.permissionType,
+                        data.startDate,
+                        data.endDate,
+                        data.reason,
+                        data.status || 'pending',
+                        data.requestedAt || new Date().toISOString(),
+                        data.approvedBy || null,
+                        data.approvedAt || null,
+                        data.synced || false
+                    ]
+                );
+                break;
+
+            case 'permission_update':
+                result = await pool.query(
+                    `UPDATE permissions SET
+                        status = $1,
+                        approved_by = $2,
+                        approved_at = $3,
+                        synced = true
+                    WHERE id = $4
+                    RETURNING *`,
+                    [
+                        data.status,
+                        data.approvedBy,
+                        data.approvedAt || new Date().toISOString(),
+                        data.id
                     ]
                 );
                 break;
@@ -598,7 +806,6 @@ app.post('/api/sync', async (req, res) => {
                 );
                 break;
 
-            // TASKS
             case 'task':
                 result = await pool.query(
                     `INSERT INTO tasks (
@@ -638,7 +845,6 @@ app.post('/api/sync', async (req, res) => {
                 );
                 break;
 
-            // SCREEN TIME
             case 'screen_time':
                 result = await pool.query(
                     `INSERT INTO screen_time (
@@ -682,7 +888,6 @@ app.post('/api/sync', async (req, res) => {
                 );
                 break;
 
-            // AUDIT LOGS
             case 'audit':
                 result = await pool.query(
                     `INSERT INTO audit_logs (id, user_id, user_name, action, details, timestamp, ip)
@@ -703,7 +908,6 @@ app.post('/api/sync', async (req, res) => {
                 );
                 break;
 
-            // ALERTS
             case 'alert':
                 result = await pool.query(
                     `INSERT INTO alerts (
@@ -739,7 +943,7 @@ app.post('/api/sync', async (req, res) => {
                 );
                 break;
 
-            // VERIFICATION
+            // ===== VERIFICATION SYNC (ALREADY PRESENT) =====
             case 'verification':
                 result = await pool.query(
                     `INSERT INTO verification_history (
@@ -770,7 +974,6 @@ app.post('/api/sync', async (req, res) => {
                 );
                 break;
 
-            // SUPERVISOR REPORTS (NEW)
             case 'supervisor_report':
                 result = await pool.query(
                     `INSERT INTO supervisor_reports (
@@ -874,8 +1077,10 @@ app.listen(PORT, () => {
     console.log(`   DELETE /api/users/:id`);
     console.log(`   GET  /api/leaves`);
     console.log(`   POST /api/leaves`);
+    console.log(`   PUT  /api/leaves/:id`);
     console.log(`   GET  /api/permissions`);
     console.log(`   POST /api/permissions`);
+    console.log(`   PUT  /api/permissions/:id`);
     console.log(`   GET  /api/tasks`);
     console.log(`   POST /api/tasks`);
     console.log(`   PUT  /api/tasks/:id`);
@@ -893,9 +1098,9 @@ app.listen(PORT, () => {
     console.log(`   GET  /api/verification`);
     console.log(`   POST /api/verification`);
     console.log(`   DELETE /api/verification`);
-    console.log(`   GET  /api/supervisor-reports`);    // NEW
-    console.log(`   POST /api/supervisor-reports`);    // NEW
-    console.log(`   PUT  /api/supervisor-reports/:id`); // NEW
-    console.log(`   DELETE /api/supervisor-reports/:id`); // NEW
+    console.log(`   GET  /api/supervisor-reports`);
+    console.log(`   POST /api/supervisor-reports`);
+    console.log(`   PUT  /api/supervisor-reports/:id`);
+    console.log(`   DELETE /api/supervisor-reports/:id`);
     console.log(`   POST /api/sync`);
 });

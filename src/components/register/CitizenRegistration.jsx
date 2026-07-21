@@ -1,10 +1,12 @@
-// components/register/CitizenRegistration.js
+// components/register/CitizenRegistration.js – FULLY VALIDATED (18+, no duplicate name/email)
 
 import React, { useState, useEffect } from 'react';
 import { db, syncQueue, checkRealInternet } from '../../services/database';
 import { uid } from '../../utils/helpers';
 
-// ===== LANGUAGE TRANSLATIONS =====
+const API_BASE = 'http://localhost:5000/api';
+
+// ===== LANGUAGE TRANSLATIONS (added duplicate errors for name & email) =====
 const translations = {
   en: {
     title: '🆔 Register Citizen for National ID',
@@ -12,18 +14,25 @@ const translations = {
     offlineReady: 'Offline Ready',
     firstName: 'First Name *',
     firstNamePlaceholder: 'Enter first name',
+    firstNameError: 'First name must contain only letters and spaces',
     lastName: 'Last Name *',
     lastNamePlaceholder: 'Enter last name',
+    lastNameError: 'Last name must contain only letters and spaces',
     dateOfBirth: 'Date of Birth *',
+    dateOfBirthError: 'Please enter a valid date of birth (must be in the past)',
+    ageError: 'Citizen must be 18 years or older',
     gender: 'Gender *',
     selectGender: 'Select Gender',
     male: 'Male',
     female: 'Female',
     other: 'Other',
     phone: 'Phone Number *',
-    phonePlaceholder: 'Enter phone number',
+    phonePlaceholder: '+2519XXXXXXXX',
+    phoneError: 'Phone must start with +2519 followed by 8 digits (e.g., +251912345678)',
     email: 'Email',
     emailPlaceholder: 'Enter email address',
+    emailError: 'Please enter a valid email address',
+    duplicateEmail: 'This email is already registered',
     region: 'Region *',
     selectRegion: 'Select Region',
     north: 'North',
@@ -45,12 +54,6 @@ const translations = {
     married: 'Married',
     divorced: 'Divorced',
     widowed: 'Widowed',
-    idType: 'ID Type',
-    nationalId: 'National ID',
-    birthCertificate: 'Birth Certificate',
-    passport: 'Passport',
-    idNumber: 'ID Number',
-    idNumberPlaceholder: 'Enter ID number',
     biometrics: 'Biometrics Collected',
     yes: 'Yes',
     no: 'No',
@@ -68,26 +71,35 @@ const translations = {
     offline: 'Offline',
     pendingSync: 'pending sync',
     offlineMode: 'Offline Mode:',
-    offlineMessage: 'Citizens will be saved locally and synced automatically when online.'
+    offlineMessage: 'Citizens will be saved locally and synced automatically when online.',
+    fixErrors: 'Please fix the validation errors before submitting.',
+    duplicateName: 'A citizen with this name already exists'
   },
   am: {
     title: '🆔 ለብሔራዊ መታወቂያ ዜጋ ይመዝገቡ',
     subtitle: 'ለብሔራዊ መታወቂያ ምዝገባ የዜጋ መረጃ ያስገቡ',
-    offlineReady: 'ከመስመር ውጭ ዝግጁ',
+    offlineReady: 'ከመስመር ውጭ ዝጁ',
     firstName: 'ስም *',
     firstNamePlaceholder: 'ስም ያስገቡ',
+    firstNameError: 'ስም ፊደላት እና ክፍተቶችን ብቻ መያዝ አለበት',
     lastName: 'የአባት ስም *',
     lastNamePlaceholder: 'የአባት ስም ያስገቡ',
+    lastNameError: 'የአባት ስም ፊደላት እና ክፍተቶችን ብቻ መያዝ አለበት',
     dateOfBirth: 'የትውልድ ቀን *',
+    dateOfBirthError: 'እባክዎ ትክክለኛ የትውልድ ቀን ያስገቡ (ያለፈ ጊዜ መሆን አለበት)',
+    ageError: 'ዜጋ ከ18 ዓመት በላይ መሆን አለበት',
     gender: 'ጾታ *',
     selectGender: 'ጾታ ይምረጡ',
     male: 'ወንድ',
     female: 'ሴት',
     other: 'ሌላ',
     phone: 'ስልክ ቁጥር *',
-    phonePlaceholder: 'ስልክ ቁጥር ያስገቡ',
+    phonePlaceholder: '+2519XXXXXXXX',
+    phoneError: 'ስልክ ቁጥር በ+2519 መጀመር እና 8 አሃዞች መከተል አለበት (ለምሳሌ፡ +251912345678)',
     email: 'ኢሜይል',
     emailPlaceholder: 'ኢሜይል አድራሻ ያስገቡ',
+    emailError: 'እባክዎ ትክክለኛ የኢሜይል አድራሻ ያስገቡ',
+    duplicateEmail: 'ይህ ኢሜይል ቀድሞ ተመዝግቧል',
     region: 'ክልል *',
     selectRegion: 'ክልል ይምረጡ',
     north: 'ሰሜን',
@@ -109,12 +121,6 @@ const translations = {
     married: 'ያገባ',
     divorced: 'የተፋታ',
     widowed: 'መበለት',
-    idType: 'የመታወቂያ አይነት',
-    nationalId: 'ብሔራዊ መታወቂያ',
-    birthCertificate: 'የትውልድ የምስክር ወረቀት',
-    passport: 'ፓስፖርት',
-    idNumber: 'የመታወቂያ ቁጥር',
-    idNumberPlaceholder: 'የመታወቂያ ቁጥር ያስገቡ',
     biometrics: 'ባዮሜትሪክስ የተሰበሰበ',
     yes: 'አዎ',
     no: 'አይ',
@@ -132,7 +138,9 @@ const translations = {
     offline: 'ከመስመር ውጭ',
     pendingSync: 'በመጠበቅ ላይ',
     offlineMode: 'ከመስመር ውጭ ሁነታ፡',
-    offlineMessage: 'ዜጎች በአካባቢው ይቀመጣሉ እና በመስመር ላይ ሲሆኑ በራስ-ሰር ይመሳሰላሉ።'
+    offlineMessage: 'ዜጎች በአካባቢው ይቀመጣሉ እና በመስመር ላይ ሲሆኑ በራስ-ሰር ይመሳሰላሉ።',
+    fixErrors: 'ከማስገባትዎ በፊት የማረጋገጫ ስህተቶችን ያስተካክሉ።',
+    duplicateName: 'በዚህ ስም የተመዘገበ ዜጋ አለ'
   },
   om: {
     title: '🆔 Firoota Magaalaa Sabaa Qabaachuuf Galmeessaa',
@@ -140,18 +148,25 @@ const translations = {
     offlineReady: 'Offline Qopheessa',
     firstName: 'Maqaa Dura *',
     firstNamePlaceholder: 'Maqaa dura galchi',
+    firstNameError: 'Maqaan qubee fi bakka duwwaa qofa qabaachuu qaba',
     lastName: 'Maqaa Abbootii *',
     lastNamePlaceholder: 'Maqaa Abbootii galchi',
+    lastNameError: 'Maqaan Abbootii qubee fi bakka duwwaa qofa qabaachuu qaba',
     dateOfBirth: 'Guyyaa Dhalootaa *',
+    dateOfBirthError: 'Guyyaa dhalootaa sirrii galchi (guyyaa darbe ta\'uu qaba)',
+    ageError: 'Firoon waggaa 18 fi olii ta\'uu qaba',
     gender: 'Saala *',
     selectGender: 'Saala fili',
     male: 'Dhiira',
     female: 'Dubartii',
     other: 'Kan Biroo',
     phone: 'Lakkoobsa Bilbilaa *',
-    phonePlaceholder: 'Lakkoobsa bilbilaa galchi',
+    phonePlaceholder: '+2519XXXXXXXX',
+    phoneError: 'Lakkoobsi bilbilaa +2519 jalqabee 8 lakkoobsa qabaachuu qaba (fakkeenya: +251912345678)',
     email: 'Email',
     emailPlaceholder: 'Teessoo email galchi',
+    emailError: 'Teessoo email sirrii galchi',
+    duplicateEmail: 'Email kun dura galmeeffame',
     region: 'Naannoo *',
     selectRegion: 'Naannoo fili',
     north: 'Kaaba',
@@ -173,12 +188,6 @@ const translations = {
     married: 'Kan Fuudhe/Heerume',
     divorced: 'Kan Hiiku',
     widowed: 'Kan Hiyyeesee',
-    idType: 'Gosa Waraqaa Magaalaa',
-    nationalId: 'Waraqaa Magaalaa Sabaa',
-    birthCertificate: 'Waraqaa Dhalootaa',
-    passport: 'Paasipooriti',
-    idNumber: 'Lakkoobsa Waraqaa Magaalaa',
-    idNumberPlaceholder: 'Lakkoobsa waraqaa magaalaa galchi',
     biometrics: 'Biometrics Walitti Qabame',
     yes: 'Eeyyee',
     no: 'Lakkii',
@@ -196,7 +205,9 @@ const translations = {
     offline: 'Offline',
     pendingSync: 'eegachaa jira',
     offlineMode: 'Haala Offline:',
-    offlineMessage: 'Firoonni naannoo keessatti qusatamanii yeroo online ta\'an ofiifuu wal qabsiifamu.'
+    offlineMessage: 'Firoonni naannoo keessatti qusatamanii yeroo online ta\'an ofiifuu wal qabsiifamu.',
+    fixErrors: 'Galmeessuu dura dogoggora mirkaneessaa sirreessi.',
+    duplicateName: 'Firoon maqaa kanaan dura galmeeffame'
   },
   ti: {
     title: '🆔 ንብሔራዊ መታወቂያ ዜጋ ተመዝገብ',
@@ -204,18 +215,25 @@ const translations = {
     offlineReady: 'ብልዕ መስመር ተዳሉ',
     firstName: 'ስም *',
     firstNamePlaceholder: 'ስም አእትዉ',
+    firstNameError: 'ስም ፊደላትን ክፍተትን ጥራይ ክህዝ ኣለዎ',
     lastName: 'ስም ኣቦ *',
     lastNamePlaceholder: 'ስም ኣቦ አእትዉ',
+    lastNameError: 'ስም ኣቦ ፊደላትን ክፍተትን ጥራይ ክህዝ ኣለዎ',
     dateOfBirth: 'ዕለት ትውልድ *',
+    dateOfBirthError: 'ቅኑዕ ዕለት ትውልድ አእትዉ (ናይ ሓሊፉ ግዜ ክኸዉን ኣለዎ)',
+    ageError: 'ዜጋ 18 ዓመት ወይ ንላዕሊ ክኸዉን ኣለዎ',
     gender: 'ጾታ *',
     selectGender: 'ጾታ ምረጹ',
     male: 'ተባዕታይ',
     female: 'ኣንስተይቲ',
     other: 'ካልእ',
     phone: 'ቁጽሪ ተሌፎን *',
-    phonePlaceholder: 'ቁጽሪ ተሌፎን አእትዉ',
+    phonePlaceholder: '+2519XXXXXXXX',
+    phoneError: 'ቁጽሪ ተሌፎን ብ+2519 ክጅምርን 8 ቁጽሪታት ክስዕብን ኣለዎ (ኣብነት፡ +251912345678)',
     email: 'ኢመይል',
     emailPlaceholder: 'አድራሻ ኢመይል አእትዉ',
+    emailError: 'ቅኑዕ አድራሻ ኢመይል አእትዉ',
+    duplicateEmail: 'እዚ ኢመይል ቀደም ተመዝጊቡ',
     region: 'ክልል *',
     selectRegion: 'ክልል ምረጹ',
     north: 'ሰሜን',
@@ -237,12 +255,6 @@ const translations = {
     married: 'ተዳዊሉ',
     divorced: 'ተፈንጺሉ',
     widowed: 'መበለት',
-    idType: 'ዓይነት መታወቂያ',
-    nationalId: 'ብሔራዊ መታወቂያ',
-    birthCertificate: 'ሰርቲፊኬት ትውልድ',
-    passport: 'ፓስፖርት',
-    idNumber: 'ቁጽሪ መታወቂያ',
-    idNumberPlaceholder: 'ቁጽሪ መታወቂያ አእትዉ',
     biometrics: 'ባዮሜትሪክስ ተሰብሲቡ',
     yes: 'እወ',
     no: 'አይኮን',
@@ -260,7 +272,9 @@ const translations = {
     offline: 'ብልዕ መስመር',
     pendingSync: 'ብምጽባይ ኣሎ',
     offlineMode: 'ብልዕ መስመር ሁነታ:',
-    offlineMessage: 'ዜጋታት ብአካባቢ ይቅመጡ እዮም እሞ መስመር ምስ ተመልሰ ብራሱ ይመሳሰሉ።'
+    offlineMessage: 'ዜጋታት ብአካባቢ ይቅመጡ እዮም እሞ መስመር ምስ ተመልሰ ብራሱ ይመሳሰሉ።',
+    fixErrors: 'ቅድሚ ምስዳእኩም ጌጋታት ምዝገባ ኣርምዑ።',
+    duplicateName: 'ዜጋ በዚ ስም ቀደም ተመዝጊቡ'
   }
 };
 
@@ -279,10 +293,18 @@ function CitizenRegistration({ user, citizens, setCitizens, addNotification }) {
     village: '',
     occupation: '',
     maritalStatus: '',
-    idType: 'National ID',
-    idNumber: '',
     biometrics: false
   });
+  const [errors, setErrors] = useState({
+    firstName: '',
+    lastName: '',
+    dateOfBirth: '',
+    gender: '',
+    phone: '',
+    email: '',
+    region: ''
+  });
+  const [touched, setTouched] = useState({});
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   const [pendingCount, setPendingCount] = useState(0);
@@ -292,7 +314,7 @@ function CitizenRegistration({ user, citizens, setCitizens, addNotification }) {
   // Get translations
   const t = translations[language] || translations.en;
 
-  // Language options - ALL 4 LANGUAGES
+  // Language options
   const languages = [
     { code: 'en', label: '🇬🇧 English' },
     { code: 'am', label: '🇪🇹 አማርኛ' },
@@ -300,6 +322,202 @@ function CitizenRegistration({ user, citizens, setCitizens, addNotification }) {
     { code: 'ti', label: '🇪🇹 ትግርኛ' }
   ];
 
+  // ============================================================
+  // VALIDATION FUNCTIONS
+  // ============================================================
+  const validateName = (value) => {
+    if (!value.trim()) return 'This field is required';
+    if (!/^[a-zA-Z\s\-']+$/.test(value)) return t.firstNameError || 'Must contain only letters and spaces';
+    return '';
+  };
+
+  const validateDateOfBirth = (value) => {
+    if (!value) return 'Date of birth is required';
+    const birthDate = new Date(value);
+    const today = new Date();
+    if (birthDate > today) return t.dateOfBirthError || 'Date of birth cannot be in the future';
+
+    let age = today.getFullYear() - birthDate.getFullYear();
+    const monthDiff = today.getMonth() - birthDate.getMonth();
+    if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
+      age--;
+    }
+    if (age < 18) {
+      return t.ageError || 'Citizen must be 18 years or older';
+    }
+    return '';
+  };
+
+  const validatePhone = (value) => {
+    if (!value.trim()) return 'Phone number is required';
+    if (!/^\+2519\d{8}$/.test(value.trim())) {
+      return t.phoneError || 'Phone must start with +2519 followed by 8 digits (e.g., +251912345678)';
+    }
+    return '';
+  };
+
+  const validateEmail = (value) => {
+    if (!value.trim()) return '';
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) {
+      return t.emailError || 'Please enter a valid email address';
+    }
+    return '';
+  };
+
+  const validateGender = (value) => {
+    if (!value) return 'Gender is required';
+    return '';
+  };
+
+  const validateRegion = (value) => {
+    if (!value) return 'Region is required';
+    return '';
+  };
+
+  // ============================================================
+  // DUPLICATE CHECKS (name & email only)
+  // ============================================================
+  const checkDuplicates = () => {
+    const dupErrors = {};
+    const existing = citizens || [];
+
+    // Check duplicate full name (case-insensitive)
+    const fullName = `${form.firstName.trim()} ${form.lastName.trim()}`.toLowerCase();
+    if (fullName.trim()) {
+      const nameExists = existing.some(c => 
+        c.firstName && c.lastName && 
+        `${c.firstName} ${c.lastName}`.toLowerCase() === fullName
+      );
+      if (nameExists) {
+        dupErrors.firstName = t.duplicateName || 'A citizen with this name already exists';
+      }
+    }
+
+    // Check duplicate email (if provided)
+    if (form.email.trim()) {
+      const emailExists = existing.some(c => c.email && c.email.toLowerCase() === form.email.trim().toLowerCase());
+      if (emailExists) {
+        dupErrors.email = t.duplicateEmail || 'This email is already registered';
+      }
+    }
+
+    return dupErrors;
+  };
+
+  // ============================================================
+  // VALIDATE ALL FIELDS (including duplicates)
+  // ============================================================
+  const validateAll = () => {
+    const newErrors = {
+      firstName: validateName(form.firstName),
+      lastName: validateName(form.lastName),
+      dateOfBirth: validateDateOfBirth(form.dateOfBirth),
+      gender: validateGender(form.gender),
+      phone: validatePhone(form.phone),
+      email: validateEmail(form.email),
+      region: validateRegion(form.region)
+    };
+    // Override with duplicate errors if any
+    const dupErrors = checkDuplicates();
+    if (dupErrors.firstName) newErrors.firstName = dupErrors.firstName;
+    if (dupErrors.email) newErrors.email = dupErrors.email;
+
+    setErrors(newErrors);
+    return Object.values(newErrors).every(e => e === '');
+  };
+
+  // ============================================================
+  // HANDLE FIELD CHANGES (real-time)
+  // ============================================================
+  const handleChange = (e) => {
+    const { name, value, type, checked } = e.target;
+    const newValue = type === 'checkbox' ? checked : value;
+    setForm(prev => ({ ...prev, [name]: newValue }));
+    setTouched(prev => ({ ...prev, [name]: true }));
+
+    // Validate only format, not duplicates (duplicates checked on blur or submit)
+    let error = '';
+    switch (name) {
+      case 'firstName':
+      case 'lastName':
+        error = validateName(newValue);
+        break;
+      case 'dateOfBirth':
+        error = validateDateOfBirth(newValue);
+        break;
+      case 'gender':
+        error = validateGender(newValue);
+        break;
+      case 'phone':
+        error = validatePhone(newValue);
+        break;
+      case 'email':
+        error = validateEmail(newValue);
+        break;
+      case 'region':
+        error = validateRegion(newValue);
+        break;
+      default:
+        break;
+    }
+    setErrors(prev => ({ ...prev, [name]: error }));
+    // Clear duplicate errors for fields that are being changed
+    if (name === 'firstName' || name === 'lastName' || name === 'email') {
+      // We'll recalc duplicates on blur and submit; just clear previous duplicate if any to allow typing
+      // But we don't want to clear if the user hasn't fixed the duplicate yet
+      // We can just re-run duplicate check on blur; for now keep as is.
+    }
+  };
+
+  // ============================================================
+  // HANDLE BLUR – trigger duplicate check
+  // ============================================================
+  const handleBlur = (e) => {
+    const { name } = e.target;
+    setTouched(prev => ({ ...prev, [name]: true }));
+
+    // Validate format first
+    let error = '';
+    switch (name) {
+      case 'firstName':
+      case 'lastName':
+        error = validateName(form[name]);
+        break;
+      case 'dateOfBirth':
+        error = validateDateOfBirth(form[name]);
+        break;
+      case 'gender':
+        error = validateGender(form[name]);
+        break;
+      case 'phone':
+        error = validatePhone(form[name]);
+        break;
+      case 'email':
+        error = validateEmail(form[name]);
+        break;
+      case 'region':
+        error = validateRegion(form[name]);
+        break;
+      default:
+        break;
+    }
+    setErrors(prev => ({ ...prev, [name]: error }));
+
+    // If it's a name or email field, also check duplicates
+    if (name === 'firstName' || name === 'lastName' || name === 'email') {
+      const dupErrors = checkDuplicates();
+      if (dupErrors.firstName) {
+        setErrors(prev => ({ ...prev, firstName: dupErrors.firstName }));
+      }
+      if (dupErrors.email) {
+        setErrors(prev => ({ ...prev, email: dupErrors.email }));
+      }
+    }
+  };
+
+  // ============================================================
+  // CHECK ONLINE STATUS (unchanged)
+  // ============================================================
   useEffect(() => {
     const checkNetwork = async () => {
       const online = await checkRealInternet();
@@ -324,16 +542,32 @@ function CitizenRegistration({ user, citizens, setCitizens, addNotification }) {
     };
   }, []);
 
-  const handleChange = (e) => {
-    const { name, value, type, checked } = e.target;
-    setForm(prev => ({ ...prev, [name]: type === 'checkbox' ? checked : value }));
-  };
-
+  // ============================================================
+  // SUBMIT HANDLER
+  // ============================================================
   const handleSubmit = async (e) => {
     e.preventDefault();
     
-    if (!form.firstName.trim() || !form.lastName.trim() || !form.phone.trim() || !form.region) {
-      alert('Please fill in all required fields');
+    // Validate all fields (including duplicates)
+    const isValid = validateAll();
+    if (!isValid) {
+      // Build error list for alert
+      const errorMessages = Object.entries(errors)
+        .filter(([_, msg]) => msg)
+        .map(([field, msg]) => {
+          const fieldNames = {
+            firstName: 'First Name',
+            lastName: 'Last Name',
+            dateOfBirth: 'Date of Birth',
+            gender: 'Gender',
+            phone: 'Phone',
+            email: 'Email',
+            region: 'Region'
+          };
+          return `• ${fieldNames[field] || field}: ${msg}`;
+        })
+        .join('\n');
+      alert(`${t.fixErrors}\n\n${errorMessages}`);
       return;
     }
 
@@ -364,21 +598,74 @@ function CitizenRegistration({ user, citizens, setCitizens, addNotification }) {
         registrationDate: new Date().toISOString(),
         registeredBy: user?.employeeId || 'unknown',
         registeredByName: user?.name || 'Unknown',
-        idType: form.idType || 'National ID',
-        idNumber: form.idNumber.trim() || '',
         biometrics: form.biometrics || false,
         status: 'active',
         createdAt: new Date().toISOString(),
-        synced: online ? true : false
+        synced: false,
+        offlineSaved: !online
       };
 
+      // 1) Save to IndexedDB
       await db.citizens.add(newCitizen);
-      
       if (setCitizens) {
         setCitizens(prev => [newCitizen, ...prev]);
       }
 
-      if (!online) {
+      // 2) Sync to PostgreSQL if online
+      let syncSuccess = false;
+      if (online) {
+        try {
+          const response = await fetch(`${API_BASE}/sync`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              type: 'citizen',
+              data: newCitizen
+            })
+          });
+
+          if (response.ok) {
+            await db.citizens.update(newCitizen.id, { 
+              synced: true,
+              syncedAt: new Date().toISOString()
+            });
+            if (setCitizens) {
+              setCitizens(prev => prev.map(c => c.id === newCitizen.id ? { ...c, synced: true } : c));
+            }
+            syncSuccess = true;
+            setSuccessMessage(`${t.success}\n\n${newCitizen.firstName} ${newCitizen.lastName}\n🆔 ${nationalId}`);
+          } else {
+            throw new Error(`Server responded with ${response.status}`);
+          }
+        } catch (syncError) {
+          console.warn('❌ Failed to sync citizen, queueing:', syncError.message);
+          await db.citizens.update(newCitizen.id, {
+            synced: false,
+            syncError: syncError.message,
+            lastSyncAttempt: Date.now()
+          });
+          syncQueue.add({
+            type: 'citizen',
+            id: newCitizen.id,
+            data: newCitizen
+          });
+          setPendingCount(syncQueue.count());
+          setSuccessMessage(`${t.offlineSuccess}\n\n${newCitizen.firstName} ${newCitizen.lastName}\n🆔 ${nationalId}`);
+          if (addNotification) {
+            await addNotification(
+              user?.id,
+              '💾 Citizen Saved Locally',
+              `Citizen ${newCitizen.firstName} ${newCitizen.lastName} saved offline. Will sync when online.`,
+              'warning'
+            );
+          }
+        }
+      } else {
+        // Offline: queue immediately
+        await db.citizens.update(newCitizen.id, {
+          synced: false,
+          offlineSaved: true
+        });
         syncQueue.add({
           type: 'citizen',
           id: newCitizen.id,
@@ -386,12 +673,19 @@ function CitizenRegistration({ user, citizens, setCitizens, addNotification }) {
         });
         setPendingCount(syncQueue.count());
         setSuccessMessage(`${t.offlineSuccess}\n\n${newCitizen.firstName} ${newCitizen.lastName}\n🆔 ${nationalId}`);
-        setShowSuccess(true);
-      } else {
-        setSuccessMessage(`${t.success}\n\n${newCitizen.firstName} ${newCitizen.lastName}\n🆔 ${nationalId}`);
-        setShowSuccess(true);
+        if (addNotification) {
+          await addNotification(
+            user?.id,
+            '💾 Citizen Saved Offline',
+            `Citizen ${newCitizen.firstName} ${newCitizen.lastName} saved offline. Will sync automatically when online.`,
+            'warning'
+          );
+        }
       }
-      
+
+      setShowSuccess(true);
+
+      // Reset form after 4 seconds
       setTimeout(() => {
         setForm({
           firstName: '',
@@ -406,10 +700,10 @@ function CitizenRegistration({ user, citizens, setCitizens, addNotification }) {
           village: '',
           occupation: '',
           maritalStatus: '',
-          idType: 'National ID',
-          idNumber: '',
           biometrics: false
         });
+        setErrors({ firstName: '', lastName: '', dateOfBirth: '', gender: '', phone: '', email: '', region: '' });
+        setTouched({});
         setShowSuccess(false);
       }, 4000);
       
@@ -421,6 +715,9 @@ function CitizenRegistration({ user, citizens, setCitizens, addNotification }) {
     }
   };
 
+  // ============================================================
+  // CLEAR FORM
+  // ============================================================
   const handleClear = () => {
     if (window.confirm(t.clearConfirm)) {
       setForm({
@@ -436,14 +733,17 @@ function CitizenRegistration({ user, citizens, setCitizens, addNotification }) {
         village: '',
         occupation: '',
         maritalStatus: '',
-        idType: 'National ID',
-        idNumber: '',
         biometrics: false
       });
+      setErrors({ firstName: '', lastName: '', dateOfBirth: '', gender: '', phone: '', email: '', region: '' });
+      setTouched({});
       setShowSuccess(false);
     }
   };
 
+  // ============================================================
+  // RENDER (same as before, but error handling updated)
+  // ============================================================
   return (
     <div style={{ 
       padding: '20px', 
@@ -451,7 +751,7 @@ function CitizenRegistration({ user, citizens, setCitizens, addNotification }) {
       margin: '0 auto',
       fontFamily: 'Inter, system-ui, -apple-system, sans-serif'
     }}>
-      {/* ===== STATUS BAR ===== */}
+      {/* Status Bar */}
       <div style={{
         display: 'flex',
         justifyContent: 'space-between',
@@ -472,11 +772,7 @@ function CitizenRegistration({ user, citizens, setCitizens, addNotification }) {
             borderRadius: '50%',
             background: isOnline ? '#22c55e' : '#ef4444'
           }}></span>
-          <span style={{ 
-            fontWeight: '600', 
-            fontSize: '14px',
-            color: isOnline ? '#166534' : '#991b1b'
-          }}>
+          <span style={{ fontWeight: '600', fontSize: '14px', color: isOnline ? '#166534' : '#991b1b' }}>
             {isOnline ? `✅ ${t.online}` : `❌ ${t.offline}`}
           </span>
         </div>
@@ -503,7 +799,6 @@ function CitizenRegistration({ user, citizens, setCitizens, addNotification }) {
           }}>
             {t.offlineReady}
           </span>
-          {/* ===== LANGUAGE SELECTOR - ALL 4 LANGUAGES ===== */}
           <select 
             value={language} 
             onChange={(e) => setLanguage(e.target.value)}
@@ -525,7 +820,7 @@ function CitizenRegistration({ user, citizens, setCitizens, addNotification }) {
         </div>
       </div>
 
-      {/* ===== OFFLINE BANNER ===== */}
+      {/* Offline Banner */}
       {!isOnline && (
         <div style={{
           padding: '14px 20px',
@@ -539,7 +834,7 @@ function CitizenRegistration({ user, citizens, setCitizens, addNotification }) {
         </div>
       )}
 
-      {/* ===== SUCCESS MESSAGE ===== */}
+      {/* Success Message */}
       {showSuccess && (
         <div style={{
           padding: '16px 20px',
@@ -555,7 +850,7 @@ function CitizenRegistration({ user, citizens, setCitizens, addNotification }) {
         </div>
       )}
 
-      {/* ===== REGISTRATION FORM ===== */}
+      {/* Form Card */}
       <div style={{
         background: 'white',
         borderRadius: '12px',
@@ -563,47 +858,27 @@ function CitizenRegistration({ user, citizens, setCitizens, addNotification }) {
         border: '1px solid #e5e7eb',
         overflow: 'hidden'
       }}>
-        {/* Form Header */}
+        {/* Header */}
         <div style={{
           padding: '24px 28px',
           borderBottom: '1px solid #e5e7eb',
           background: '#fafafa'
         }}>
-          <h3 style={{ 
-            margin: '0 0 4px 0', 
-            fontSize: '20px', 
-            fontWeight: '600',
-            color: '#111827'
-          }}>
+          <h3 style={{ margin: '0 0 4px 0', fontSize: '20px', fontWeight: '600', color: '#111827' }}>
             {t.title}
           </h3>
-          <p style={{ 
-            margin: '0', 
-            color: '#6b7280', 
-            fontSize: '14px'
-          }}>
+          <p style={{ margin: '0', color: '#6b7280', fontSize: '14px' }}>
             {t.subtitle}
           </p>
         </div>
 
         {/* Form Body */}
         <div style={{ padding: '28px' }}>
-          <form onSubmit={handleSubmit}>
+          <form onSubmit={handleSubmit} noValidate>
             {/* Row 1: First Name & Last Name */}
-            <div style={{ 
-              display: 'grid', 
-              gridTemplateColumns: '1fr 1fr', 
-              gap: '20px',
-              marginBottom: '20px'
-            }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', marginBottom: '20px' }}>
               <div className="form-group">
-                <label style={{ 
-                  display: 'block', 
-                  fontWeight: '500', 
-                  marginBottom: '6px', 
-                  fontSize: '14px',
-                  color: '#374151'
-                }}>
+                <label style={{ display: 'block', fontWeight: '500', marginBottom: '6px', fontSize: '14px', color: '#374151' }}>
                   {t.firstName}
                 </label>
                 <input
@@ -611,29 +886,32 @@ function CitizenRegistration({ user, citizens, setCitizens, addNotification }) {
                   name="firstName"
                   value={form.firstName}
                   onChange={handleChange}
+                  onBlur={handleBlur}
                   placeholder={t.firstNamePlaceholder}
                   style={{
                     width: '100%',
                     padding: '10px 14px',
-                    border: '1px solid #d1d5db',
+                    border: `1px solid ${touched.firstName && errors.firstName ? '#dc2626' : '#d1d5db'}`,
                     borderRadius: '8px',
                     fontSize: '14px',
-                    transition: 'border-color 0.15s ease',
-                    outline: 'none'
+                    outline: 'none',
+                    transition: 'border-color 0.15s ease'
                   }}
-                  onFocus={(e) => e.target.style.borderColor = '#3b82f6'}
-                  onBlur={(e) => e.target.style.borderColor = '#d1d5db'}
+                  onFocus={(e) => e.target.style.borderColor = touched.firstName && errors.firstName ? '#dc2626' : '#3b82f6'}
+                  onBlur={(e) => {
+                    handleBlur(e);
+                    e.target.style.borderColor = touched.firstName && errors.firstName ? '#dc2626' : '#d1d5db';
+                  }}
                   required
                 />
+                {touched.firstName && errors.firstName && (
+                  <span style={{ color: '#dc2626', fontSize: '13px', marginTop: '4px', display: 'block' }}>
+                    {errors.firstName}
+                  </span>
+                )}
               </div>
               <div className="form-group">
-                <label style={{ 
-                  display: 'block', 
-                  fontWeight: '500', 
-                  marginBottom: '6px', 
-                  fontSize: '14px',
-                  color: '#374151'
-                }}>
+                <label style={{ display: 'block', fontWeight: '500', marginBottom: '6px', fontSize: '14px', color: '#374151' }}>
                   {t.lastName}
                 </label>
                 <input
@@ -641,38 +919,36 @@ function CitizenRegistration({ user, citizens, setCitizens, addNotification }) {
                   name="lastName"
                   value={form.lastName}
                   onChange={handleChange}
+                  onBlur={handleBlur}
                   placeholder={t.lastNamePlaceholder}
                   style={{
                     width: '100%',
                     padding: '10px 14px',
-                    border: '1px solid #d1d5db',
+                    border: `1px solid ${touched.lastName && errors.lastName ? '#dc2626' : '#d1d5db'}`,
                     borderRadius: '8px',
                     fontSize: '14px',
-                    transition: 'border-color 0.15s ease',
-                    outline: 'none'
+                    outline: 'none',
+                    transition: 'border-color 0.15s ease'
                   }}
-                  onFocus={(e) => e.target.style.borderColor = '#3b82f6'}
-                  onBlur={(e) => e.target.style.borderColor = '#d1d5db'}
+                  onFocus={(e) => e.target.style.borderColor = touched.lastName && errors.lastName ? '#dc2626' : '#3b82f6'}
+                  onBlur={(e) => {
+                    handleBlur(e);
+                    e.target.style.borderColor = touched.lastName && errors.lastName ? '#dc2626' : '#d1d5db';
+                  }}
                   required
                 />
+                {touched.lastName && errors.lastName && (
+                  <span style={{ color: '#dc2626', fontSize: '13px', marginTop: '4px', display: 'block' }}>
+                    {errors.lastName}
+                  </span>
+                )}
               </div>
             </div>
 
             {/* Row 2: Date of Birth & Gender */}
-            <div style={{ 
-              display: 'grid', 
-              gridTemplateColumns: '1fr 1fr', 
-              gap: '20px',
-              marginBottom: '20px'
-            }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', marginBottom: '20px' }}>
               <div className="form-group">
-                <label style={{ 
-                  display: 'block', 
-                  fontWeight: '500', 
-                  marginBottom: '6px', 
-                  fontSize: '14px',
-                  color: '#374151'
-                }}>
+                <label style={{ display: 'block', fontWeight: '500', marginBottom: '6px', fontSize: '14px', color: '#374151' }}>
                   {t.dateOfBirth}
                 </label>
                 <input
@@ -680,46 +956,53 @@ function CitizenRegistration({ user, citizens, setCitizens, addNotification }) {
                   name="dateOfBirth"
                   value={form.dateOfBirth}
                   onChange={handleChange}
+                  onBlur={handleBlur}
                   style={{
                     width: '100%',
                     padding: '10px 14px',
-                    border: '1px solid #d1d5db',
+                    border: `1px solid ${touched.dateOfBirth && errors.dateOfBirth ? '#dc2626' : '#d1d5db'}`,
                     borderRadius: '8px',
                     fontSize: '14px',
-                    transition: 'border-color 0.15s ease',
-                    outline: 'none'
+                    outline: 'none',
+                    transition: 'border-color 0.15s ease'
                   }}
-                  onFocus={(e) => e.target.style.borderColor = '#3b82f6'}
-                  onBlur={(e) => e.target.style.borderColor = '#d1d5db'}
+                  onFocus={(e) => e.target.style.borderColor = touched.dateOfBirth && errors.dateOfBirth ? '#dc2626' : '#3b82f6'}
+                  onBlur={(e) => {
+                    handleBlur(e);
+                    e.target.style.borderColor = touched.dateOfBirth && errors.dateOfBirth ? '#dc2626' : '#d1d5db';
+                  }}
                   required
                 />
+                {touched.dateOfBirth && errors.dateOfBirth && (
+                  <span style={{ color: '#dc2626', fontSize: '13px', marginTop: '4px', display: 'block' }}>
+                    {errors.dateOfBirth}
+                  </span>
+                )}
               </div>
               <div className="form-group">
-                <label style={{ 
-                  display: 'block', 
-                  fontWeight: '500', 
-                  marginBottom: '6px', 
-                  fontSize: '14px',
-                  color: '#374151'
-                }}>
+                <label style={{ display: 'block', fontWeight: '500', marginBottom: '6px', fontSize: '14px', color: '#374151' }}>
                   {t.gender}
                 </label>
                 <select
                   name="gender"
                   value={form.gender}
                   onChange={handleChange}
+                  onBlur={handleBlur}
                   style={{
                     width: '100%',
                     padding: '10px 14px',
-                    border: '1px solid #d1d5db',
+                    border: `1px solid ${touched.gender && errors.gender ? '#dc2626' : '#d1d5db'}`,
                     borderRadius: '8px',
                     fontSize: '14px',
                     background: 'white',
-                    transition: 'border-color 0.15s ease',
-                    outline: 'none'
+                    outline: 'none',
+                    transition: 'border-color 0.15s ease'
                   }}
-                  onFocus={(e) => e.target.style.borderColor = '#3b82f6'}
-                  onBlur={(e) => e.target.style.borderColor = '#d1d5db'}
+                  onFocus={(e) => e.target.style.borderColor = touched.gender && errors.gender ? '#dc2626' : '#3b82f6'}
+                  onBlur={(e) => {
+                    handleBlur(e);
+                    e.target.style.borderColor = touched.gender && errors.gender ? '#dc2626' : '#d1d5db';
+                  }}
                   required
                 >
                   <option value="">{t.selectGender}</option>
@@ -727,24 +1010,18 @@ function CitizenRegistration({ user, citizens, setCitizens, addNotification }) {
                   <option value="Female">{t.female}</option>
                   <option value="Other">{t.other}</option>
                 </select>
+                {touched.gender && errors.gender && (
+                  <span style={{ color: '#dc2626', fontSize: '13px', marginTop: '4px', display: 'block' }}>
+                    {errors.gender}
+                  </span>
+                )}
               </div>
             </div>
 
             {/* Row 3: Phone & Email */}
-            <div style={{ 
-              display: 'grid', 
-              gridTemplateColumns: '1fr 1fr', 
-              gap: '20px',
-              marginBottom: '20px'
-            }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', marginBottom: '20px' }}>
               <div className="form-group">
-                <label style={{ 
-                  display: 'block', 
-                  fontWeight: '500', 
-                  marginBottom: '6px', 
-                  fontSize: '14px',
-                  color: '#374151'
-                }}>
+                <label style={{ display: 'block', fontWeight: '500', marginBottom: '6px', fontSize: '14px', color: '#374151' }}>
                   {t.phone}
                 </label>
                 <input
@@ -752,29 +1029,35 @@ function CitizenRegistration({ user, citizens, setCitizens, addNotification }) {
                   name="phone"
                   value={form.phone}
                   onChange={handleChange}
+                  onBlur={handleBlur}
                   placeholder={t.phonePlaceholder}
                   style={{
                     width: '100%',
                     padding: '10px 14px',
-                    border: '1px solid #d1d5db',
+                    border: `1px solid ${touched.phone && errors.phone ? '#dc2626' : '#d1d5db'}`,
                     borderRadius: '8px',
                     fontSize: '14px',
-                    transition: 'border-color 0.15s ease',
-                    outline: 'none'
+                    outline: 'none',
+                    transition: 'border-color 0.15s ease'
                   }}
-                  onFocus={(e) => e.target.style.borderColor = '#3b82f6'}
-                  onBlur={(e) => e.target.style.borderColor = '#d1d5db'}
+                  onFocus={(e) => e.target.style.borderColor = touched.phone && errors.phone ? '#dc2626' : '#3b82f6'}
+                  onBlur={(e) => {
+                    handleBlur(e);
+                    e.target.style.borderColor = touched.phone && errors.phone ? '#dc2626' : '#d1d5db';
+                  }}
                   required
                 />
+                {touched.phone && errors.phone && (
+                  <span style={{ color: '#dc2626', fontSize: '13px', marginTop: '4px', display: 'block' }}>
+                    {errors.phone}
+                  </span>
+                )}
+                <small style={{ color: '#6b7280', fontSize: '11px', display: 'block', marginTop: '2px' }}>
+                  Format: +2519XXXXXXXX (e.g., +251912345678)
+                </small>
               </div>
               <div className="form-group">
-                <label style={{ 
-                  display: 'block', 
-                  fontWeight: '500', 
-                  marginBottom: '6px', 
-                  fontSize: '14px',
-                  color: '#374151'
-                }}>
+                <label style={{ display: 'block', fontWeight: '500', marginBottom: '6px', fontSize: '14px', color: '#374151' }}>
                   {t.email}
                 </label>
                 <input
@@ -782,55 +1065,57 @@ function CitizenRegistration({ user, citizens, setCitizens, addNotification }) {
                   name="email"
                   value={form.email}
                   onChange={handleChange}
+                  onBlur={handleBlur}
                   placeholder={t.emailPlaceholder}
                   style={{
                     width: '100%',
                     padding: '10px 14px',
-                    border: '1px solid #d1d5db',
+                    border: `1px solid ${touched.email && errors.email ? '#dc2626' : '#d1d5db'}`,
                     borderRadius: '8px',
                     fontSize: '14px',
-                    transition: 'border-color 0.15s ease',
-                    outline: 'none'
+                    outline: 'none',
+                    transition: 'border-color 0.15s ease'
                   }}
-                  onFocus={(e) => e.target.style.borderColor = '#3b82f6'}
-                  onBlur={(e) => e.target.style.borderColor = '#d1d5db'}
+                  onFocus={(e) => e.target.style.borderColor = touched.email && errors.email ? '#dc2626' : '#3b82f6'}
+                  onBlur={(e) => {
+                    handleBlur(e);
+                    e.target.style.borderColor = touched.email && errors.email ? '#dc2626' : '#d1d5db';
+                  }}
                 />
+                {touched.email && errors.email && (
+                  <span style={{ color: '#dc2626', fontSize: '13px', marginTop: '4px', display: 'block' }}>
+                    {errors.email}
+                  </span>
+                )}
               </div>
             </div>
 
             {/* Row 4: Region & District */}
-            <div style={{ 
-              display: 'grid', 
-              gridTemplateColumns: '1fr 1fr', 
-              gap: '20px',
-              marginBottom: '20px'
-            }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', marginBottom: '20px' }}>
               <div className="form-group">
-                <label style={{ 
-                  display: 'block', 
-                  fontWeight: '500', 
-                  marginBottom: '6px', 
-                  fontSize: '14px',
-                  color: '#374151'
-                }}>
+                <label style={{ display: 'block', fontWeight: '500', marginBottom: '6px', fontSize: '14px', color: '#374151' }}>
                   {t.region}
                 </label>
                 <select
                   name="region"
                   value={form.region}
                   onChange={handleChange}
+                  onBlur={handleBlur}
                   style={{
                     width: '100%',
                     padding: '10px 14px',
-                    border: '1px solid #d1d5db',
+                    border: `1px solid ${touched.region && errors.region ? '#dc2626' : '#d1d5db'}`,
                     borderRadius: '8px',
                     fontSize: '14px',
                     background: 'white',
-                    transition: 'border-color 0.15s ease',
-                    outline: 'none'
+                    outline: 'none',
+                    transition: 'border-color 0.15s ease'
                   }}
-                  onFocus={(e) => e.target.style.borderColor = '#3b82f6'}
-                  onBlur={(e) => e.target.style.borderColor = '#d1d5db'}
+                  onFocus={(e) => e.target.style.borderColor = touched.region && errors.region ? '#dc2626' : '#3b82f6'}
+                  onBlur={(e) => {
+                    handleBlur(e);
+                    e.target.style.borderColor = touched.region && errors.region ? '#dc2626' : '#d1d5db';
+                  }}
                   required
                 >
                   <option value="">{t.selectRegion}</option>
@@ -840,15 +1125,14 @@ function CitizenRegistration({ user, citizens, setCitizens, addNotification }) {
                   <option value="West">{t.west}</option>
                   <option value="Central">{t.central}</option>
                 </select>
+                {touched.region && errors.region && (
+                  <span style={{ color: '#dc2626', fontSize: '13px', marginTop: '4px', display: 'block' }}>
+                    {errors.region}
+                  </span>
+                )}
               </div>
               <div className="form-group">
-                <label style={{ 
-                  display: 'block', 
-                  fontWeight: '500', 
-                  marginBottom: '6px', 
-                  fontSize: '14px',
-                  color: '#374151'
-                }}>
+                <label style={{ display: 'block', fontWeight: '500', marginBottom: '6px', fontSize: '14px', color: '#374151' }}>
                   {t.district}
                 </label>
                 <input
@@ -863,8 +1147,8 @@ function CitizenRegistration({ user, citizens, setCitizens, addNotification }) {
                     border: '1px solid #d1d5db',
                     borderRadius: '8px',
                     fontSize: '14px',
-                    transition: 'border-color 0.15s ease',
-                    outline: 'none'
+                    outline: 'none',
+                    transition: 'border-color 0.15s ease'
                   }}
                   onFocus={(e) => e.target.style.borderColor = '#3b82f6'}
                   onBlur={(e) => e.target.style.borderColor = '#d1d5db'}
@@ -873,20 +1157,9 @@ function CitizenRegistration({ user, citizens, setCitizens, addNotification }) {
             </div>
 
             {/* Row 5: Village & Address */}
-            <div style={{ 
-              display: 'grid', 
-              gridTemplateColumns: '1fr 1fr', 
-              gap: '20px',
-              marginBottom: '20px'
-            }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', marginBottom: '20px' }}>
               <div className="form-group">
-                <label style={{ 
-                  display: 'block', 
-                  fontWeight: '500', 
-                  marginBottom: '6px', 
-                  fontSize: '14px',
-                  color: '#374151'
-                }}>
+                <label style={{ display: 'block', fontWeight: '500', marginBottom: '6px', fontSize: '14px', color: '#374151' }}>
                   {t.village}
                 </label>
                 <input
@@ -901,21 +1174,15 @@ function CitizenRegistration({ user, citizens, setCitizens, addNotification }) {
                     border: '1px solid #d1d5db',
                     borderRadius: '8px',
                     fontSize: '14px',
-                    transition: 'border-color 0.15s ease',
-                    outline: 'none'
+                    outline: 'none',
+                    transition: 'border-color 0.15s ease'
                   }}
                   onFocus={(e) => e.target.style.borderColor = '#3b82f6'}
                   onBlur={(e) => e.target.style.borderColor = '#d1d5db'}
                 />
               </div>
               <div className="form-group">
-                <label style={{ 
-                  display: 'block', 
-                  fontWeight: '500', 
-                  marginBottom: '6px', 
-                  fontSize: '14px',
-                  color: '#374151'
-                }}>
+                <label style={{ display: 'block', fontWeight: '500', marginBottom: '6px', fontSize: '14px', color: '#374151' }}>
                   {t.address}
                 </label>
                 <input
@@ -930,8 +1197,8 @@ function CitizenRegistration({ user, citizens, setCitizens, addNotification }) {
                     border: '1px solid #d1d5db',
                     borderRadius: '8px',
                     fontSize: '14px',
-                    transition: 'border-color 0.15s ease',
-                    outline: 'none'
+                    outline: 'none',
+                    transition: 'border-color 0.15s ease'
                   }}
                   onFocus={(e) => e.target.style.borderColor = '#3b82f6'}
                   onBlur={(e) => e.target.style.borderColor = '#d1d5db'}
@@ -940,20 +1207,9 @@ function CitizenRegistration({ user, citizens, setCitizens, addNotification }) {
             </div>
 
             {/* Row 6: Occupation & Marital Status */}
-            <div style={{ 
-              display: 'grid', 
-              gridTemplateColumns: '1fr 1fr', 
-              gap: '20px',
-              marginBottom: '20px'
-            }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', marginBottom: '20px' }}>
               <div className="form-group">
-                <label style={{ 
-                  display: 'block', 
-                  fontWeight: '500', 
-                  marginBottom: '6px', 
-                  fontSize: '14px',
-                  color: '#374151'
-                }}>
+                <label style={{ display: 'block', fontWeight: '500', marginBottom: '6px', fontSize: '14px', color: '#374151' }}>
                   {t.occupation}
                 </label>
                 <input
@@ -968,21 +1224,15 @@ function CitizenRegistration({ user, citizens, setCitizens, addNotification }) {
                     border: '1px solid #d1d5db',
                     borderRadius: '8px',
                     fontSize: '14px',
-                    transition: 'border-color 0.15s ease',
-                    outline: 'none'
+                    outline: 'none',
+                    transition: 'border-color 0.15s ease'
                   }}
                   onFocus={(e) => e.target.style.borderColor = '#3b82f6'}
                   onBlur={(e) => e.target.style.borderColor = '#d1d5db'}
                 />
               </div>
               <div className="form-group">
-                <label style={{ 
-                  display: 'block', 
-                  fontWeight: '500', 
-                  marginBottom: '6px', 
-                  fontSize: '14px',
-                  color: '#374151'
-                }}>
+                <label style={{ display: 'block', fontWeight: '500', marginBottom: '6px', fontSize: '14px', color: '#374151' }}>
                   {t.maritalStatus}
                 </label>
                 <select
@@ -996,8 +1246,8 @@ function CitizenRegistration({ user, citizens, setCitizens, addNotification }) {
                     borderRadius: '8px',
                     fontSize: '14px',
                     background: 'white',
-                    transition: 'border-color 0.15s ease',
-                    outline: 'none'
+                    outline: 'none',
+                    transition: 'border-color 0.15s ease'
                   }}
                   onFocus={(e) => e.target.style.borderColor = '#3b82f6'}
                   onBlur={(e) => e.target.style.borderColor = '#d1d5db'}
@@ -1011,86 +1261,10 @@ function CitizenRegistration({ user, citizens, setCitizens, addNotification }) {
               </div>
             </div>
 
-            {/* Row 7: ID Type & ID Number */}
-            <div style={{ 
-              display: 'grid', 
-              gridTemplateColumns: '1fr 1fr', 
-              gap: '20px',
-              marginBottom: '20px'
-            }}>
-              <div className="form-group">
-                <label style={{ 
-                  display: 'block', 
-                  fontWeight: '500', 
-                  marginBottom: '6px', 
-                  fontSize: '14px',
-                  color: '#374151'
-                }}>
-                  {t.idType}
-                </label>
-                <select
-                  name="idType"
-                  value={form.idType}
-                  onChange={handleChange}
-                  style={{
-                    width: '100%',
-                    padding: '10px 14px',
-                    border: '1px solid #d1d5db',
-                    borderRadius: '8px',
-                    fontSize: '14px',
-                    background: 'white',
-                    transition: 'border-color 0.15s ease',
-                    outline: 'none'
-                  }}
-                  onFocus={(e) => e.target.style.borderColor = '#3b82f6'}
-                  onBlur={(e) => e.target.style.borderColor = '#d1d5db'}
-                >
-                  <option value="National ID">{t.nationalId}</option>
-                  <option value="Birth Certificate">{t.birthCertificate}</option>
-                  <option value="Passport">{t.passport}</option>
-                </select>
-              </div>
-              <div className="form-group">
-                <label style={{ 
-                  display: 'block', 
-                  fontWeight: '500', 
-                  marginBottom: '6px', 
-                  fontSize: '14px',
-                  color: '#374151'
-                }}>
-                  {t.idNumber}
-                </label>
-                <input
-                  type="text"
-                  name="idNumber"
-                  value={form.idNumber}
-                  onChange={handleChange}
-                  placeholder={t.idNumberPlaceholder}
-                  style={{
-                    width: '100%',
-                    padding: '10px 14px',
-                    border: '1px solid #d1d5db',
-                    borderRadius: '8px',
-                    fontSize: '14px',
-                    transition: 'border-color 0.15s ease',
-                    outline: 'none'
-                  }}
-                  onFocus={(e) => e.target.style.borderColor = '#3b82f6'}
-                  onBlur={(e) => e.target.style.borderColor = '#d1d5db'}
-                />
-              </div>
-            </div>
-
-            {/* Row 8: Biometrics */}
+            {/* Row 7: Biometrics (single field) */}
             <div style={{ marginBottom: '16px' }}>
               <div className="form-group">
-                <label style={{ 
-                  display: 'block', 
-                  fontWeight: '500', 
-                  marginBottom: '6px', 
-                  fontSize: '14px',
-                  color: '#374151'
-                }}>
+                <label style={{ display: 'block', fontWeight: '500', marginBottom: '6px', fontSize: '14px', color: '#374151' }}>
                   {t.biometrics}
                 </label>
                 <select
@@ -1103,8 +1277,8 @@ function CitizenRegistration({ user, citizens, setCitizens, addNotification }) {
                     borderRadius: '8px',
                     fontSize: '14px',
                     background: 'white',
-                    transition: 'border-color 0.15s ease',
-                    outline: 'none'
+                    outline: 'none',
+                    transition: 'border-color 0.15s ease'
                   }}
                   onFocus={(e) => e.target.style.borderColor = '#3b82f6'}
                   onBlur={(e) => e.target.style.borderColor = '#d1d5db'}
@@ -1129,6 +1303,30 @@ function CitizenRegistration({ user, citizens, setCitizens, addNotification }) {
               </span>
             </div>
 
+            {/* Validation Summary */}
+            {Object.values(errors).some(e => e !== '') && (
+              <div style={{
+                padding: '12px 16px',
+                background: '#fef2f2',
+                border: '1px solid #fca5a5',
+                borderRadius: '8px',
+                marginBottom: '16px',
+                color: '#991b1b',
+                fontSize: '14px'
+              }}>
+                <strong>⚠️ Please fix the following errors:</strong>
+                <ul style={{ margin: '8px 0 0 0', paddingLeft: '20px' }}>
+                  {errors.firstName && <li>First Name: {errors.firstName}</li>}
+                  {errors.lastName && <li>Last Name: {errors.lastName}</li>}
+                  {errors.dateOfBirth && <li>Date of Birth: {errors.dateOfBirth}</li>}
+                  {errors.gender && <li>Gender: {errors.gender}</li>}
+                  {errors.phone && <li>Phone: {errors.phone}</li>}
+                  {errors.email && <li>Email: {errors.email}</li>}
+                  {errors.region && <li>Region: {errors.region}</li>}
+                </ul>
+              </div>
+            )}
+
             {/* Buttons */}
             <div style={{ 
               display: 'flex', 
@@ -1139,29 +1337,29 @@ function CitizenRegistration({ user, citizens, setCitizens, addNotification }) {
             }}>
               <button
                 type="submit"
-                disabled={isSubmitting}
+                disabled={isSubmitting || Object.values(errors).some(e => e !== '')}
                 style={{
                   padding: '12px 32px',
-                  background: isOnline ? '#0b7e4b' : '#f59e0b',
+                  background: isSubmitting || Object.values(errors).some(e => e !== '') ? '#94a3b8' : (isOnline ? '#0b7e4b' : '#f59e0b'),
                   color: 'white',
                   border: 'none',
                   borderRadius: '8px',
-                  cursor: isSubmitting ? 'not-allowed' : 'pointer',
+                  cursor: isSubmitting || Object.values(errors).some(e => e !== '') ? 'not-allowed' : 'pointer',
                   fontSize: '15px',
                   fontWeight: '600',
-                  opacity: isSubmitting ? 0.7 : 1,
+                  opacity: isSubmitting || Object.values(errors).some(e => e !== '') ? 0.7 : 1,
                   transition: 'background 0.2s ease',
                   flex: '1',
                   minWidth: '180px',
                   maxWidth: '280px'
                 }}
                 onMouseEnter={(e) => {
-                  if (!isSubmitting) {
+                  if (!isSubmitting && !Object.values(errors).some(e => e !== '')) {
                     e.target.style.background = isOnline ? '#0a6a3f' : '#d97706';
                   }
                 }}
                 onMouseLeave={(e) => {
-                  if (!isSubmitting) {
+                  if (!isSubmitting && !Object.values(errors).some(e => e !== '')) {
                     e.target.style.background = isOnline ? '#0b7e4b' : '#f59e0b';
                   }
                 }}

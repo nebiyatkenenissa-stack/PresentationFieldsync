@@ -1,65 +1,84 @@
-// components/dashboard/Dashboard.js - FULL COMPLETE FIXED VERSION
+// components/dashboard/Dashboard.js - FINAL (no toggle, top performers filtered)
 
 import React, { useMemo, useCallback } from 'react';
 import { getToday } from '../../utils/helpers';
-import { 
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, 
+import {
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
   ResponsiveContainer, LineChart, Line, AreaChart, Area, Cell
 } from 'recharts';
 import VerificationPopup from '../verification/VerificationPopup';
 import { useVerification } from '../../hooks/useVerification';
 
-function Dashboard({ 
-  isManager, isSupervisor, isOfficer, user, reports, users, 
-  attendance, screenTime, leaves, permissions, totalReports, 
-  totalRegistrations, attendanceSummary, teamMembers, 
-  pendingLeaves, pendingPermissions, topPerformers, 
-  teamPerformance, employeePerformance, renderTrendChart,
-  citizens, liveStatus
+function Dashboard({
+  isManager, isSupervisor, isOfficer, user,
+  reports, users, attendance, leaves, permissions, citizens,
+  teamMembers, liveStatus
 }) {
-  
-  // ===== VERIFICATION SYSTEM FOR FIELD OFFICER =====
-  const { 
-    showPopup, 
-    verificationScore, 
+  // ===== VERIFICATION =====
+  const {
+    showPopup,
+    verificationScore,
     verificationHistory,
-    handleAnswer, 
+    handleAnswer,
     handleClose,
     lastVerified
   } = useVerification(isOfficer ? user?.id : null, isOfficer ? user?.name : null);
 
-  // Calculate registration trend data for chart
-  const chartData = useMemo(() => {
+  // ============================================================
+  // ALL DATA COMPUTED FROM RAW ARRAYS – SYNCED-ONLY
+  // ============================================================
+
+  // ----- PENDING COUNTS -----
+  const realPendingLeaves = useMemo(() => {
+    return (leaves || []).filter(l => l.status === 'pending').length;
+  }, [leaves]);
+
+  const realPendingPermissions = useMemo(() => {
+    return (permissions || []).filter(p => p.status === 'pending').length;
+  }, [permissions]);
+
+  // ----- TOTALS – ONLY SYNCED RECORDS -----
+  const realTotalReports = useMemo(() => {
+    return (reports || []).filter(r => r.synced === true).length;
+  }, [reports]);
+
+  const realTotalCitizens = useMemo(() => {
+    return (citizens || []).filter(c => c.synced === true).length;
+  }, [citizens]);
+
+  const realSupervisors = useMemo(() => (users || []).filter(u => u.role === 'supervisor').length, [users]);
+  const realFieldOfficers = useMemo(() => (users || []).filter(u => u.role === 'field_officer').length, [users]);
+
+  // ----- ATTENDANCE RATE – ONLY SYNCED ATTENDANCE -----
+  const realAttendanceRate = useMemo(() => {
+    const syncedAttendance = (attendance || []).filter(a => a.synced !== false);
+    if (!syncedAttendance || syncedAttendance.length === 0) return 0;
+    const total = syncedAttendance.length;
+    const present = syncedAttendance.filter(a => a.status === 'present' || a.status === 'late').length;
+    return Math.round((present / total) * 100);
+  }, [attendance]);
+
+  // ----- REGISTRATION TREND – ONLY SYNCED CITIZENS -----
+  const registrationTrendData = useMemo(() => {
+    const syncedCitizens = (citizens || []).filter(c => c.synced === true);
     const today = new Date();
     const data = [];
-    let max = 0;
     for (let i = 6; i >= 0; i--) {
       const d = new Date(today);
       d.setDate(d.getDate() - i);
       const dateStr = d.toISOString().slice(0, 10);
-      const value = (reports || []).filter(r => r.reportDate === dateStr).reduce((sum, r) => sum + (r.registrations || 0), 0);
+      const value = syncedCitizens.filter(c => c.registrationDate?.slice(0, 10) === dateStr).length;
       data.push({ date: dateStr, value });
-      if (value > max) max = value;
     }
-    return { data, max: max || 1 };
-  }, [reports]);
+    return data;
+  }, [citizens]);
 
-  // Region stats
-  const regionStats = useMemo(() => {
-    const map = {};
-    (reports || []).forEach(r => {
-      if (!map[r.region]) map[r.region] = { reports: 0, registrations: 0 };
-      map[r.region].reports += 1;
-      map[r.region].registrations += (citizens || []).filter(c => c.region === r.region).length;
-    });
-    return Object.entries(map).map(([region, data]) => ({ region, ...data }));
-  }, [reports, citizens]);
-
-  // Report Status Distribution
+  // ----- REPORT STATUS DISTRIBUTION (synced reports) -----
   const reportStatusData = useMemo(() => {
-    if (!reports || reports.length === 0) return [];
+    const syncedReports = (reports || []).filter(r => r.synced === true);
+    if (!syncedReports || syncedReports.length === 0) return [];
     const statuses = { 'Approved': 0, 'Pending': 0, 'Rejected': 0 };
-    reports.forEach(r => {
+    syncedReports.forEach(r => {
       if (r.reviewed && r.status !== 'rejected') statuses['Approved']++;
       else if (r.status === 'rejected') statuses['Rejected']++;
       else statuses['Pending']++;
@@ -69,11 +88,12 @@ function Dashboard({
       .map(([name, value]) => ({ name, value }));
   }, [reports]);
 
-  // Today's Attendance Status
+  // ----- TODAY'S ATTENDANCE (synced) -----
   const todayAttendanceData = useMemo(() => {
-    if (!attendance || attendance.length === 0) return [];
+    const syncedAttendance = (attendance || []).filter(a => a.synced !== false);
+    if (!syncedAttendance || syncedAttendance.length === 0) return [];
     const today = getToday();
-    const todayAtt = attendance.filter(a => a.date === today);
+    const todayAtt = syncedAttendance.filter(a => a.date === today);
     if (todayAtt.length === 0) return [];
     const statuses = { 'Present': 0, 'Late': 0, 'Absent': 0, 'Half Day': 0 };
     todayAtt.forEach(a => {
@@ -87,7 +107,7 @@ function Dashboard({
       .map(([name, value]) => ({ name, value }));
   }, [attendance]);
 
-  // Leave Status Distribution
+  // ----- LEAVE STATUS DISTRIBUTION -----
   const leaveStatusData = useMemo(() => {
     if (!leaves || leaves.length === 0) return [];
     const statuses = { 'Approved': 0, 'Pending': 0, 'Rejected': 0 };
@@ -101,7 +121,7 @@ function Dashboard({
       .map(([name, value]) => ({ name, value }));
   }, [leaves]);
 
-  // Permission Status Distribution
+  // ----- PERMISSION STATUS DISTRIBUTION -----
   const permissionStatusData = useMemo(() => {
     if (!permissions || permissions.length === 0) return [];
     const statuses = { 'Approved': 0, 'Pending': 0, 'Rejected': 0 };
@@ -115,26 +135,28 @@ function Dashboard({
       .map(([name, value]) => ({ name, value }));
   }, [permissions]);
 
-  // Officer's personal performance
+  // ----- OFFICER PERFORMANCE (synced) -----
   const officerPerformanceData = useMemo(() => {
     if (!isOfficer || !user) return [];
+    const syncedCitizens = (citizens || []).filter(c => c.synced === true);
+    const syncedReports = (reports || []).filter(r => r.synced === true);
     const today = getToday();
     const last7Days = [];
     for (let i = 6; i >= 0; i--) {
       const d = new Date(today);
       d.setDate(d.getDate() - i);
       const dateStr = d.toISOString().slice(0, 10);
-      const registrations = (citizens || []).filter(c => 
-        c.registeredBy === user.employeeId && 
+      const registrations = syncedCitizens.filter(c =>
+        c.registeredBy === user.employeeId &&
         c.registrationDate?.slice(0, 10) === dateStr
       ).length;
-      const reportsCount = (reports || []).filter(r => 
-        r.employeeId === user.employeeId && 
+      const reportsCount = syncedReports.filter(r =>
+        r.employeeId === user.employeeId &&
         r.reportDate === dateStr
       ).length;
-      last7Days.push({ 
-        date: dateStr, 
-        registrations, 
+      last7Days.push({
+        date: dateStr,
+        registrations,
         reports: reportsCount,
         efficiency: reportsCount > 0 ? Math.round((registrations / reportsCount) * 100) : 0
       });
@@ -142,63 +164,176 @@ function Dashboard({
     return last7Days;
   }, [citizens, reports, isOfficer, user]);
 
-  const fieldOfficers = (users || []).filter(u => u.role === 'field_officer').length;
-  const supervisors = (users || []).filter(u => u.role === 'supervisor').length;
-
-  // Get today's attendance for officer
-  const todayAttendance = useMemo(() => {
-    if (!isOfficer || !user) return null;
-    return (attendance || []).find(a => a.employeeId === user.employeeId && a.date === getToday());
-  }, [attendance, user, isOfficer]);
-
-  // Team citizen counts
+  // ----- TEAM COUNTS FOR SUPERVISOR (synced) -----
   const teamCitizenCount = useMemo(() => {
     if (!isSupervisor || !user || !teamMembers) return 0;
     const teamIds = (teamMembers || []).map(m => m.employeeId);
-    return (citizens || []).filter(c => teamIds.includes(c.registeredBy)).length;
+    const syncedCitizens = (citizens || []).filter(c => c.synced === true);
+    return syncedCitizens.filter(c => teamIds.includes(c.registeredBy)).length;
   }, [citizens, teamMembers, isSupervisor, user]);
 
-  // Team reports count
   const teamReportsCount = useMemo(() => {
     if (!isSupervisor || !user || !teamMembers) return 0;
     const teamIds = (teamMembers || []).map(m => m.employeeId);
-    return (reports || []).filter(r => teamIds.includes(r.employeeId)).length;
+    const syncedReports = (reports || []).filter(r => r.synced === true);
+    return syncedReports.filter(r => teamIds.includes(r.employeeId)).length;
   }, [reports, teamMembers, isSupervisor, user]);
 
-  // Officer's report count
+  // ----- OFFICER PERSONAL STATS (synced) -----
   const officerReportsCount = useMemo(() => {
     if (!isOfficer || !user) return 0;
-    return (reports || []).filter(r => r.employeeId === user.employeeId).length;
+    const syncedReports = (reports || []).filter(r => r.synced === true);
+    return syncedReports.filter(r => r.employeeId === user.employeeId).length;
   }, [reports, isOfficer, user]);
 
-  // Today's registrations
-  const officerTodayRegistrations = useMemo(() => {
-    if (!isOfficer || !user) return 0;
-    const today = getToday();
-    return (citizens || []).filter(c => c.registeredBy === user.employeeId && c.registrationDate?.slice(0, 10) === today).length;
-  }, [citizens, isOfficer, user]);
-
-  // Total registrations
   const officerTotalRegistrations = useMemo(() => {
     if (!isOfficer || !user) return 0;
-    return (citizens || []).filter(c => c.registeredBy === user.employeeId).length;
+    const syncedCitizens = (citizens || []).filter(c => c.synced === true);
+    return syncedCitizens.filter(c => c.registeredBy === user.employeeId).length;
   }, [citizens, isOfficer, user]);
+
+  const officerTodayRegistrations = useMemo(() => {
+    if (!isOfficer || !user) return 0;
+    const syncedCitizens = (citizens || []).filter(c => c.synced === true);
+    const today = getToday();
+    return syncedCitizens.filter(c =>
+      c.registeredBy === user.employeeId &&
+      c.registrationDate?.slice(0, 10) === today
+    ).length;
+  }, [citizens, isOfficer, user]);
+
+  const todayAttendance = useMemo(() => {
+    if (!isOfficer || !user) return null;
+    const syncedAttendance = (attendance || []).filter(a => a.synced !== false);
+    return syncedAttendance.find(a => a.employeeId === user.employeeId && a.date === getToday());
+  }, [attendance, user, isOfficer]);
+
+  // ============================================================
+  // TOP PERFORMERS – COMPUTED INTERNALLY (filtered to registrations > 0)
+  // ============================================================
+  const realTopPerformers = useMemo(() => {
+    const map = {};
+    reports.forEach(r => {
+      if (!map[r.employeeId]) {
+        map[r.employeeId] = {
+          employeeId: r.employeeId,
+          employeeName: r.employeeName,
+          region: r.region,
+          totalReports: 0,
+          totalRegistrations: 0,
+          avgEfficiency: 0,
+          attendanceRate: 0,
+          trustScore: 0,
+        };
+      }
+      map[r.employeeId].totalReports += 1;
+    });
+
+    citizens.forEach(c => {
+      if (c.registeredBy && map[c.registeredBy] && c.synced === true) {
+        map[c.registeredBy].totalRegistrations += 1;
+      }
+    });
+
+    Object.values(map).forEach(emp => {
+      emp.avgEfficiency = emp.totalReports > 0
+        ? Math.round((emp.totalRegistrations / emp.totalReports) * 100)
+        : 0;
+    });
+
+    attendance.forEach(a => {
+      if (map[a.employeeId] && a.synced !== false) {
+        const totalAtt = attendance.filter(att => att.employeeId === a.employeeId && att.synced !== false).length;
+        const presentAtt = attendance.filter(att => att.employeeId === a.employeeId && (att.status === 'present' || att.status === 'late') && att.synced !== false).length;
+        map[a.employeeId].attendanceRate = totalAtt > 0 ? Math.round((presentAtt / totalAtt) * 100) : 0;
+      }
+    });
+
+    // 🔥 Filter: only officers with at least 1 registration
+    return Object.values(map)
+      .filter(emp => emp.totalRegistrations > 0)
+      .sort((a, b) => b.totalRegistrations - a.totalRegistrations)
+      .slice(0, 5);
+  }, [reports, citizens, attendance]);
+
+  // ============================================================
+  // TEAM PERFORMANCE – COMPUTED INTERNALLY (filtered)
+  // ============================================================
+  const realTeamPerformance = useMemo(() => {
+    if (!isSupervisor || !user || !teamMembers) return [];
+    const teamIds = teamMembers.map(m => m.employeeId);
+    const map = {};
+    reports.forEach(r => {
+      if (teamIds.includes(r.employeeId) && !map[r.employeeId]) {
+        map[r.employeeId] = {
+          employeeId: r.employeeId,
+          employeeName: r.employeeName,
+          region: r.region,
+          totalReports: 0,
+          totalRegistrations: 0,
+          avgEfficiency: 0,
+          attendanceRate: 0,
+        };
+      }
+      if (map[r.employeeId]) {
+        map[r.employeeId].totalReports += 1;
+      }
+    });
+    citizens.forEach(c => {
+      if (c.registeredBy && map[c.registeredBy] && c.synced === true) {
+        map[c.registeredBy].totalRegistrations += 1;
+      }
+    });
+    Object.values(map).forEach(emp => {
+      emp.avgEfficiency = emp.totalReports > 0
+        ? Math.round((emp.totalRegistrations / emp.totalReports) * 100)
+        : 0;
+    });
+    attendance.forEach(a => {
+      if (map[a.employeeId] && a.synced !== false) {
+        const totalAtt = attendance.filter(att => att.employeeId === a.employeeId && att.synced !== false).length;
+        const presentAtt = attendance.filter(att => att.employeeId === a.employeeId && (att.status === 'present' || att.status === 'late') && att.synced !== false).length;
+        map[a.employeeId].attendanceRate = totalAtt > 0 ? Math.round((presentAtt / totalAtt) * 100) : 0;
+      }
+    });
+    // 🔥 Filter: only officers with at least 1 registration
+    return Object.values(map)
+      .filter(emp => emp.totalRegistrations > 0)
+      .sort((a, b) => b.totalRegistrations - a.totalRegistrations);
+  }, [reports, citizens, attendance, teamMembers, isSupervisor, user]);
+
+  // ============================================================
+  // STYLING (light theme only, no toggle)
+  // ============================================================
+  const colors = {
+    bg: '#f1f5f9',
+    cardBg: '#ffffff',
+    cardBorder: '#e5e7eb',
+    textPrimary: '#1a202c',
+    textSecondary: '#64748b',
+    shadow: '0 1px 3px rgba(0,0,0,0.08)',
+    inputBg: '#f8fafc',
+    chartGrid: '#e5e7eb',
+    tooltipBg: '#ffffff',
+    tooltipBorder: '#e5e7eb',
+    statusBadgeBg: '#f8fafc',
+  };
 
   const CHART_COLORS = ['#1e3a5f', '#2d6a4f', '#7c3aed', '#d97706', '#0b7e4b', '#2563eb'];
 
-  // Custom tooltip
   const CustomTooltip = useCallback(({ active, payload, label }) => {
     if (active && payload && payload.length) {
       return (
-        <div style={{ 
-          background: 'white', 
-          padding: '12px 16px', 
-          borderRadius: '8px', 
-          border: '1px solid #e5e7eb',
-          boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
-          fontSize: '13px'
+        <div style={{
+          background: colors.tooltipBg,
+          padding: '12px 16px',
+          borderRadius: '8px',
+          border: `1px solid ${colors.tooltipBorder}`,
+          boxShadow: colors.shadow,
+          fontSize: '13px',
+          color: colors.textPrimary
         }}>
-          <p style={{ margin: 0, fontWeight: '600', color: '#1a202c' }}>{label}</p>
+          <p style={{ margin: 0, fontWeight: '600' }}>{label}</p>
           {payload.map((entry, index) => (
             <p key={index} style={{ margin: '4px 0', color: entry.color }}>
               {entry.name}: <strong>{entry.value}</strong>
@@ -210,25 +345,10 @@ function Dashboard({
     return null;
   }, []);
 
-  const registrationChartData = useMemo(() => {
-    return chartData.data.map(d => ({ name: d.date, value: d.value }));
-  }, [chartData.data]);
-
-  const officerRegistrationChartData = useMemo(() => {
-    if (!isOfficer || !user) return [];
-    return officerPerformanceData.map(d => ({ date: d.date, value: d.registrations }));
-  }, [officerPerformanceData, isOfficer, user]);
-
-  const officerEfficiencyChartData = useMemo(() => {
-    if (!isOfficer || !user) return [];
-    return officerPerformanceData.map(d => ({ date: d.date, value: d.efficiency }));
-  }, [officerPerformanceData, isOfficer, user]);
-
-  // Chart render function
-  const renderChart = useCallback((type, data, colors = CHART_COLORS, xAxisKey = 'name') => {
+  const renderChart = useCallback((type, data, chartColors = CHART_COLORS, xAxisKey = 'name') => {
     if (!data || data.length === 0) {
       return (
-        <div style={{ textAlign: 'center', padding: '40px', color: '#64748b', fontSize: '14px' }}>
+        <div style={{ textAlign: 'center', padding: '40px', color: colors.textSecondary, fontSize: '14px' }}>
           No data available
         </div>
       );
@@ -247,77 +367,76 @@ function Dashboard({
       return colorMap[name] || '#1e3a5f';
     };
 
-    switch(type) {
+    const commonProps = {
+      margin: { top: 20, right: 30, left: 20, bottom: 5 },
+    };
+
+    switch (type) {
       case 'bar':
         return (
           <ResponsiveContainer width="100%" height={280}>
-            <BarChart data={data} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-              <XAxis dataKey={xAxisKey} tick={{ fontSize: 12, fill: '#4a5568' }} />
-              <YAxis tick={{ fontSize: 12, fill: '#4a5568' }} />
+            <BarChart data={data} {...commonProps}>
+              <CartesianGrid strokeDasharray="3 3" stroke={colors.chartGrid} />
+              <XAxis dataKey={xAxisKey} tick={{ fontSize: 12, fill: colors.textSecondary }} />
+              <YAxis tick={{ fontSize: 12, fill: colors.textSecondary }} />
               <Tooltip content={CustomTooltip} />
-              <Legend wrapperStyle={{ fontSize: '12px', paddingTop: '10px' }} />
+              <Legend wrapperStyle={{ fontSize: '12px', paddingTop: '10px', color: colors.textSecondary }} />
               <Bar dataKey="value" radius={[4, 4, 0, 0]}>
                 {data.map((entry, index) => (
-                  <Cell key={`cell-${index}`} fill={getStatusColor(entry.name) || CHART_COLORS[index % CHART_COLORS.length]} />
+                  <Cell key={`cell-${index}`} fill={getStatusColor(entry.name) || chartColors[index % chartColors.length]} />
                 ))}
               </Bar>
             </BarChart>
           </ResponsiveContainer>
         );
-      
       case 'line':
         return (
           <ResponsiveContainer width="100%" height={280}>
-            <LineChart data={data} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-              <XAxis dataKey="date" tick={{ fontSize: 12, fill: '#4a5568' }} />
-              <YAxis tick={{ fontSize: 12, fill: '#4a5568' }} />
+            <LineChart data={data} {...commonProps}>
+              <CartesianGrid strokeDasharray="3 3" stroke={colors.chartGrid} />
+              <XAxis dataKey="date" tick={{ fontSize: 12, fill: colors.textSecondary }} />
+              <YAxis tick={{ fontSize: 12, fill: colors.textSecondary }} />
               <Tooltip content={CustomTooltip} />
-              <Legend wrapperStyle={{ fontSize: '12px', paddingTop: '10px' }} />
-              <Line type="monotone" dataKey="value" stroke={colors[0]} strokeWidth={2} dot={{ r: 4, fill: colors[0] }} />
+              <Legend wrapperStyle={{ fontSize: '12px', paddingTop: '10px', color: colors.textSecondary }} />
+              <Line type="monotone" dataKey="value" stroke={chartColors[0]} strokeWidth={2} dot={{ r: 4, fill: chartColors[0] }} />
             </LineChart>
           </ResponsiveContainer>
         );
-      
       case 'area':
         return (
           <ResponsiveContainer width="100%" height={280}>
-            <AreaChart data={data} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-              <XAxis dataKey="date" tick={{ fontSize: 12, fill: '#4a5568' }} />
-              <YAxis tick={{ fontSize: 12, fill: '#4a5568' }} />
+            <AreaChart data={data} {...commonProps}>
+              <CartesianGrid strokeDasharray="3 3" stroke={colors.chartGrid} />
+              <XAxis dataKey="date" tick={{ fontSize: 12, fill: colors.textSecondary }} />
+              <YAxis tick={{ fontSize: 12, fill: colors.textSecondary }} />
               <Tooltip content={CustomTooltip} />
-              <Legend wrapperStyle={{ fontSize: '12px', paddingTop: '10px' }} />
-              <Area type="monotone" dataKey="value" stroke={colors[0]} fill={colors[0]} fillOpacity={0.2} />
+              <Legend wrapperStyle={{ fontSize: '12px', paddingTop: '10px', color: colors.textSecondary }} />
+              <Area type="monotone" dataKey="value" stroke={chartColors[0]} fill={chartColors[0]} fillOpacity={0.2} />
             </AreaChart>
           </ResponsiveContainer>
         );
-      
       default:
         return null;
     }
-  }, [CustomTooltip]);
+  }, []);
 
-  // Chart wrapper
   const ChartWrapper = useCallback(({ children, title, subtitle }) => (
     <div style={{
-      background: 'white',
+      background: colors.cardBg,
       padding: '20px',
       borderRadius: '8px',
-      boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
-      border: '1px solid #e5e7eb',
+      boxShadow: colors.shadow,
+      border: `1px solid ${colors.cardBorder}`,
       height: '100%'
     }}>
       <div style={{ marginBottom: '16px' }}>
-        <h3 style={{ fontSize: '15px', fontWeight: '600', margin: 0, color: '#1a202c' }}>{title}</h3>
-        {subtitle && <p style={{ fontSize: '13px', color: '#64748b', margin: '4px 0 0 0' }}>{subtitle}</p>}
+        <h3 style={{ fontSize: '15px', fontWeight: '600', margin: 0, color: colors.textPrimary }}>{title}</h3>
+        {subtitle && <p style={{ fontSize: '13px', color: colors.textSecondary, margin: '4px 0 0 0' }}>{subtitle}</p>}
       </div>
       {children}
     </div>
   ), []);
 
-  // Stats Card
   const StatsCard = useCallback(({ label, value, color, icon }) => (
     <div style={{
       background: `linear-gradient(135deg, ${color}, ${color}dd)`,
@@ -328,23 +447,30 @@ function Dashboard({
       transition: 'all 0.2s ease',
       cursor: 'pointer'
     }}
-    onMouseEnter={(e) => {
-      e.currentTarget.style.transform = 'translateY(-3px)';
-      e.currentTarget.style.boxShadow = '0 6px 20px rgba(0,0,0,0.15)';
-    }}
-    onMouseLeave={(e) => {
-      e.currentTarget.style.transform = 'translateY(0)';
-      e.currentTarget.style.boxShadow = '0 2px 8px rgba(0,0,0,0.1)';
-    }}>
+      onMouseEnter={(e) => {
+        e.currentTarget.style.transform = 'translateY(-3px)';
+        e.currentTarget.style.boxShadow = '0 6px 20px rgba(0,0,0,0.15)';
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.transform = 'translateY(0)';
+        e.currentTarget.style.boxShadow = '0 2px 8px rgba(0,0,0,0.1)';
+      }}>
       <div style={{ fontSize: '26px', fontWeight: '700' }}>{value}</div>
       <div style={{ fontSize: '13px', opacity: 0.85, marginTop: '4px' }}>{icon} {label}</div>
     </div>
   ), []);
 
+  // ============================================================
+  // RENDER
+  // ============================================================
   return (
-    <div className="dashboard-view" style={{ padding: '0 4px' }}>
-      
-      {/* ===== VERIFICATION POPUP FOR FIELD OFFICER ===== */}
+    <div className="dashboard-view" style={{
+      padding: '0 4px',
+      backgroundColor: colors.bg,
+      color: colors.textPrimary,
+      minHeight: '100vh',
+    }}>
+      {/* ===== VERIFICATION POPUP ===== */}
       {isOfficer && showPopup && (
         <VerificationPopup
           officerId={user?.id}
@@ -361,7 +487,8 @@ function Dashboard({
           justifyContent: 'flex-end',
           marginBottom: '12px',
           gap: '12px',
-          flexWrap: 'wrap'
+          flexWrap: 'wrap',
+          paddingRight: '16px'
         }}>
           <div style={{
             display: 'flex',
@@ -392,11 +519,11 @@ function Dashboard({
               alignItems: 'center',
               gap: '6px',
               padding: '6px 14px',
-              background: '#f8fafc',
+              background: colors.statusBadgeBg,
               borderRadius: '20px',
-              border: '1px solid #e5e7eb'
+              border: `1px solid ${colors.cardBorder}`
             }}>
-              <span style={{ fontSize: '12px', color: '#64748b' }}>
+              <span style={{ fontSize: '12px', color: colors.textSecondary }}>
                 Last Verified: {new Date(lastVerified).toLocaleTimeString()}
               </span>
             </div>
@@ -413,13 +540,14 @@ function Dashboard({
             alignItems: 'center',
             marginBottom: '24px',
             flexWrap: 'wrap',
-            gap: '12px'
+            gap: '12px',
+            padding: '0 16px'
           }}>
             <div>
-              <h2 style={{fontSize: '22px', fontWeight: '700', margin: 0, color: '#1a202c'}}>📊 Manager Dashboard</h2>
-              <p style={{color: '#64748b', fontSize: '14px', margin: '4px 0 0 0'}}>Overview of all field operations</p>
+              <h2 style={{ fontSize: '22px', fontWeight: '700', margin: 0, color: colors.textPrimary }}>📊 Manager Dashboard</h2>
+              <p style={{ color: colors.textSecondary, fontSize: '14px', margin: '4px 0 0 0' }}>Overview of all field operations (synced data only)</p>
             </div>
-            <div style={{display: 'flex', gap: '8px', flexWrap: 'wrap'}}>
+            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
               <span style={{
                 background: '#dbeafe',
                 color: '#1e40af',
@@ -438,20 +566,20 @@ function Dashboard({
                 fontSize: '12px',
                 fontWeight: '500'
               }}>
-                📊 {reports?.length || 0} Reports
+                📊 {realTotalReports} Reports (synced)
               </span>
             </div>
           </div>
 
           {/* Stats Grid */}
-          <div style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '14px', marginBottom: '24px'}}>
-            <StatsCard label="Total Reports" value={totalReports || 0} color="#1e3a5f" icon="📋" />
-            <StatsCard label="Citizens" value={totalRegistrations || 0} color="#2d6a4f" icon="🆔" />
-            <StatsCard label="Supervisors" value={supervisors} color="#7c3aed" icon="👤" />
-            <StatsCard label="Field Officers" value={fieldOfficers} color="#d97706" icon="👥" />
-            <StatsCard label="Attendance Rate" value={`${attendanceSummary?.rate || 0}%`} color="#0b7e4b" icon="⚡" />
-            <StatsCard label="Pending Leaves" value={pendingLeaves || 0} color="#dc2626" icon="📅" />
-            <StatsCard label="Pending Permissions" value={pendingPermissions || 0} color="#2563eb" icon="📋" />
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '14px', marginBottom: '24px', padding: '0 16px' }}>
+            <StatsCard label="Total Reports (synced)" value={realTotalReports} color="#1e3a5f" icon="📋" />
+            <StatsCard label="Citizens (synced)" value={realTotalCitizens} color="#2d6a4f" icon="🆔" />
+            <StatsCard label="Supervisors" value={realSupervisors} color="#7c3aed" icon="👤" />
+            <StatsCard label="Field Officers" value={realFieldOfficers} color="#d97706" icon="👥" />
+            <StatsCard label="Attendance Rate (synced)" value={`${realAttendanceRate}%`} color="#0b7e4b" icon="⚡" />
+            <StatsCard label="Pending Leaves" value={realPendingLeaves} color="#dc2626" icon="📅" />
+            <StatsCard label="Pending Permissions" value={realPendingPermissions} color="#2563eb" icon="📋" />
           </div>
 
           {/* Charts Row */}
@@ -459,26 +587,27 @@ function Dashboard({
             display: 'grid',
             gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))',
             gap: '20px',
-            marginBottom: '24px'
+            marginBottom: '24px',
+            padding: '0 16px'
           }}>
             {reportStatusData.length > 0 && (
-              <ChartWrapper title="📊 Report Status" subtitle="Approved, Pending, Rejected reports">
+              <ChartWrapper title="📊 Report Status (synced)" subtitle="Approved, Pending, Rejected reports">
                 {renderChart('bar', reportStatusData)}
               </ChartWrapper>
             )}
-            
+
             {todayAttendanceData.length > 0 && (
-              <ChartWrapper title="📋 Today's Attendance" subtitle="Attendance distribution for today">
+              <ChartWrapper title="📋 Today's Attendance (synced)" subtitle="Attendance distribution for today">
                 {renderChart('bar', todayAttendanceData)}
               </ChartWrapper>
             )}
-            
+
             {leaveStatusData.length > 0 && (
               <ChartWrapper title="📅 Leave Status" subtitle="Approved, Pending, Rejected leaves">
                 {renderChart('bar', leaveStatusData)}
               </ChartWrapper>
             )}
-            
+
             {permissionStatusData.length > 0 && (
               <ChartWrapper title="📋 Permission Status" subtitle="Approved, Pending, Rejected permissions">
                 {renderChart('bar', permissionStatusData)}
@@ -491,53 +620,56 @@ function Dashboard({
             display: 'grid',
             gridTemplateColumns: '1fr 1fr',
             gap: '20px',
-            marginBottom: '24px'
+            marginBottom: '24px',
+            padding: '0 16px'
           }}>
-            <ChartWrapper title="📈 Registration Trend" subtitle="Daily citizen registrations (Last 7 days)">
-              {renderChart('bar', registrationChartData, ['#1e3a5f'])}
+            <ChartWrapper title="📈 Registration Trend (synced)" subtitle="Daily citizen registrations (Last 7 days)">
+              {renderChart('bar', registrationTrendData.map(d => ({ name: d.date, value: d.value })), ['#1e3a5f'])}
             </ChartWrapper>
 
-            <ChartWrapper title="📊 Performance Distribution" subtitle="Report status breakdown">
+            <ChartWrapper title="📊 Performance Distribution (synced)" subtitle="Report status breakdown">
               {renderChart('bar', reportStatusData)}
             </ChartWrapper>
           </div>
 
-          {/* Top Performers */}
+          {/* Top Performers – using computed realTopPerformers (filtered) */}
           <div style={{
-            background: 'white',
+            background: colors.cardBg,
             padding: '20px',
             borderRadius: '8px',
-            boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
-            border: '1px solid #e5e7eb'
+            boxShadow: colors.shadow,
+            border: `1px solid ${colors.cardBorder}`,
+            margin: '0 16px 24px'
           }}>
-            <h3 style={{fontSize: '15px', fontWeight: '600', marginBottom: '16px', color: '#1a202c'}}>🏆 Top Performing Officers</h3>
-            <div style={{display: 'flex', flexDirection: 'column', gap: '6px'}}>
-              {(!topPerformers || topPerformers.length === 0) ? (
-                <div style={{textAlign: 'center', padding: '20px', color: '#64748b', fontSize: '14px'}}>No performance data available</div>
+            <h3 style={{ fontSize: '15px', fontWeight: '600', marginBottom: '16px', color: colors.textPrimary }}>🏆 Top Performing Officers</h3>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+              {(!realTopPerformers || realTopPerformers.length === 0) ? (
+                <div style={{ textAlign: 'center', padding: '20px', color: colors.textSecondary, fontSize: '14px' }}>No performance data available</div>
               ) : (
-                topPerformers.map((emp, i) => (
-                  <div 
-                    key={emp.employeeId} 
+                realTopPerformers.map((emp, i) => (
+                  <div
+                    key={emp.employeeId}
                     style={{
                       display: 'flex',
                       alignItems: 'center',
                       gap: '12px',
                       padding: '10px 16px',
-                      background: i === 0 ? '#fef3c7' : '#f8fafc',
+                      background: i === 0 ? '#fef3c7' : colors.inputBg,
                       borderRadius: '6px',
-                      border: i === 0 ? '1px solid #d97706' : '1px solid #e5e7eb',
+                      border: i === 0 ? '1px solid #d97706' : `1px solid ${colors.cardBorder}`,
                       flexWrap: 'wrap',
-                      fontSize: '13px'
+                      fontSize: '13px',
+                      color: colors.textPrimary
                     }}
                   >
-                    <span style={{fontWeight: '700', color: i === 0 ? '#d97706' : '#64748b', minWidth: '30px'}}>
+                    <span style={{ fontWeight: '700', color: i === 0 ? '#d97706' : colors.textSecondary, minWidth: '30px' }}>
                       #{i + 1}
                     </span>
-                    <span style={{fontWeight: '600', flex: 1}}>{emp.employeeName}</span>
-                    <span style={{color: '#64748b'}}>{emp.region}</span>
-                    <span style={{color: '#2563eb', fontWeight: '500'}}>🆔 {emp.totalRegistrations || 0}</span>
-                    <span style={{color: '#0b7e4b', fontWeight: '600'}}>{emp.avgEfficiency || 0}%</span>
-                    <span style={{color: '#7c3aed'}}>📊 {Math.round(emp.attendanceRate || 0)}%</span>
+                    <span style={{ fontWeight: '600', flex: 1 }}>{emp.employeeName}</span>
+                    <span style={{ color: colors.textSecondary }}>{emp.region}</span>
+                    <span style={{ color: '#2563eb', fontWeight: '500' }}>🆔 {emp.totalRegistrations || 0}</span>
+                    <span style={{ color: '#0b7e4b', fontWeight: '600' }}>{emp.avgEfficiency || 0}%</span>
+                    <span style={{ color: '#7c3aed' }}>📊 {Math.round(emp.attendanceRate || 0)}%</span>
                   </div>
                 ))
               )}
@@ -555,13 +687,14 @@ function Dashboard({
             alignItems: 'center',
             marginBottom: '24px',
             flexWrap: 'wrap',
-            gap: '12px'
+            gap: '12px',
+            padding: '0 16px'
           }}>
             <div>
-              <h2 style={{fontSize: '22px', fontWeight: '700', margin: 0, color: '#1a202c'}}>👨‍💼 Supervisor Dashboard</h2>
-              <p style={{color: '#64748b', fontSize: '14px', margin: '4px 0 0 0'}}>Team overview and performance</p>
+              <h2 style={{ fontSize: '22px', fontWeight: '700', margin: 0, color: colors.textPrimary }}>👨‍💼 Supervisor Dashboard</h2>
+              <p style={{ color: colors.textSecondary, fontSize: '14px', margin: '4px 0 0 0' }}>Team overview (synced data only)</p>
             </div>
-            <div style={{display: 'flex', gap: '8px', flexWrap: 'wrap'}}>
+            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
               <span style={{
                 background: '#dbeafe',
                 color: '#1e40af',
@@ -586,11 +719,11 @@ function Dashboard({
           </div>
 
           {/* Stats Grid */}
-          <div style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '14px', marginBottom: '24px'}}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '14px', marginBottom: '24px', padding: '0 16px' }}>
             <StatsCard label="Team Members" value={teamMembers?.length || 0} color="#7c3aed" icon="👥" />
-            <StatsCard label="Team Reports" value={teamReportsCount} color="#2563eb" icon="📋" />
-            <StatsCard label="Team Registrations" value={teamCitizenCount} color="#0b7e4b" icon="🆔" />
-            <StatsCard label="Pending Leaves" value={pendingLeaves || 0} color="#dc2626" icon="📅" />
+            <StatsCard label="Team Reports (synced)" value={teamReportsCount} color="#2563eb" icon="📋" />
+            <StatsCard label="Team Registrations (synced)" value={teamCitizenCount} color="#0b7e4b" icon="🆔" />
+            <StatsCard label="Pending Leaves" value={realPendingLeaves} color="#dc2626" icon="📅" />
           </div>
 
           {/* Charts */}
@@ -598,14 +731,15 @@ function Dashboard({
             display: 'grid',
             gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))',
             gap: '20px',
-            marginBottom: '24px'
+            marginBottom: '24px',
+            padding: '0 16px'
           }}>
             {reportStatusData.length > 0 && (
-              <ChartWrapper title="📊 Team Report Status" subtitle="Approved, Pending, Rejected reports">
+              <ChartWrapper title="📊 Team Report Status (synced)" subtitle="Approved, Pending, Rejected reports">
                 {renderChart('bar', reportStatusData)}
               </ChartWrapper>
             )}
-            
+
             {leaveStatusData.length > 0 && (
               <ChartWrapper title="📅 Team Leave Status" subtitle="Approved, Pending, Rejected leaves">
                 {renderChart('bar', leaveStatusData)}
@@ -618,53 +752,56 @@ function Dashboard({
             display: 'grid',
             gridTemplateColumns: '1fr 1fr',
             gap: '20px',
-            marginBottom: '24px'
+            marginBottom: '24px',
+            padding: '0 16px'
           }}>
-            <ChartWrapper title="📈 Team Registration Trend" subtitle="Daily registrations (Last 7 days)">
-              {renderChart('bar', registrationChartData, ['#2d6a4f'])}
+            <ChartWrapper title="📈 Team Registration Trend (synced)" subtitle="Daily registrations (Last 7 days)">
+              {renderChart('bar', registrationTrendData.map(d => ({ name: d.date, value: d.value })), ['#2d6a4f'])}
             </ChartWrapper>
 
-            <ChartWrapper title="📊 Team Performance" subtitle="Team report status breakdown">
+            <ChartWrapper title="📊 Team Performance (synced)" subtitle="Team report status breakdown">
               {renderChart('bar', reportStatusData)}
             </ChartWrapper>
           </div>
 
-          {/* Team Performance List */}
+          {/* Team Performance List – using computed realTeamPerformance (filtered) */}
           <div style={{
-            background: 'white',
+            background: colors.cardBg,
             padding: '20px',
             borderRadius: '8px',
-            boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
-            border: '1px solid #e5e7eb'
+            boxShadow: colors.shadow,
+            border: `1px solid ${colors.cardBorder}`,
+            margin: '0 16px 24px'
           }}>
-            <h3 style={{fontSize: '15px', fontWeight: '600', marginBottom: '16px', color: '#1a202c'}}>🏆 Team Performance</h3>
-            {(!teamPerformance || teamPerformance.length === 0) ? (
-              <div style={{textAlign: 'center', padding: '20px', color: '#64748b', fontSize: '14px'}}>No team performance data yet</div>
+            <h3 style={{ fontSize: '15px', fontWeight: '600', marginBottom: '16px', color: colors.textPrimary }}>🏆 Team Performance</h3>
+            {(!realTeamPerformance || realTeamPerformance.length === 0) ? (
+              <div style={{ textAlign: 'center', padding: '20px', color: colors.textSecondary, fontSize: '14px' }}>No team performance data yet</div>
             ) : (
-              <div style={{display: 'flex', flexDirection: 'column', gap: '6px'}}>
-                {teamPerformance.map((emp, i) => (
-                  <div 
-                    key={emp.employeeId} 
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                {realTeamPerformance.map((emp, i) => (
+                  <div
+                    key={emp.employeeId}
                     style={{
                       display: 'flex',
                       alignItems: 'center',
                       gap: '12px',
                       padding: '10px 16px',
-                      background: i === 0 ? '#fef3c7' : '#f8fafc',
+                      background: i === 0 ? '#fef3c7' : colors.inputBg,
                       borderRadius: '6px',
-                      border: i === 0 ? '1px solid #d97706' : '1px solid #e5e7eb',
+                      border: i === 0 ? '1px solid #d97706' : `1px solid ${colors.cardBorder}`,
                       flexWrap: 'wrap',
-                      fontSize: '13px'
+                      fontSize: '13px',
+                      color: colors.textPrimary
                     }}
                   >
-                    <span style={{fontWeight: '700', color: i === 0 ? '#d97706' : '#64748b', minWidth: '30px'}}>
+                    <span style={{ fontWeight: '700', color: i === 0 ? '#d97706' : colors.textSecondary, minWidth: '30px' }}>
                       #{i + 1}
                     </span>
-                    <span style={{fontWeight: '600', flex: 1}}>{emp.employeeName}</span>
-                    <span style={{color: '#64748b'}}>{emp.region}</span>
-                    <span style={{color: '#2563eb', fontWeight: '500'}}>🆔 {emp.totalRegistrations || 0}</span>
-                    <span style={{color: '#0b7e4b', fontWeight: '600'}}>{emp.avgEfficiency || 0}%</span>
-                    <span style={{color: '#7c3aed'}}>📊 {Math.round(emp.attendanceRate || 0)}%</span>
+                    <span style={{ fontWeight: '600', flex: 1 }}>{emp.employeeName}</span>
+                    <span style={{ color: colors.textSecondary }}>{emp.region}</span>
+                    <span style={{ color: '#2563eb', fontWeight: '500' }}>🆔 {emp.totalRegistrations || 0}</span>
+                    <span style={{ color: '#0b7e4b', fontWeight: '600' }}>{emp.avgEfficiency || 0}%</span>
+                    <span style={{ color: '#7c3aed' }}>📊 {Math.round(emp.attendanceRate || 0)}%</span>
                   </div>
                 ))}
               </div>
@@ -682,13 +819,14 @@ function Dashboard({
             alignItems: 'center',
             marginBottom: '24px',
             flexWrap: 'wrap',
-            gap: '12px'
+            gap: '12px',
+            padding: '0 16px'
           }}>
             <div>
-              <h2 style={{fontSize: '22px', fontWeight: '700', margin: 0, color: '#1a202c'}}>👤 Field Officer Dashboard</h2>
-              <p style={{color: '#64748b', fontSize: '14px', margin: '4px 0 0 0'}}>Your personal performance overview</p>
+              <h2 style={{ fontSize: '22px', fontWeight: '700', margin: 0, color: colors.textPrimary }}>👤 Field Officer Dashboard</h2>
+              <p style={{ color: colors.textSecondary, fontSize: '14px', margin: '4px 0 0 0' }}>Your personal performance (synced data only)</p>
             </div>
-            <div style={{display: 'flex', gap: '8px', flexWrap: 'wrap'}}>
+            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
               <span style={{
                 background: '#dbeafe',
                 color: '#1e40af',
@@ -707,42 +845,42 @@ function Dashboard({
                 fontSize: '12px',
                 fontWeight: '500'
               }}>
-                📊 {officerReportsCount} Reports
+                📊 {officerReportsCount} Reports (synced)
               </span>
             </div>
           </div>
 
           {/* Stats Grid */}
-          <div style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '14px', marginBottom: '24px'}}>
-            <StatsCard label="My Reports" value={officerReportsCount} color="#2563eb" icon="📋" />
-            <StatsCard label="Citizens Registered" value={officerTotalRegistrations} color="#0b7e4b" icon="🆔" />
-            <StatsCard label="Pending Leaves" value={pendingLeaves || 0} color="#dc2626" icon="📅" />
-            <StatsCard label="Pending Permissions" value={pendingPermissions || 0} color="#d97706" icon="📋" />
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '14px', marginBottom: '24px', padding: '0 16px' }}>
+            <StatsCard label="My Reports (synced)" value={officerReportsCount} color="#2563eb" icon="📋" />
+            <StatsCard label="Citizens Registered (synced)" value={officerTotalRegistrations} color="#0b7e4b" icon="🆔" />
+            <StatsCard label="Pending Leaves" value={realPendingLeaves} color="#dc2626" icon="📅" />
+            <StatsCard label="Pending Permissions" value={realPendingPermissions} color="#d97706" icon="📋" />
           </div>
 
           {/* Quick Stats */}
-          <div style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '10px', marginBottom: '24px'}}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '10px', marginBottom: '24px', padding: '0 16px' }}>
             {[
-              { label: "Today's Reports", value: (reports || []).filter(r => r.employeeId === user.employeeId && r.reportDate === getToday()).length },
-              { label: "Today's Registrations", value: officerTodayRegistrations },
+              { label: "Today's Reports (synced)", value: (reports || []).filter(r => r.employeeId === user.employeeId && r.reportDate === getToday() && r.synced).length },
+              { label: "Today's Registrations (synced)", value: officerTodayRegistrations },
               { label: 'Efficiency', value: `${Math.round((officerTotalRegistrations / (officerReportsCount || 1) / 100) * 100)}%` },
               { label: 'Attendance', value: todayAttendance?.status || 'Not Marked' }
             ].map((stat, index) => (
-              <div 
+              <div
                 key={index}
                 style={{
-                  background: 'white',
+                  background: colors.cardBg,
                   padding: '14px 16px',
                   borderRadius: '8px',
-                  boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
+                  boxShadow: colors.shadow,
                   display: 'flex',
                   justifyContent: 'space-between',
                   alignItems: 'center',
-                  border: '1px solid #e5e7eb'
+                  border: `1px solid ${colors.cardBorder}`
                 }}
               >
-                <span style={{fontSize: '12px', color: '#64748b'}}>{stat.label}</span>
-                <strong style={{fontSize: '16px', color: '#1a202c'}}>{stat.value}</strong>
+                <span style={{ fontSize: '12px', color: colors.textSecondary }}>{stat.label}</span>
+                <strong style={{ fontSize: '16px', color: colors.textPrimary }}>{stat.value}</strong>
               </div>
             ))}
           </div>
@@ -752,35 +890,37 @@ function Dashboard({
             display: 'grid',
             gridTemplateColumns: '1fr 1fr',
             gap: '20px',
-            marginBottom: '24px'
+            marginBottom: '24px',
+            padding: '0 16px'
           }}>
-            <ChartWrapper title="📈 My Registration Trend" subtitle="Your daily registrations (Last 7 days)">
-              {renderChart('area', officerRegistrationChartData, ['#0b7e4b'])}
+            <ChartWrapper title="📈 My Registration Trend (synced)" subtitle="Your daily registrations (Last 7 days)">
+              {renderChart('area', officerPerformanceData.map(d => ({ date: d.date, value: d.registrations })), ['#0b7e4b'])}
             </ChartWrapper>
 
-            <ChartWrapper title="⚡ Efficiency Trend" subtitle="Registrations per report">
-              {renderChart('line', officerEfficiencyChartData, ['#7c3aed'])}
+            <ChartWrapper title="⚡ Efficiency Trend (synced)" subtitle="Registrations per report">
+              {renderChart('line', officerPerformanceData.map(d => ({ date: d.date, value: d.efficiency })), ['#7c3aed'])}
             </ChartWrapper>
           </div>
 
           {/* Today's Attendance */}
           <div style={{
-            background: 'white',
+            background: colors.cardBg,
             borderRadius: '8px',
             padding: '20px',
-            boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
-            border: '1px solid #e5e7eb'
+            boxShadow: colors.shadow,
+            border: `1px solid ${colors.cardBorder}`,
+            margin: '0 16px 24px'
           }}>
-            <h3 style={{fontSize: '15px', fontWeight: '600', marginBottom: '16px', color: '#1a202c'}}>📊 Today's Attendance</h3>
-            <div style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: '10px'}}>
+            <h3 style={{ fontSize: '15px', fontWeight: '600', marginBottom: '16px', color: colors.textPrimary }}>📊 Today's Attendance</h3>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: '10px' }}>
               {[
-                { label: 'Status', value: todayAttendance?.status || 'Not Marked', color: todayAttendance?.status === 'present' ? '#0b7e4b' : todayAttendance?.status === 'late' ? '#d97706' : todayAttendance?.status === 'absent' ? '#dc2626' : '#64748b' },
-                { label: 'Check In', value: todayAttendance?.checkIn || '--:--', color: '#1a202c' },
-                { label: 'Check Out', value: todayAttendance?.checkOut || '--:--', color: '#1a202c' },
-                { label: 'Work Hours', value: `${todayAttendance?.workHours || 0}h`, color: '#1a202c' }
+                { label: 'Status', value: todayAttendance?.status || 'Not Marked', color: todayAttendance?.status === 'present' ? '#0b7e4b' : todayAttendance?.status === 'late' ? '#d97706' : todayAttendance?.status === 'absent' ? '#dc2626' : colors.textSecondary },
+                { label: 'Check In', value: todayAttendance?.checkIn || '--:--', color: colors.textPrimary },
+                { label: 'Check Out', value: todayAttendance?.checkOut || '--:--', color: colors.textPrimary },
+                { label: 'Work Hours', value: `${todayAttendance?.workHours || 0}h`, color: colors.textPrimary }
               ].map((item, index) => (
-                <div key={index} style={{ padding: '10px', background: '#f8fafc', borderRadius: '6px' }}>
-                  <div style={{ fontSize: '11px', color: '#64748b' }}>{item.label}</div>
+                <div key={index} style={{ padding: '10px', background: colors.inputBg, borderRadius: '6px' }}>
+                  <div style={{ fontSize: '11px', color: colors.textSecondary }}>{item.label}</div>
                   <div style={{ fontSize: '15px', fontWeight: '600', color: item.color }}>{item.value}</div>
                 </div>
               ))}

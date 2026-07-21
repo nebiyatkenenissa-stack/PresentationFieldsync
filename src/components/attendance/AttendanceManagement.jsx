@@ -1,9 +1,9 @@
-// components/attendance/AttendanceManagement.js – FULL FIXED (online API sync)
+// components/attendance/AttendanceManagement.js – FULL FIXED (removed DevTools offline alert)
 
 import React, { useState, useMemo, useEffect } from 'react';
 import { db } from '../../services/database';
 import { getToday, uid } from '../../utils/helpers';
-import { syncQueue, checkRealInternet, isDevToolsOffline, clearStuckSyncItems } from '../../services/database';
+import { syncQueue, checkRealInternet, clearStuckSyncItems } from '../../services/database';
 
 function AttendanceManagement({ 
   filteredAttendance,
@@ -42,11 +42,6 @@ function AttendanceManagement({
   // ===== CHECK ONLINE STATUS & CLEAR STUCK SYNC =====
   useEffect(() => {
     const checkNetwork = async () => {
-      if (isDevToolsOffline()) {
-        setIsOnline(false);
-        return;
-      }
-      
       const online = await checkRealInternet();
       setIsOnline(online);
       
@@ -133,16 +128,12 @@ function AttendanceManagement({
     setShowModal(true);
   };
 
-  // ===== HANDLE SUBMIT ATTENDANCE (NOW WITH IMMEDIATE API SYNC) =====
+  // ===== HANDLE SUBMIT ATTENDANCE (FIXED: no DevTools alert) =====
   const handleSubmitAttendance = async () => {
     if (!selectedOfficer) return;
     const today = getToday();
     
-    if (isDevToolsOffline()) {
-      alert('🔌 You are offline. Please disable offline mode in DevTools.');
-      return;
-    }
-    
+    // Check real online status (no blocking alert)
     const online = await checkRealInternet();
     setIsOnline(online);
 
@@ -187,7 +178,6 @@ function AttendanceManagement({
         seenBy: null,
         editedBySupervisor: true,
         lastEditedAt: new Date().toISOString(),
-        // Mark as NOT synced initially – we'll update after API call
         synced: false,
         lastSyncAttempt: Date.now()
       };
@@ -252,14 +242,15 @@ function AttendanceManagement({
               );
             }
             console.log('✅ Attendance sent to PostgreSQL');
+            alert('✅ Attendance submitted successfully!');
           } else {
             throw new Error('API failed');
           }
         } catch (apiError) {
-          // API call failed – queue for sync
-          console.warn('⚠️ API call failed, queuing attendance for sync');
+          console.warn('⚠️ API call failed, queueing attendance for sync');
           syncQueue.add({ type: 'attendance', id: recordId, data: payload });
           setPendingCount(syncQueue.count());
+          alert('⚠️ Online but server unreachable. Saved locally and will sync later.');
         }
       } else {
         // OFFLINE – always queue
@@ -268,7 +259,7 @@ function AttendanceManagement({
         alert('📋 Attendance saved OFFLINE! Will sync automatically when online.');
       }
 
-      // Notify manager (unchanged)
+      // Notify manager
       const manager = users.find(u => u.role === 'manager');
       if (manager && addNotification) {
         await addNotification(
@@ -290,7 +281,6 @@ function AttendanceManagement({
 
       setShowModal(false);
       setSelectedOfficer(null);
-      alert('✅ Attendance submitted successfully!');
     } catch (error) {
       console.error('Error submitting attendance:', error);
       alert('❌ Error submitting attendance: ' + error.message);
@@ -363,7 +353,6 @@ function AttendanceManagement({
 
   const displayFilteredAttendance = getFilteredDisplayAttendance();
 
-  // --- The rest of the component (UI) remains completely unchanged ---
   return (
     <div style={{padding: '24px', maxWidth: '1400px', margin: '0 auto', fontFamily: 'Segoe UI, Tahoma, Geneva, Verdana, sans-serif'}}>
       {/* STATUS BAR */}

@@ -1,4 +1,4 @@
-// components/users/UserManagement.js - FIXED - Syncs to PostgreSQL
+// components/users/UserManagement.js - WITH FULL VALIDATION
 
 import React, { useState } from 'react';
 import { db, syncQueue, checkRealInternet } from '../../services/database';
@@ -13,6 +13,8 @@ function UserManagement({
 }) {
   const { userT } = useUserLanguage();
   const [isSubmitting, setIsSubmitting] = useState(false);
+  
+  // Form state
   const [localNewUser, setLocalNewUser] = useState({
     name: '',
     email: '',
@@ -26,9 +28,74 @@ function UserManagement({
     department: ''
   });
 
-  // ===== CREATE USER (IndexedDB + PostgreSQL Sync) =====
+  // Validation errors
+  const [errors, setErrors] = useState({
+    name: '',
+    password: '',
+    phone: ''
+  });
+
+  // ===== VALIDATION FUNCTIONS =====
+  const validateName = (name) => {
+    // Only letters, spaces, hyphens, and apostrophes allowed – no digits
+    if (!name.trim()) return userT('userManagement.nameRequired') || 'Full name is required';
+    if (/[0-9]/.test(name)) return userT('userManagement.nameNoNumbers') || 'Full name must not contain numbers';
+    return '';
+  };
+
+  const validatePassword = (password) => {
+    if (!password || password.length < 6) return 'Password must be at least 6 characters';
+    if (!/[a-zA-Z]/.test(password)) return 'Password must contain at least one letter';
+    if (!/[0-9]/.test(password)) return 'Password must contain at least one number';
+    return '';
+  };
+
+  const validatePhone = (phone) => {
+    // Must start with +2519 and exactly 8 digits after (total 13 chars)
+    const fullPhone = phone.trim();
+    if (!fullPhone) return ''; // optional field – no error if empty
+    if (!/^\+2519\d{8}$/.test(fullPhone)) {
+      return 'Phone must be in format +2519XXXXXXXX (8 digits after +2519)';
+    }
+    return '';
+  };
+
+  // ===== HANDLE FIELD CHANGES WITH REAL-TIME VALIDATION =====
+  const handleChange = (e) => {
+    const { name, value } = e.target;
+    setLocalNewUser(prev => ({ ...prev, [name]: value }));
+
+    // Validate on change
+    if (name === 'name') {
+      setErrors(prev => ({ ...prev, name: validateName(value) }));
+    } else if (name === 'password') {
+      setErrors(prev => ({ ...prev, password: validatePassword(value) }));
+    } else if (name === 'phone') {
+      // Auto-prefix +2519 if not present
+      let phoneVal = value;
+      if (phoneVal && !phoneVal.startsWith('+2519')) {
+        // If user types digits, we could auto-prefix, but better to let them paste full
+        // We'll just validate the full format
+      }
+      setErrors(prev => ({ ...prev, phone: validatePhone(phoneVal) }));
+    }
+  };
+
+  // ===== CREATE USER =====
   const handleSubmit = async (e) => {
     e.preventDefault();
+
+    // Final validation
+    const nameError = validateName(localNewUser.name);
+    const passwordError = validatePassword(localNewUser.password);
+    const phoneError = validatePhone(localNewUser.phone);
+    setErrors({ name: nameError, password: passwordError, phone: phoneError });
+
+    if (nameError || passwordError || phoneError) {
+      alert('Please fix the validation errors before submitting.');
+      return;
+    }
+
     setIsSubmitting(true);
 
     try {
@@ -105,6 +172,7 @@ function UserManagement({
       
       alert(userT('userManagement.createSuccess', { name: newUserObj.name }));
 
+      // Reset form
       setLocalNewUser({
         name: '',
         email: '',
@@ -117,6 +185,7 @@ function UserManagement({
         shift: 'Day',
         department: ''
       });
+      setErrors({ name: '', password: '', phone: '' });
     } catch (error) {
       console.error('Error creating user:', error);
       alert(userT('userManagement.createError', { error: error.message }));
@@ -125,7 +194,7 @@ function UserManagement({
     }
   };
 
-  // ===== TOGGLE USER STATUS =====
+  // ===== TOGGLE USER STATUS (unchanged) =====
   const handleToggleStatus = async (userId) => {
     try {
       const user = users.find(u => u.id === userId);
@@ -140,7 +209,6 @@ function UserManagement({
         setUsers(prev => prev.map(u => u.id === userId ? updatedUser : u));
       }
 
-      // Sync status change to PostgreSQL
       const online = await checkRealInternet();
       if (online) {
         try {
@@ -171,7 +239,7 @@ function UserManagement({
     }
   };
 
-  // ===== DELETE USER =====
+  // ===== DELETE USER (unchanged) =====
   const handleDeleteUser = async (userId) => {
     if (!window.confirm(userT('userManagement.deleteConfirm'))) return;
 
@@ -185,7 +253,6 @@ function UserManagement({
         setUsers(prev => prev.filter(u => u.id !== userId));
       }
 
-      // Sync delete to PostgreSQL
       const online = await checkRealInternet();
       if (online) {
         try {
@@ -249,29 +316,41 @@ function UserManagement({
           </span>
         </div>
 
-        <form onSubmit={handleSubmit}>
+        <form onSubmit={handleSubmit} noValidate>
           <div style={{
             display: 'grid',
             gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
             gap: '16px'
           }}>
             <div style={{display: 'flex', flexDirection: 'column', gap: '4px'}}>
-              <label style={{fontSize: '13px', fontWeight: '500', color: '#374151'}}>{userT('userManagement.fullName')} *</label>
+              <label style={{fontSize: '13px', fontWeight: '500', color: '#374151'}}>
+                {userT('userManagement.fullName')} *
+              </label>
               <input 
                 type="text" 
+                name="name"
                 value={localNewUser.name} 
-                onChange={e => setLocalNewUser({...localNewUser, name: e.target.value})}
+                onChange={handleChange}
                 placeholder={userT('userManagement.enterName')} 
                 required
-                style={{padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '14px'}}
+                style={{
+                  padding: '8px 12px',
+                  border: `1px solid ${errors.name ? '#dc2626' : '#d1d5db'}`,
+                  borderRadius: '6px',
+                  fontSize: '14px'
+                }}
               />
+              {errors.name && (
+                <span style={{color: '#dc2626', fontSize: '12px', marginTop: '2px'}}>{errors.name}</span>
+              )}
             </div>
             <div style={{display: 'flex', flexDirection: 'column', gap: '4px'}}>
               <label style={{fontSize: '13px', fontWeight: '500', color: '#374151'}}>{userT('userManagement.email')} *</label>
               <input 
                 type="email" 
+                name="email"
                 value={localNewUser.email} 
-                onChange={e => setLocalNewUser({...localNewUser, email: e.target.value})}
+                onChange={handleChange}
                 placeholder={userT('userManagement.enterEmail')} 
                 required
                 style={{padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '14px'}}
@@ -286,25 +365,47 @@ function UserManagement({
             marginTop: '16px'
           }}>
             <div style={{display: 'flex', flexDirection: 'column', gap: '4px'}}>
-              <label style={{fontSize: '13px', fontWeight: '500', color: '#374151'}}>{userT('userManagement.password')} *</label>
+              <label style={{fontSize: '13px', fontWeight: '500', color: '#374151'}}>
+                {userT('userManagement.password')} *
+              </label>
               <input 
                 type="password" 
+                name="password"
                 value={localNewUser.password} 
-                onChange={e => setLocalNewUser({...localNewUser, password: e.target.value})}
+                onChange={handleChange}
                 placeholder={userT('userManagement.enterPassword')} 
                 required
-                style={{padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '14px'}}
+                style={{
+                  padding: '8px 12px',
+                  border: `1px solid ${errors.password ? '#dc2626' : '#d1d5db'}`,
+                  borderRadius: '6px',
+                  fontSize: '14px'
+                }}
               />
+              {errors.password && (
+                <span style={{color: '#dc2626', fontSize: '12px', marginTop: '2px'}}>{errors.password}</span>
+              )}
+              <small style={{color: '#64748b', fontSize: '11px'}}>Must contain at least one letter and one number</small>
             </div>
             <div style={{display: 'flex', flexDirection: 'column', gap: '4px'}}>
               <label style={{fontSize: '13px', fontWeight: '500', color: '#374151'}}>{userT('userManagement.phone')}</label>
               <input 
                 type="tel" 
+                name="phone"
                 value={localNewUser.phone} 
-                onChange={e => setLocalNewUser({...localNewUser, phone: e.target.value})}
-                placeholder={userT('userManagement.enterPhone')}
-                style={{padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '14px'}}
+                onChange={handleChange}
+                placeholder="+2519XXXXXXXX (8 digits after +2519)"
+                style={{
+                  padding: '8px 12px',
+                  border: `1px solid ${errors.phone ? '#dc2626' : '#d1d5db'}`,
+                  borderRadius: '6px',
+                  fontSize: '14px'
+                }}
               />
+              {errors.phone && (
+                <span style={{color: '#dc2626', fontSize: '12px', marginTop: '2px'}}>{errors.phone}</span>
+              )}
+              <small style={{color: '#64748b', fontSize: '11px'}}>Format: +2519XXXXXXXX (e.g., +251912345678)</small>
             </div>
           </div>
 
@@ -317,8 +418,9 @@ function UserManagement({
             <div style={{display: 'flex', flexDirection: 'column', gap: '4px'}}>
               <label style={{fontSize: '13px', fontWeight: '500', color: '#374151'}}>{userT('userManagement.role')} *</label>
               <select 
+                name="role"
                 value={localNewUser.role} 
-                onChange={e => setLocalNewUser({...localNewUser, role: e.target.value})}
+                onChange={handleChange}
                 required
                 style={{padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '14px'}}
               >
@@ -330,8 +432,9 @@ function UserManagement({
             <div style={{display: 'flex', flexDirection: 'column', gap: '4px'}}>
               <label style={{fontSize: '13px', fontWeight: '500', color: '#374151'}}>{userT('userManagement.region')} *</label>
               <select 
+                name="region"
                 value={localNewUser.region} 
-                onChange={e => setLocalNewUser({...localNewUser, region: e.target.value})}
+                onChange={handleChange}
                 required
                 style={{padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '14px'}}
               >
@@ -354,8 +457,9 @@ function UserManagement({
             <div style={{display: 'flex', flexDirection: 'column', gap: '4px'}}>
               <label style={{fontSize: '13px', fontWeight: '500', color: '#374151'}}>{userT('userManagement.shift')}</label>
               <select 
+                name="shift"
                 value={localNewUser.shift} 
-                onChange={e => setLocalNewUser({...localNewUser, shift: e.target.value})}
+                onChange={handleChange}
                 style={{padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '14px'}}
               >
                 <option value="Day">{userT('userManagement.day')}</option>
@@ -367,8 +471,9 @@ function UserManagement({
               <label style={{fontSize: '13px', fontWeight: '500', color: '#374151'}}>{userT('userManagement.department')}</label>
               <input 
                 type="text" 
+                name="department"
                 value={localNewUser.department} 
-                onChange={e => setLocalNewUser({...localNewUser, department: e.target.value})}
+                onChange={handleChange}
                 placeholder={userT('userManagement.enterDepartment')}
                 style={{padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '14px'}}
               />
@@ -385,8 +490,9 @@ function UserManagement({
               <div style={{display: 'flex', flexDirection: 'column', gap: '4px'}}>
                 <label style={{fontSize: '13px', fontWeight: '500', color: '#374151'}}>{userT('userManagement.supervisor')}</label>
                 <select 
+                  name="supervisorId"
                   value={localNewUser.supervisorId} 
-                  onChange={e => setLocalNewUser({...localNewUser, supervisorId: e.target.value})}
+                  onChange={handleChange}
                   style={{padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '14px'}}
                 >
                   <option value="">{userT('userManagement.selectSupervisor')}</option>
@@ -399,8 +505,9 @@ function UserManagement({
                 <label style={{fontSize: '13px', fontWeight: '500', color: '#374151'}}>{userT('userManagement.assignedSites')}</label>
                 <input 
                   type="text" 
+                  name="assignedSites"
                   value={localNewUser.assignedSites} 
-                  onChange={e => setLocalNewUser({...localNewUser, assignedSites: e.target.value})}
+                  onChange={handleChange}
                   placeholder={userT('userManagement.sitePlaceholder')}
                   style={{padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '14px'}}
                 />
@@ -434,7 +541,7 @@ function UserManagement({
         </form>
       </div>
 
-      {/* ===== USERS TABLE ===== */}
+      {/* ===== USERS TABLE (unchanged) ===== */}
       <div style={{
         background: 'white',
         borderRadius: '12px',
