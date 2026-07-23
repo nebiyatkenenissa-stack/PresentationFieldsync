@@ -312,6 +312,30 @@ function AppContent() {
   const isSupervisor = user?.role === 'supervisor';
 
   // ============================================================
+  // RESTORE SESSION ON APP LOAD (persistent login)
+  // ============================================================
+  useEffect(() => {
+    const restoreSession = async () => {
+      try {
+        const session = await db.auth.get('session');
+        if (session && session.userId) {
+          const allUsers = await db.users.toArray();
+          const foundUser = allUsers.find(u => u.id === session.userId);
+          if (foundUser) {
+            setUser(foundUser);
+            console.log('🔐 Session restored for', foundUser.name);
+          } else {
+            await db.auth.clear();
+          }
+        }
+      } catch (error) {
+        console.error('Error restoring session:', error);
+      }
+    };
+    restoreSession();
+  }, []);
+
+  // ============================================================
   // AUDIT LOG FUNCTIONS (with push & queue)
   // ============================================================
   const addAuditLog = async (action, details) => {
@@ -498,9 +522,9 @@ function AppContent() {
         setAppNotifications(notificationsData);
         setPermissions(permissionsData);
 
-        await db.auth.clear();
-        await clearStuckSyncItems();
-        
+        await clearStuckSyncItems(); // Keep – not clearing auth
+        // db.auth.clear() removed – session persists
+
         const queueItems = syncQueue.getAll();
         if (queueItems.length > 0) {
           console.log(`📋 Found ${queueItems.length} pending items in queue`);
@@ -1021,7 +1045,7 @@ function AppContent() {
     }
     setUser(null);
     await db.auth.clear();
-    window.location.reload();
+    // Removed: window.location.reload();
   };
 
   // ============================================================
@@ -1886,13 +1910,16 @@ function AppContent() {
   // ============================================================
   // LOGIN PAGE
   // ============================================================
+  // Show loading only if no user and still loading
   if (!user) {
+    if (isLoading) {
+      return <LoadingScreen />;
+    }
     return <Login onLogin={handleLogin} loginError={loginError} isOnline={isOnline} />;
   }
 
-  if (isLoading) {
-    return <LoadingScreen />;
-  }
+  // If user exists, show app immediately – no loading screen
+  // (isLoading may still be true but we ignore it)
 
   // ============================================================
   // MAIN APP RETURN
@@ -2178,6 +2205,7 @@ function AppContent() {
                 attendance={attendance}
                 screenTime={screenTime}
                 liveStatus={liveStatus}
+                citizens={citizens}        // <-- THIS LINE ADDED
                 totalReports={totalReports}
                 totalRegistrations={totalRegistrations}
                 regionStats={regionStats}

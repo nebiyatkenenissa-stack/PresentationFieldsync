@@ -1,51 +1,175 @@
 import React, { useMemo } from 'react';
 
 function Analytics({ 
-  reports, 
+  reports: allReports, 
   users, 
-  attendance, 
-  screenTime, 
-  liveStatus,
-  totalReports, 
-  totalRegistrations, 
-  regionStats, 
-  employeePerformance,
+  attendance: allAttendance, 
+  screenTime: allScreenTime, 
+  liveStatus: allLiveStatus,
+  citizens: allCitizens,
   renderBarChart 
 }) {
-  // Calculate averages
-  const avgEfficiency = employeePerformance?.length > 0 
+  // ============================================================
+  // FILTER ONLY SYNCED DATA
+  // ============================================================
+  const reports = useMemo(() => 
+    (allReports || []).filter(r => r.synced === true), 
+    [allReports]
+  );
+  
+  const citizens = useMemo(() => 
+    (allCitizens || []).filter(c => c.synced === true), 
+    [allCitizens]
+  );
+  
+  const attendance = useMemo(() => 
+    (allAttendance || []).filter(a => a.synced === true), 
+    [allAttendance]
+  );
+  
+  const screenTime = useMemo(() => 
+    (allScreenTime || []).filter(s => s.synced === true), 
+    [allScreenTime]
+  );
+  
+  const liveStatus = useMemo(() => 
+    (allLiveStatus || []).filter(l => l.synced === true), 
+    [allLiveStatus]
+  );
+
+  // ============================================================
+  // COMPUTE METRICS FROM FILTERED DATA
+  // ============================================================
+  const totalReports = reports.length;
+  const totalRegistrations = citizens.length;
+
+  // Days with reports (for daily average)
+  const daysWithReports = new Set(reports.map(r => r.reportDate)).size || 1;
+  const dailyAvg = Math.round(totalRegistrations / daysWithReports);
+
+  // Completion rate (approved / reviewed)
+  const approvedReports = reports.filter(r => r.reviewed).length;
+  const completionRate = totalReports > 0 ? Math.round((approvedReports / totalReports) * 100) : 0;
+
+  // Region stats (from filtered reports & citizens)
+  const regionStats = useMemo(() => {
+    const map = {};
+    reports.forEach(r => {
+      if (!map[r.region]) map[r.region] = { reports: 0, registrations: 0, employees: new Set() };
+      map[r.region].reports += 1;
+    });
+    citizens.forEach(c => {
+      if (!map[c.region]) map[c.region] = { reports: 0, registrations: 0, employees: new Set() };
+      map[c.region].registrations += 1;
+      if (c.registeredBy) map[c.region].employees.add(c.registeredBy);
+    });
+    return Object.entries(map).map(([region, data]) => ({
+      region,
+      ...data,
+      employees: data.employees.size
+    }));
+  }, [reports, citizens]);
+
+  // Employee performance (from filtered data)
+  const employeePerformance = useMemo(() => {
+    const map = {};
+    reports.forEach(r => {
+      if (!map[r.employeeId]) {
+        map[r.employeeId] = {
+          employeeId: r.employeeId,
+          employeeName: r.employeeName,
+          region: r.region,
+          totalReports: 0,
+          totalRegistrations: 0,
+          avgEfficiency: 0,
+          attendanceRate: 0,
+          totalWorkHours: 0,
+          lateDays: 0,
+          absentDays: 0,
+          trustScore: 0,
+          productivityScore: 0,
+          tasksCompleted: 0,
+          tasksInProgress: 0
+        };
+      }
+      map[r.employeeId].totalReports += 1;
+    });
+
+    // Add registrations from citizens
+    citizens.forEach(c => {
+      if (c.registeredBy && map[c.registeredBy]) {
+        map[c.registeredBy].totalRegistrations += 1;
+      }
+    });
+
+    // Attendance
+    attendance.forEach(a => {
+      if (map[a.employeeId]) {
+        const totalAtt = attendance.filter(att => att.employeeId === a.employeeId).length;
+        const presentAtt = attendance.filter(att => att.employeeId === a.employeeId && att.status === 'present').length;
+        map[a.employeeId].attendanceRate = totalAtt > 0 ? (presentAtt / totalAtt) * 100 : 0;
+        map[a.employeeId].totalWorkHours += a.workHours || 0;
+        if (a.status === 'late') map[a.employeeId].lateDays += 1;
+        if (a.status === 'absent') map[a.employeeId].absentDays += 1;
+      }
+    });
+
+    // Screen time trust scores
+    screenTime.forEach(s => {
+      if (map[s.employeeId]) {
+        map[s.employeeId].trustScore = (s.trustScore && !isNaN(s.trustScore)) ? s.trustScore : 0;
+      }
+    });
+
+    // Live status
+    liveStatus.forEach(l => {
+      if (map[l.employeeId]) {
+        map[l.employeeId].productivityScore = l.productivityScore || 0;
+        map[l.employeeId].tasksCompleted = l.tasksCompleted || 0;
+        map[l.employeeId].tasksInProgress = l.tasksInProgress || 0;
+      }
+    });
+
+    // Calculate avg efficiency (registrations per report, normalized)
+    Object.values(map).forEach(emp => {
+      emp.avgEfficiency = emp.totalReports > 0 
+        ? Math.round((emp.totalRegistrations / (emp.totalReports * 100)) * 100) 
+        : 0;
+    });
+
+    return Object.values(map);
+  }, [reports, citizens, attendance, screenTime, liveStatus]);
+
+  // ============================================================
+  // DERIVED METRICS
+  // ============================================================
+  const avgEfficiency = employeePerformance.length > 0 
     ? Math.round(employeePerformance.reduce((sum, e) => sum + e.avgEfficiency, 0) / employeePerformance.length)
     : 0;
-  const avgAttendance = employeePerformance?.length > 0
+
+  const avgAttendance = employeePerformance.length > 0
     ? Math.round(employeePerformance.reduce((sum, e) => sum + e.attendanceRate, 0) / employeePerformance.length)
     : 0;
-  const avgTrust = employeePerformance?.length > 0
+
+  const avgTrust = employeePerformance.length > 0
     ? Math.round(employeePerformance.reduce((sum, e) => sum + (e.trustScore || 0), 0) / employeePerformance.length)
     : 0;
 
-  // Get top officers
-  const topOfficers = [...(employeePerformance || [])]
+  const topOfficers = [...employeePerformance]
     .sort((a, b) => b.totalRegistrations - a.totalRegistrations)
     .slice(0, 5);
 
-  // Calculate total field officers
   const totalOfficers = users?.filter(u => u.role === 'field_officer').length || 0;
   const totalSupervisors = users?.filter(u => u.role === 'supervisor').length || 0;
 
-  // Calculate daily average registrations
-  const daysWithReports = new Set(reports?.map(r => r.reportDate)).size || 1;
-  const dailyAvg = Math.round(totalRegistrations / daysWithReports);
-
-  // Calculate completion rate (approved vs total)
-  const approvedReports = reports?.filter(r => r.reviewed).length || 0;
-  const completionRate = reports?.length > 0 ? Math.round((approvedReports / reports.length) * 100) : 0;
-
-  // Get low performers (officers with low efficiency)
-  const lowPerformers = [...(employeePerformance || [])]
+  const lowPerformers = [...employeePerformance]
     .filter(e => e.avgEfficiency < 30)
     .sort((a, b) => a.avgEfficiency - b.avgEfficiency)
     .slice(0, 3);
 
+  // ============================================================
+  // RENDER – same as before, but using computed filtered values
+  // ============================================================
   return (
     <div className="analytics-view" style={{padding: '0'}}>
       {/* Header */}
@@ -80,7 +204,7 @@ function Analytics({
             fontSize: '12px',
             fontWeight: '500'
           }}>
-            📊 {reports?.length || 0} Reports
+            📊 {totalReports} Reports
           </span>
         </div>
       </div>
@@ -109,7 +233,7 @@ function Analytics({
           e.currentTarget.style.transform = 'translateY(0) scale(1)';
           e.currentTarget.style.boxShadow = '0 4px 12px rgba(30, 58, 95, 0.2)';
         }}>
-          <div style={{fontSize: '32px', fontWeight: '700'}}>{totalRegistrations || 0}</div>
+          <div style={{fontSize: '32px', fontWeight: '700'}}>{totalRegistrations}</div>
           <div style={{fontSize: '14px', opacity: 0.8}}>🆔 Total Citizens Registered</div>
           <div style={{fontSize: '12px', opacity: 0.6, marginTop: '4px'}}>📈 +{dailyAvg} avg per day</div>
         </div>
@@ -132,7 +256,7 @@ function Analytics({
         }}>
           <div style={{fontSize: '32px', fontWeight: '700'}}>{completionRate}%</div>
           <div style={{fontSize: '14px', opacity: 0.8}}>✅ Report Completion Rate</div>
-          <div style={{fontSize: '12px', opacity: 0.6, marginTop: '4px'}}>📋 {approvedReports} approved out of {reports?.length || 0}</div>
+          <div style={{fontSize: '12px', opacity: 0.6, marginTop: '4px'}}>📋 {approvedReports} approved out of {totalReports}</div>
         </div>
         <div style={{
           background: 'linear-gradient(135deg, #d97706, #b45309)',
@@ -626,8 +750,8 @@ function Analytics({
           e.currentTarget.style.padding = '0';
         }}>
           <span>🏆 Best Region: {regionStats?.length > 0 ? regionStats.sort((a, b) => b.registrations - a.registrations)[0]?.region || 'N/A' : 'N/A'}</span>
-          <span>📈 Total Reports: {reports?.length || 0}</span>
-          <span>🆔 Total Citizens: {totalRegistrations || 0}</span>
+          <span>📈 Total Reports: {totalReports}</span>
+          <span>🆔 Total Citizens: {totalRegistrations}</span>
         </div>
       </div>
     </div>
