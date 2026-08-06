@@ -1,4 +1,8 @@
-// App.jsx – FULL COMPLETE VERSION (with alerts, audit, screen time, tasks, verification, supervisor reports pull & push)
+// App.jsx – FULL COMPLETE VERSION with Profile (password change + file-upload photo path)
+// + FORCE PASSWORD CHANGE ON FIRST LOGIN
+// + HIERARCHICAL LOCATION (Country → Region → Zone → Woreda → Kebele → Community)
+// + SERVER LOGIN (hybrid online/offline)
+// + FIXED: deleteUser, toggleUserStatus, profile update with password change, offline queue for user_delete & user_status_update
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { 
@@ -58,7 +62,7 @@ import VerificationPopup from './components/verification/VerificationPopup';
 import VerificationPage from './components/verification/VerificationPage';
 import { useVerification } from './hooks/useVerification';
 
-// ===== OFFLINE QUEUE PROCESSOR (kept for reference) =====
+// ===== OFFLINE QUEUE PROCESSOR (extended for user updates, deletes, status) =====
 const processOfflineQueue = async (queueItems) => {
   const results = { synced: 0, failed: 0 };
   
@@ -108,6 +112,44 @@ const processOfflineQueue = async (queueItems) => {
         case 'supervisor_report':
           await db.supervisor_reports.update(item.id, { synced: true });
           results.synced++;
+          break;
+        case 'user_update':
+          const userData = item.data;
+          const response = await fetch(`http://localhost:5000/api/users/${userData.id}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(userData)
+          });
+          if (response.ok) {
+            await db.users.update(userData.id, { synced: true });
+            results.synced++;
+          } else {
+            throw new Error('Server rejected user update');
+          }
+          break;
+        case 'user_delete':
+          const delRes = await fetch(`http://localhost:5000/api/users/${item.data.userId}`, {
+            method: 'DELETE'
+          });
+          if (delRes.ok) {
+            await db.users.delete(item.data.userId);
+            results.synced++;
+          } else {
+            throw new Error('Server rejected delete');
+          }
+          break;
+        case 'user_status_update':
+          const statusRes = await fetch(`http://localhost:5000/api/users/${item.data.userId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ status: item.data.status })
+          });
+          if (statusRes.ok) {
+            await db.users.update(item.data.userId, { status: item.data.status, synced: true });
+            results.synced++;
+          } else {
+            throw new Error('Server rejected status update');
+          }
           break;
         default:
           results.failed++;
@@ -173,6 +215,42 @@ function AppContent() {
     checkOut: '',
     notes: ''
   });
+
+  // ===== FORCE PASSWORD CHANGE STATE =====
+  const [showForceChangePassword, setShowForceChangePassword] = useState(false);
+  const [forcePasswordForm, setForcePasswordForm] = useState({
+    currentPassword: '',
+    newPassword: '',
+    confirmPassword: ''
+  });
+  const [forcePasswordError, setForcePasswordError] = useState('');
+
+  // ===== PROFILE STATE =====
+  const [showProfileModal, setShowProfileModal] = useState(false);
+  const [profileForm, setProfileForm] = useState({
+    name: '',
+    email: '',
+    phone: '',
+    shift: '',
+    department: '',
+    currentPassword: '', // NEW: required for password change
+    password: '',
+    confirmPassword: ''
+  });
+  const [profilePhotoPreview, setProfilePhotoPreview] = useState(null);
+  const [selectedProfileFile, setSelectedProfileFile] = useState(null);
+
+  // ===== LOCATION STATE =====
+  const [selectedLocations, setSelectedLocations] = useState({
+    country: null,
+    region: null,
+    zone: null,
+    woreda: null,
+    kebele: null,
+    community: null
+  });
+  const [woredaSupervisors, setWoredaSupervisors] = useState([]);
+  const [loadingSupervisors, setLoadingSupervisors] = useState(false);
 
   // ===== VERIFICATION SYSTEM =====
   const isOfficer = user?.role === 'field_officer';
@@ -312,6 +390,27 @@ function AppContent() {
   const isSupervisor = user?.role === 'supervisor';
 
   // ============================================================
+  // HELPER: Build location path
+  // ============================================================
+  const buildLocationPath = async (locations) => {
+    const levels = ['country', 'region', 'zone', 'woreda', 'kebele', 'community'];
+    const names = [];
+    for (const level of levels) {
+      const id = locations[level];
+      if (id) {
+        try {
+          const res = await fetch(`http://localhost:5000/api/locations/${id}`);
+          const data = await res.json();
+          names.push(data.name);
+        } catch {
+          names.push('Unknown');
+        }
+      }
+    }
+    return names.join(' > ') || 'Unknown';
+  };
+
+  // ============================================================
   // RESTORE SESSION ON APP LOAD (persistent login)
   // ============================================================
   useEffect(() => {
@@ -322,7 +421,12 @@ function AppContent() {
           const allUsers = await db.users.toArray();
           const foundUser = allUsers.find(u => u.id === session.userId);
           if (foundUser) {
-            setUser(foundUser);
+            if (foundUser.must_change_password) {
+              setUser(foundUser);
+              setShowForceChangePassword(true);
+            } else {
+              setUser(foundUser);
+            }
             console.log('🔐 Session restored for', foundUser.name);
           } else {
             await db.auth.clear();
@@ -472,6 +576,17 @@ function AppContent() {
                     supervisorId: serverUser.supervisor_id,
                     status: serverUser.status,
                     password: mergedUsers[existingIndex].password,
+                    profilePhoto: serverUser.profile_photo || mergedUsers[existingIndex].profilePhoto || null,
+                    shift: serverUser.shift || mergedUsers[existingIndex].shift || 'Day',
+                    department: serverUser.department || mergedUsers[existingIndex].department || '',
+                    phone: serverUser.phone || mergedUsers[existingIndex].phone || '',
+                    must_change_password: serverUser.must_change_password !== undefined ? serverUser.must_change_password : false,
+                    country_id: serverUser.country_id || mergedUsers[existingIndex].country_id || null,
+                    region_id: serverUser.region_id || mergedUsers[existingIndex].region_id || null,
+                    zone_id: serverUser.zone_id || mergedUsers[existingIndex].zone_id || null,
+                    woreda_id: serverUser.woreda_id || mergedUsers[existingIndex].woreda_id || null,
+                    kebele_id: serverUser.kebele_id || mergedUsers[existingIndex].kebele_id || null,
+                    community_id: serverUser.community_id || mergedUsers[existingIndex].community_id || null,
                   };
                 } else {
                   const defaultPassword = 
@@ -493,7 +608,15 @@ function AppContent() {
                     assignedSites: [],
                     managerId: 'm1',
                     gpsEnabled: true,
-                    pin: serverUser.role === 'field_officer' ? '1234' : null
+                    pin: serverUser.role === 'field_officer' ? '1234' : null,
+                    profilePhoto: serverUser.profile_photo || null,
+                    must_change_password: serverUser.must_change_password || false,
+                    country_id: serverUser.country_id || null,
+                    region_id: serverUser.region_id || null,
+                    zone_id: serverUser.zone_id || null,
+                    woreda_id: serverUser.woreda_id || null,
+                    kebele_id: serverUser.kebele_id || null,
+                    community_id: serverUser.community_id || null,
                   });
                 }
               }
@@ -522,8 +645,7 @@ function AppContent() {
         setAppNotifications(notificationsData);
         setPermissions(permissionsData);
 
-        await clearStuckSyncItems(); // Keep – not clearing auth
-        // db.auth.clear() removed – session persists
+        await clearStuckSyncItems();
 
         const queueItems = syncQueue.getAll();
         if (queueItems.length > 0) {
@@ -539,6 +661,43 @@ function AppContent() {
     };
     loadAllData();
   }, []);
+
+  // ============================================================
+  // LOCATION HANDLERS
+  // ============================================================
+  const handleLocationSelect = (level, value) => {
+    setSelectedLocations(prev => {
+      const newLoc = { ...prev, [level]: value };
+      const levels = ['country', 'region', 'zone', 'woreda', 'kebele', 'community'];
+      const idx = levels.indexOf(level);
+      for (let i = idx + 1; i < levels.length; i++) {
+        newLoc[levels[i]] = null;
+      }
+      return newLoc;
+    });
+  };
+
+  // Fetch supervisors when woreda changes
+  useEffect(() => {
+    if (!selectedLocations.woreda) {
+      setWoredaSupervisors([]);
+      return;
+    }
+    const fetchSupervisors = async () => {
+      setLoadingSupervisors(true);
+      try {
+        const res = await fetch(`http://localhost:5000/api/users/supervisors-by-woreda/${selectedLocations.woreda}`);
+        const data = await res.json();
+        setWoredaSupervisors(data);
+      } catch (error) {
+        console.error('Error fetching supervisors:', error);
+        setWoredaSupervisors([]);
+      } finally {
+        setLoadingSupervisors(false);
+      }
+    };
+    fetchSupervisors();
+  }, [selectedLocations.woreda]);
 
   // ============================================================
   // PULL SCREEN TIME FOR MANAGERS/SUPERVISORS
@@ -1019,9 +1178,50 @@ function AppContent() {
   };
 
   // ============================================================
-  // AUTHENTICATION
+  // AUTHENTICATION (UPDATED with server login)
   // ============================================================
   const handleLogin = async (email, password) => {
+    const online = await checkRealInternet();
+    
+    if (online) {
+      try {
+        const response = await fetch('http://localhost:5000/api/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, password })
+        });
+        const data = await response.json();
+        if (response.ok && data.success) {
+          const serverUser = data.user;
+          const localUser = {
+            ...serverUser,
+            password: password,
+          };
+          const existing = await db.users.get(serverUser.id);
+          if (existing) {
+            await db.users.update(serverUser.id, localUser);
+          } else {
+            await db.users.add(localUser);
+          }
+          setUser(localUser);
+          await db.auth.put({ id: 'session', userId: localUser.id });
+          setLoginError('');
+          addNotification(localUser.id, '👋 Welcome Back!', `Welcome back ${localUser.name}!`, 'success');
+          addAuditLog('LOGIN', { email: localUser.email, name: localUser.name });
+
+          if (localUser.must_change_password) {
+            setShowForceChangePassword(true);
+          }
+          return true;
+        } else {
+          setLoginError(data.error || 'Invalid email or password');
+          return false;
+        }
+      } catch (err) {
+        console.warn('Server login failed, falling back to offline:', err);
+      }
+    }
+
     const foundUser = users.find(u => u.email === email && u.password === password && u.status === 'active');
     if (foundUser) {
       setUser(foundUser);
@@ -1029,10 +1229,82 @@ function AppContent() {
       setLoginError('');
       addNotification(foundUser.id, '👋 Welcome Back!', `Welcome back ${foundUser.name}!`, 'success');
       addAuditLog('LOGIN', { email: foundUser.email, name: foundUser.name });
+
+      if (foundUser.must_change_password) {
+        setShowForceChangePassword(true);
+      }
       return true;
     }
     setLoginError('Invalid email or password');
     return false;
+  };
+
+  // ============================================================
+  // FIXED handleForceChangePassword
+  // ============================================================
+  const handleForceChangePassword = async (e) => {
+    e.preventDefault();
+    console.log('🔑 handleForceChangePassword called');
+    setForcePasswordError('');
+
+    if (forcePasswordForm.newPassword !== forcePasswordForm.confirmPassword) {
+      console.log('❌ New passwords do not match');
+      setForcePasswordError('New passwords do not match.');
+      return;
+    }
+    if (forcePasswordForm.newPassword.length < 4) {
+      console.log('❌ Password too short');
+      setForcePasswordError('Password must be at least 4 characters.');
+      return;
+    }
+
+    let email = user?.email?.trim();
+    if (!email) {
+      const foundUser = users.find(u => u.id === user?.id);
+      if (foundUser) email = foundUser.email?.trim();
+    }
+    if (!email) {
+      console.log('❌ No email found for user');
+      setForcePasswordError('User email not found. Please log out and try again.');
+      return;
+    }
+    email = email.toLowerCase();
+    console.log(`📧 Changing password for email: ${email}`);
+
+    const payload = {
+      email: email,
+      currentPassword: forcePasswordForm.currentPassword,
+      newPassword: forcePasswordForm.newPassword
+    };
+    console.log('📤 Sending payload:', { ...payload, currentPassword: '[REDACTED]', newPassword: '[REDACTED]' });
+
+    try {
+      console.log('🚀 Sending fetch to http://localhost:5000/api/auth/change-password');
+      const response = await fetch('http://localhost:5000/api/auth/change-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      console.log('📡 Response status:', response.status);
+      const data = await response.json();
+      console.log('📦 Response data:', data);
+
+      if (response.ok) {
+        const updatedUser = { ...user, must_change_password: false, password: forcePasswordForm.newPassword };
+        setUser(updatedUser);
+        setUsers(prev => prev.map(u => u.id === updatedUser.id ? updatedUser : u));
+        await db.users.update(user.id, updatedUser);
+        setShowForceChangePassword(false);
+        setForcePasswordForm({ currentPassword: '', newPassword: '', confirmPassword: '' });
+        alert('✅ Password changed successfully!');
+      } else {
+        setForcePasswordError(data.error || 'Failed to change password.');
+      }
+    } catch (err) {
+      console.error('❌ Fetch error:', err);
+      setForcePasswordError('Network error. Please try again.');
+    }
   };
 
   const handleLogout = async () => {
@@ -1045,11 +1317,11 @@ function AppContent() {
     }
     setUser(null);
     await db.auth.clear();
-    // Removed: window.location.reload();
+    setShowForceChangePassword(false);
   };
 
   // ============================================================
-  // USER MANAGEMENT
+  // USER MANAGEMENT (UPDATED: location support, server sync)
   // ============================================================
   const handleCreateUser = async (e) => {
     e.preventDefault();
@@ -1059,6 +1331,8 @@ function AppContent() {
       return;
     }
 
+    const locationPath = await buildLocationPath(selectedLocations);
+
     const newUserObj = {
       id: uid(),
       employeeId: newUser.role === 'supervisor'
@@ -1067,27 +1341,85 @@ function AppContent() {
       name: newUser.name,
       email: newUser.email,
       password: newUser.password,
-      phone: newUser.phone,
+      phone: newUser.phone || '',
       role: newUser.role,
-      region: newUser.region,
+      region: locationPath,
       supervisorId: newUser.role === 'field_officer' ? newUser.supervisorId : null,
-      assignedSites: newUser.role === 'field_officer' ? newUser.assignedSites.split(',').map(s => s.trim()).filter(s => s) : [],
+      assignedSites: newUser.role === 'field_officer' ? (newUser.assignedSites || '').split(',').map(s => s.trim()).filter(s => s) : [],
       status: 'active',
       managerId: 'm1',
-      shift: newUser.shift,
+      shift: newUser.shift || 'Day',
       department: newUser.department || '',
       gpsEnabled: true,
-      pin: newUser.role === 'field_officer' ? '1234' : null
+      pin: newUser.role === 'field_officer' ? '1234' : null,
+      profilePhoto: null,
+      must_change_password: newUser.role === 'field_officer' ? true : false,
+      country_id: selectedLocations.country || null,
+      region_id: selectedLocations.region || null,
+      zone_id: selectedLocations.zone || null,
+      woreda_id: selectedLocations.woreda || null,
+      kebele_id: selectedLocations.kebele || null,
+      community_id: selectedLocations.community || null,
+      locationPath: locationPath,
     };
 
-    setUsers(prev => { const updated = [...prev, newUserObj]; db.users.bulkPut(updated); return updated; });
-    addNotification(newUserObj.id, 'Account Created', `Welcome ${newUserObj.name}! Your account has been created.`, 'success');
-    addAuditLog('CREATE_USER', { email: newUserObj.email, role: newUserObj.role, name: newUserObj.name });
+    await db.users.add(newUserObj);
+    setUsers([...users, newUserObj]);
+
+    const online = await checkRealInternet();
+    if (online) {
+      try {
+        const response = await fetch('http://localhost:5000/api/users', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(newUserObj)
+        });
+        if (response.ok) {
+          const serverUser = await response.json();
+          if (serverUser.temporaryPassword) {
+            await db.users.update(newUserObj.id, { 
+              password: serverUser.temporaryPassword,
+              synced: true,
+              must_change_password: true
+            });
+            setUsers(prev => prev.map(u => 
+              u.id === newUserObj.id ? { ...u, password: serverUser.temporaryPassword, synced: true, must_change_password: true } : u
+            ));
+          } else {
+            await db.users.update(newUserObj.id, { synced: true });
+            setUsers(prev => prev.map(u => 
+              u.id === newUserObj.id ? { ...u, synced: true } : u
+            ));
+          }
+          console.log('✅ User synced to PostgreSQL');
+        } else {
+          throw new Error('Server responded with error');
+        }
+      } catch (err) {
+        console.log('📡 User saved offline, will sync later', err);
+        syncQueue.add({ type: 'user', id: newUserObj.id, data: newUserObj });
+      }
+    } else {
+      syncQueue.add({ type: 'user', id: newUserObj.id, data: newUserObj });
+      console.log('📡 User queued for sync');
+    }
+
+    if (addNotification) {
+      addNotification(
+        newUserObj.id,
+        'Account Created',
+        `Welcome ${newUserObj.name}! Your account has been created.`,
+        'success'
+      );
+    }
+    
     const manager = users.find(u => u.role === 'manager');
     if (manager) {
       addNotification(manager.id, 'New User Created', `${newUserObj.name} (${newUserObj.role}) has been created`, 'info');
     }
+
     alert(`✅ User ${newUserObj.name} created successfully!`);
+
     setNewUser({
       name: '',
       email: '',
@@ -1100,29 +1432,136 @@ function AppContent() {
       shift: 'Day',
       department: ''
     });
+    setSelectedLocations({
+      country: null,
+      region: null,
+      zone: null,
+      woreda: null,
+      kebele: null,
+      community: null
+    });
   };
 
+  // ===== FIXED toggleUserStatus =====
   const toggleUserStatus = async (userId) => {
+    const userObj = users.find(u => u.id === userId);
+    if (!userObj) return;
+    const newStatus = userObj.status === 'active' ? 'inactive' : 'active';
+
+    // 1. Optimistic update locally
     setUsers(prev => {
-      const updated = prev.map(u => u.id === userId ? { ...u, status: u.status === 'active' ? 'inactive' : 'active' } : u);
+      const updated = prev.map(u =>
+        u.id === userId ? { ...u, status: newStatus } : u
+      );
       db.users.bulkPut(updated);
       return updated;
     });
-    const userObj = users.find(u => u.id === userId);
-    if (userObj) {
-      addNotification(userObj.id, 'Account Status Updated', `Your account has been ${userObj.status === 'active' ? 'deactivated' : 'activated'}`, 'warning');
+
+    // 2. Try to update server if online
+    const online = await checkRealInternet();
+    let serverSuccess = false;
+    if (online) {
+      try {
+        const resp = await fetch(`http://localhost:5000/api/users/${userId}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status: newStatus })
+        });
+        if (resp.ok) {
+          serverSuccess = true;
+          const updatedUser = await resp.json();
+          setUsers(prev => prev.map(u =>
+            u.id === userId ? { ...u, ...updatedUser } : u
+          ));
+          await db.users.update(userId, updatedUser);
+          console.log('✅ Status updated on server');
+        } else {
+          throw new Error('Server rejected status update');
+        }
+      } catch (error) {
+        console.error('Status update error:', error);
+        // fall through – we'll queue if needed
+      }
     }
-    addAuditLog('TOGGLE_USER_STATUS', { userId, newStatus: userObj?.status === 'active' ? 'inactive' : 'active' });
+
+    // 3. If server update failed or offline, queue the change
+    if (!serverSuccess) {
+      const queueItems = syncQueue.getAll();
+      const alreadyQueued = queueItems.some(item =>
+        item.type === 'user_status_update' && item.data.userId === userId
+      );
+      if (!alreadyQueued) {
+        syncQueue.add({
+          type: 'user_status_update',
+          data: { userId, status: newStatus }
+        });
+        if (!online) {
+          alert('📋 Status change saved offline. Will sync when online.');
+        } else {
+          alert('📋 Status change queued for sync (server error).');
+        }
+      }
+    }
+
+    // 4. Notify
+    addNotification(userId, 'Account Status Updated', `Account ${newStatus === 'active' ? 'activated' : 'deactivated'}`, 'warning');
+    addAuditLog('TOGGLE_USER_STATUS', { userId, newStatus });
   };
 
+  // ===== FIXED deleteUser =====
   const deleteUser = async (userId) => {
-    if (window.confirm('Are you sure you want to delete this user?')) {
-      const userObj = users.find(u => u.id === userId);
-      setUsers(prev => { const updated = prev.filter(u => u.id !== userId); db.users.bulkPut(updated); return updated; });
-      if (userObj) addNotification(userObj.id, 'Account Deleted', 'Your account has been deleted', 'error');
-      addAuditLog('DELETE_USER', { userId, name: userObj?.name });
-      alert(`User ${userObj?.name} deleted`);
+    if (!window.confirm('Are you sure you want to delete this user?')) return;
+    const userObj = users.find(u => u.id === userId);
+    if (!userObj) return;
+
+    // 1. Remove from local state and IndexedDB (optimistic)
+    setUsers(prev => prev.filter(u => u.id !== userId));
+    await db.users.delete(userId);
+
+    // 2. Try to delete on server if online
+    const online = await checkRealInternet();
+    let serverDeleted = false;
+    if (online) {
+      try {
+        const resp = await fetch(`http://localhost:5000/api/users/${userId}`, {
+          method: 'DELETE'
+        });
+        if (resp.ok) {
+          serverDeleted = true;
+          console.log('✅ User deleted from server');
+        } else {
+          throw new Error('Server rejected deletion');
+        }
+      } catch (error) {
+        console.error('Delete error:', error);
+        // fall through – queue
+      }
     }
+
+    // 3. If not deleted on server, queue the deletion
+    if (!serverDeleted) {
+      const queueItems = syncQueue.getAll();
+      const alreadyQueued = queueItems.some(item =>
+        item.type === 'user_delete' && item.data.userId === userId
+      );
+      if (!alreadyQueued) {
+        syncQueue.add({
+          type: 'user_delete',
+          data: { userId }
+        });
+        if (!online) {
+          alert('📋 User deletion queued for offline sync.');
+        } else {
+          alert('📋 User deletion queued (server error).');
+        }
+      }
+    } else {
+      alert(`✅ User ${userObj.name} deleted successfully.`);
+    }
+
+    // 4. Notify
+    addNotification(userId, 'Account Deleted', 'Your account has been deleted', 'error');
+    addAuditLog('DELETE_USER', { userId, name: userObj?.name });
   };
 
   // ============================================================
@@ -1761,7 +2200,6 @@ function AppContent() {
       synced: false
     };
 
-    // Save locally
     setSupervisorReports(prev => { const updated = [newReport, ...prev]; db.supervisor_reports.bulkPut(updated); return updated; });
 
     setReports(prev => {
@@ -1770,10 +2208,8 @@ function AppContent() {
       return updated;
     });
 
-    // Push to server
     if (online) {
       try {
-        // CORRECT URL: supervisor-reports (hyphen)
         const response = await fetch('http://localhost:5000/api/supervisor-reports', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -1831,13 +2267,10 @@ function AppContent() {
       synced: false
     };
 
-    // Save locally
     setSupervisorReports(prev => { const updated = [newReport, ...prev]; db.supervisor_reports.bulkPut(updated); return updated; });
 
-    // Push to server
     if (online) {
       try {
-        // CORRECT URL: supervisor-reports (hyphen)
         const response = await fetch('http://localhost:5000/api/supervisor-reports', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -1892,6 +2325,189 @@ function AppContent() {
   };
 
   // ============================================================
+  // PROFILE FUNCTIONS (with file upload for photo) – FIXED
+  // ============================================================
+  const openProfileModal = () => {
+    if (!user) return;
+    setProfileForm({
+      name: user.name || '',
+      email: user.email || '',
+      phone: user.phone || '',
+      shift: user.shift || 'Day',
+      department: user.department || '',
+      currentPassword: '',
+      password: '',
+      confirmPassword: ''
+    });
+    setProfilePhotoPreview(user.profilePhoto ? `http://localhost:5000${user.profilePhoto}` : null);
+    setSelectedProfileFile(null);
+    setShowProfileModal(true);
+  };
+
+  const handleProfilePhotoChange = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    if (file.size > 2 * 1024 * 1024) {
+      alert('Image must be under 2 MB.');
+      return;
+    }
+    if (!file.type.startsWith('image/')) {
+      alert('Only image files are allowed.');
+      return;
+    }
+    setSelectedProfileFile(file);
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      setProfilePhotoPreview(ev.target.result);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleProfileUpdate = async (e) => {
+    e.preventDefault();
+    if (!user) return;
+
+    if (!profileForm.name.trim() || !profileForm.email.trim()) {
+      alert('Name and Email are required.');
+      return;
+    }
+
+    if (profileForm.password || profileForm.confirmPassword) {
+      if (profileForm.password !== profileForm.confirmPassword) {
+        alert('Passwords do not match.');
+        return;
+      }
+      if (profileForm.password.length < 4) {
+        alert('Password must be at least 4 characters.');
+        return;
+      }
+      if (!profileForm.currentPassword) {
+        alert('Please enter your current password to change it.');
+        return;
+      }
+    }
+
+    const online = await checkRealInternet();
+    let updatedUser = { ...user };
+    let serverSuccess = false;
+
+    // 1. Update basic info (no password)
+    const updatedFields = {
+      name: profileForm.name.trim(),
+      email: profileForm.email.trim(),
+      phone: profileForm.phone.trim(),
+      shift: profileForm.shift,
+      department: profileForm.department.trim(),
+    };
+
+    if (online) {
+      try {
+        const response = await fetch(`http://localhost:5000/api/users/${user.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(updatedFields)
+        });
+        if (response.ok) {
+          updatedUser = await response.json();
+          serverSuccess = true;
+          console.log('✅ Profile info updated on server');
+        } else {
+          throw new Error(await response.text());
+        }
+      } catch (err) {
+        console.error('Server update failed:', err);
+      }
+    }
+
+    if (serverSuccess) {
+      setUser(updatedUser);
+      setUsers(prev => prev.map(u => u.id === updatedUser.id ? updatedUser : u));
+      await db.users.update(user.id, updatedUser);
+    } else {
+      updatedUser = { ...user, ...updatedFields };
+      setUser(updatedUser);
+      setUsers(prev => prev.map(u => u.id === updatedUser.id ? updatedUser : u));
+      await db.users.update(user.id, updatedUser);
+      if (!online) {
+        const queueItems = syncQueue.getAll();
+        const alreadyQueued = queueItems.some(item => item.id === user.id && item.type === 'user_update');
+        if (!alreadyQueued) {
+          syncQueue.add({ type: 'user_update', id: user.id, data: updatedUser });
+          alert('📋 Profile saved offline. Will sync when online.');
+        }
+      } else {
+        alert('Profile saved locally, but server update failed. Please try again later.');
+      }
+    }
+
+    // 2. Change password if provided
+    if (profileForm.password) {
+      const pwPayload = {
+        email: user.email,
+        currentPassword: profileForm.currentPassword,
+        newPassword: profileForm.password
+      };
+      if (online) {
+        try {
+          const pwRes = await fetch('http://localhost:5000/api/auth/change-password', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(pwPayload)
+          });
+          if (pwRes.ok) {
+            alert('✅ Password changed successfully!');
+            const userWithPw = { ...updatedUser, password: profileForm.password };
+            setUser(userWithPw);
+            setUsers(prev => prev.map(u => u.id === userWithPw.id ? userWithPw : u));
+            await db.users.update(user.id, userWithPw);
+          } else {
+            const errData = await pwRes.json();
+            alert(`❌ Password change failed: ${errData.error || 'Unknown error'}`);
+          }
+        } catch (err) {
+          console.error('Password change error:', err);
+          alert('Network error while changing password.');
+        }
+      } else {
+        alert('Offline: password change will be synced later.');
+      }
+    }
+
+    // 3. Upload photo if selected
+    if (selectedProfileFile) {
+      const formData = new FormData();
+      formData.append('profilePhoto', selectedProfileFile);
+      if (online) {
+        try {
+          const photoRes = await fetch(`http://localhost:5000/api/users/${user.id}/photo`, {
+            method: 'POST',
+            body: formData
+          });
+          if (photoRes.ok) {
+            const photoData = await photoRes.json();
+            const userWithPhoto = { ...updatedUser, profilePhoto: photoData.profilePhoto };
+            setUser(userWithPhoto);
+            setUsers(prev => prev.map(u => u.id === userWithPhoto.id ? userWithPhoto : u));
+            await db.users.update(user.id, userWithPhoto);
+            setProfilePhotoPreview(`http://localhost:5000${photoData.profilePhoto}`);
+            console.log('✅ Photo uploaded');
+          } else {
+            throw new Error('Photo upload failed');
+          }
+        } catch (err) {
+          console.error('Photo upload error:', err);
+          alert('Photo upload failed. Please try again.');
+        }
+      } else {
+        alert('Offline: photo will be uploaded when online.');
+      }
+    }
+
+    setShowProfileModal(false);
+    alert('✅ Profile updated successfully!');
+  };
+
+  // ============================================================
   // RENDER FUNCTIONS (placeholders)
   // ============================================================
   const renderTrendChart = () => { /* implemented in Dashboard */ };
@@ -1910,7 +2526,6 @@ function AppContent() {
   // ============================================================
   // LOGIN PAGE
   // ============================================================
-  // Show loading only if no user and still loading
   if (!user) {
     if (isLoading) {
       return <LoadingScreen />;
@@ -1918,14 +2533,130 @@ function AppContent() {
     return <Login onLogin={handleLogin} loginError={loginError} isOnline={isOnline} />;
   }
 
-  // If user exists, show app immediately – no loading screen
-  // (isLoading may still be true but we ignore it)
-
   // ============================================================
   // MAIN APP RETURN
   // ============================================================
   return (
     <>
+      {/* ===== FORCE PASSWORD CHANGE MODAL (OVERLAY) ===== */}
+      {showForceChangePassword && (
+        <div className="force-password-overlay" style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(0,0,0,0.7)',
+          zIndex: 9999,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center'
+        }}>
+          <div style={{
+            background: 'white',
+            borderRadius: '12px',
+            padding: '30px',
+            maxWidth: '400px',
+            width: '90%',
+            boxShadow: '0 20px 60px rgba(0,0,0,0.3)'
+          }}>
+            <h2 style={{ margin: '0 0 8px 0', color: '#1e293b' }}>🔒 Change Password</h2>
+            <p style={{ color: '#dc2626', marginBottom: '20px', fontSize: '14px' }}>
+              You must change your temporary password before continuing.
+            </p>
+            <form onSubmit={handleForceChangePassword}>
+              <div style={{ marginBottom: '15px' }}>
+                <label style={{ display: 'block', fontWeight: '500', marginBottom: '5px', fontSize: '14px' }}>
+                  Current (Temporary) Password *
+                </label>
+                <input
+                  type="password"
+                  required
+                  value={forcePasswordForm.currentPassword}
+                  onChange={(e) => setForcePasswordForm({
+                    ...forcePasswordForm,
+                    currentPassword: e.target.value
+                  })}
+                  style={{
+                    width: '100%',
+                    padding: '10px',
+                    borderRadius: '6px',
+                    border: '1px solid #ccc',
+                    fontSize: '14px'
+                  }}
+                />
+              </div>
+              <div style={{ marginBottom: '15px' }}>
+                <label style={{ display: 'block', fontWeight: '500', marginBottom: '5px', fontSize: '14px' }}>
+                  New Password *
+                </label>
+                <input
+                  type="password"
+                  required
+                  value={forcePasswordForm.newPassword}
+                  onChange={(e) => setForcePasswordForm({
+                    ...forcePasswordForm,
+                    newPassword: e.target.value
+                  })}
+                  style={{
+                    width: '100%',
+                    padding: '10px',
+                    borderRadius: '6px',
+                    border: '1px solid #ccc',
+                    fontSize: '14px'
+                  }}
+                />
+              </div>
+              <div style={{ marginBottom: '20px' }}>
+                <label style={{ display: 'block', fontWeight: '500', marginBottom: '5px', fontSize: '14px' }}>
+                  Confirm New Password *
+                </label>
+                <input
+                  type="password"
+                  required
+                  value={forcePasswordForm.confirmPassword}
+                  onChange={(e) => setForcePasswordForm({
+                    ...forcePasswordForm,
+                    confirmPassword: e.target.value
+                  })}
+                  style={{
+                    width: '100%',
+                    padding: '10px',
+                    borderRadius: '6px',
+                    border: '1px solid #ccc',
+                    fontSize: '14px'
+                  }}
+                />
+              </div>
+              {forcePasswordError && (
+                <div style={{ color: '#dc2626', fontSize: '13px', marginBottom: '12px' }}>
+                  ❌ {forcePasswordError}
+                </div>
+              )}
+              <button
+                type="submit"
+                style={{
+                  width: '100%',
+                  padding: '12px',
+                  background: '#0b7e4b',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '6px',
+                  fontSize: '16px',
+                  fontWeight: '600',
+                  cursor: 'pointer',
+                  transition: 'background 0.2s'
+                }}
+                onMouseEnter={(e) => e.currentTarget.style.background = '#065f37'}
+                onMouseLeave={(e) => e.currentTarget.style.background = '#0b7e4b'}
+              >
+                Update Password
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
+
       {isOfficer && showPopup && (
         <VerificationPopup
           officerId={user?.id}
@@ -1963,6 +2694,7 @@ function AppContent() {
             setNotifications={setAppNotifications}
             markNotificationRead={markNotificationRead}
             markAllNotificationsRead={markAllNotificationsRead}
+            onProfileClick={openProfileModal}
           />
           <div className="content">
             {/* Dashboard */}
@@ -2194,6 +2926,10 @@ function AppContent() {
                 toggleUserStatus={toggleUserStatus}
                 deleteUser={deleteUser}
                 addNotification={addNotification}
+                selectedLocations={selectedLocations}
+                onLocationSelect={handleLocationSelect}
+                woredaSupervisors={woredaSupervisors}
+                loadingSupervisors={loadingSupervisors}
               />
             )}
             
@@ -2205,7 +2941,7 @@ function AppContent() {
                 attendance={attendance}
                 screenTime={screenTime}
                 liveStatus={liveStatus}
-                citizens={citizens}        // <-- THIS LINE ADDED
+                citizens={citizens}
                 totalReports={totalReports}
                 totalRegistrations={totalRegistrations}
                 regionStats={regionStats}
@@ -2291,6 +3027,167 @@ function AppContent() {
           </div>
         </div>
       </div>
+
+      {/* ===== PROFILE MODAL (with current password field) ===== */}
+      {showProfileModal && (
+        <div className="profile-overlay" onClick={() => setShowProfileModal(false)} style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(0,0,0,0.5)',
+          zIndex: 2000,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center'
+        }}>
+          <div className="profile-modal" onClick={(e) => e.stopPropagation()} style={{
+            background: '#fff',
+            borderRadius: '12px',
+            padding: '30px',
+            maxWidth: '500px',
+            width: '90%',
+            maxHeight: '90vh',
+            overflowY: 'auto',
+            boxShadow: '0 10px 40px rgba(0,0,0,0.2)'
+          }}>
+            <div className="modal-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+              <h2 style={{ margin: 0 }}>👤 Edit Profile</h2>
+              <button className="modal-close" onClick={() => setShowProfileModal(false)} style={{
+                background: 'transparent',
+                border: 'none',
+                fontSize: '24px',
+                cursor: 'pointer'
+              }}>✕</button>
+            </div>
+            <form onSubmit={handleProfileUpdate}>
+              <div className="profile-photo-section" style={{ textAlign: 'center', marginBottom: '20px' }}>
+                <div style={{ width: '100px', height: '100px', borderRadius: '50%', overflow: 'hidden', margin: '0 auto', border: '2px solid #ddd', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  {profilePhotoPreview ? (
+                    <img src={profilePhotoPreview} alt="Profile" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                  ) : (
+                    <span style={{ fontSize: '60px', color: '#ccc' }}>📷</span>
+                  )}
+                </div>
+                <label style={{ display: 'block', marginTop: '10px', cursor: 'pointer', color: '#4CAF50' }}>
+                  Change Photo
+                  <input type="file" accept="image/*" onChange={handleProfilePhotoChange} style={{ display: 'none' }} />
+                </label>
+              </div>
+
+              <div className="form-group" style={{ marginBottom: '15px' }}>
+                <label style={{ display: 'block', fontWeight: 'bold', marginBottom: '5px' }}>Full Name *</label>
+                <input
+                  type="text"
+                  value={profileForm.name}
+                  onChange={(e) => setProfileForm(prev => ({ ...prev, name: e.target.value }))}
+                  style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #ccc' }}
+                  required
+                />
+              </div>
+
+              <div className="form-group" style={{ marginBottom: '15px' }}>
+                <label style={{ display: 'block', fontWeight: 'bold', marginBottom: '5px' }}>Email *</label>
+                <input
+                  type="email"
+                  value={profileForm.email}
+                  onChange={(e) => setProfileForm(prev => ({ ...prev, email: e.target.value }))}
+                  style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #ccc' }}
+                  required
+                />
+              </div>
+
+              <div className="form-group" style={{ marginBottom: '15px' }}>
+                <label style={{ display: 'block', fontWeight: 'bold', marginBottom: '5px' }}>Phone</label>
+                <input
+                  type="text"
+                  value={profileForm.phone}
+                  onChange={(e) => setProfileForm(prev => ({ ...prev, phone: e.target.value }))}
+                  style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #ccc' }}
+                />
+              </div>
+
+              <div className="form-group" style={{ marginBottom: '15px' }}>
+                <label style={{ display: 'block', fontWeight: 'bold', marginBottom: '5px' }}>Shift</label>
+                <select
+                  value={profileForm.shift}
+                  onChange={(e) => setProfileForm(prev => ({ ...prev, shift: e.target.value }))}
+                  style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #ccc' }}
+                >
+                  <option value="Day">Day</option>
+                  <option value="Night">Night</option>
+                  <option value="Flexible">Flexible</option>
+                </select>
+              </div>
+
+              <div className="form-group" style={{ marginBottom: '15px' }}>
+                <label style={{ display: 'block', fontWeight: 'bold', marginBottom: '5px' }}>Department</label>
+                <input
+                  type="text"
+                  value={profileForm.department}
+                  onChange={(e) => setProfileForm(prev => ({ ...prev, department: e.target.value }))}
+                  style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #ccc' }}
+                />
+              </div>
+
+              <hr style={{ margin: '20px 0' }} />
+              <h4 style={{ marginBottom: '15px' }}>Change Password (optional)</h4>
+              
+              {/* NEW: Current Password field */}
+              <div className="form-group" style={{ marginBottom: '15px' }}>
+                <label style={{ display: 'block', fontWeight: 'bold', marginBottom: '5px' }}>Current Password</label>
+                <input
+                  type="password"
+                  placeholder="Required to change password"
+                  value={profileForm.currentPassword}
+                  onChange={(e) => setProfileForm(prev => ({ ...prev, currentPassword: e.target.value }))}
+                  style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #ccc' }}
+                />
+              </div>
+              <div className="form-group" style={{ marginBottom: '15px' }}>
+                <label style={{ display: 'block', fontWeight: 'bold', marginBottom: '5px' }}>New Password</label>
+                <input
+                  type="password"
+                  placeholder="Leave blank to keep current"
+                  value={profileForm.password}
+                  onChange={(e) => setProfileForm(prev => ({ ...prev, password: e.target.value }))}
+                  style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #ccc' }}
+                />
+              </div>
+              <div className="form-group" style={{ marginBottom: '15px' }}>
+                <label style={{ display: 'block', fontWeight: 'bold', marginBottom: '5px' }}>Confirm Password</label>
+                <input
+                  type="password"
+                  placeholder="Confirm new password"
+                  value={profileForm.confirmPassword}
+                  onChange={(e) => setProfileForm(prev => ({ ...prev, confirmPassword: e.target.value }))}
+                  style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #ccc' }}
+                />
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '20px' }}>
+                <button type="button" onClick={() => setShowProfileModal(false)} style={{
+                  padding: '10px 20px',
+                  borderRadius: '6px',
+                  border: '1px solid #ccc',
+                  background: '#f5f5f5',
+                  cursor: 'pointer'
+                }}>Cancel</button>
+                <button type="submit" style={{
+                  padding: '10px 20px',
+                  borderRadius: '6px',
+                  border: 'none',
+                  background: '#4CAF50',
+                  color: '#fff',
+                  cursor: 'pointer'
+                }}>Save Changes</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       <OfflineIndicator />
       <SyncStatus />
     </>

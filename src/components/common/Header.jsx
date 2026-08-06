@@ -1,8 +1,8 @@
 // components/common/Header.jsx
 
 import React, { useState, useMemo, useEffect } from 'react';
-import { db, syncQueue, checkRealInternet, isDevToolsOffline } from '../../services/database';
-import NetworkStatus from './NetworkStatus';
+import { db, syncQueue, checkRealInternet } from '../../services/database';
+import NetworkStatus from './NetworkStatus'; // We'll keep this but we'll override its display with our own.
 
 function Header({ 
   user, 
@@ -14,59 +14,69 @@ function Header({
   notifications,
   setNotifications,
   markNotificationRead,
-  markAllNotificationsRead
+  markAllNotificationsRead,
+  onProfileClick
 }) {
   const [showDropdown, setShowDropdown] = useState(false);
   const [isOnline, setIsOnline] = useState(propIsOnline || navigator.onLine);
   const [syncing, setSyncing] = useState(propSyncing || false);
   const [pendingSync, setPendingSync] = useState(propPendingSync || 0);
   const [syncProgress, setSyncProgress] = useState(0);
-  const [showSyncDetails, setShowSyncDetails] = useState(false);
 
-  // ===== CHECK NETWORK (DEVOPS FIRST) =====
+  // ===== REAL NETWORK INFO =====
+  const [networkInfo, setNetworkInfo] = useState({
+    type: 'unknown',
+    speed: '--',
+    latency: '--'
+  });
+
+  useEffect(() => {
+    const updateNetworkInfo = () => {
+      const connection = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+      if (connection) {
+        const type = connection.effectiveType || 'unknown'; // 'slow-2g', '2g', '3g', '4g'
+        const speed = connection.downlink ? `${connection.downlink.toFixed(1)} Mbps` : '--';
+        const latency = connection.rtt ? `${connection.rtt}ms` : '--';
+        setNetworkInfo({ type, speed, latency });
+      } else {
+        // Fallback: if Network API not available, just show 'Online'
+        setNetworkInfo({ type: 'online', speed: '--', latency: '--' });
+      }
+    };
+
+    updateNetworkInfo();
+
+    const connection = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+    if (connection) {
+      connection.addEventListener('change', updateNetworkInfo);
+      return () => connection.removeEventListener('change', updateNetworkInfo);
+    }
+  }, []);
+
+  // ===== CHECK NETWORK (real internet) =====
   useEffect(() => {
     const checkNetwork = async () => {
-      // 1. Check DevTools offline first
       if (!navigator.onLine) {
-        console.log('🔌 Header: DevTools says OFFLINE');
-        if (isOnline !== false) {
-          setIsOnline(false);
-        }
+        if (isOnline !== false) setIsOnline(false);
         return;
       }
-      
-      // 2. Then check real internet
       const online = await checkRealInternet();
       if (online !== isOnline) {
-        console.log(`🔄 Header: Network changed to: ${online ? 'Online' : 'Offline'}`);
         setIsOnline(online);
-        
         if (online) {
           const queueCount = syncQueue.count();
           if (queueCount > 0) {
             console.log(`📤 Back online with ${queueCount} pending items`);
-            setTimeout(() => {
-              window.dispatchEvent(new CustomEvent('force-sync'));
-            }, 1000);
+            setTimeout(() => window.dispatchEvent(new CustomEvent('force-sync')), 1000);
           }
         }
       }
     };
 
     checkNetwork();
-    
-    // Check every 2 seconds (fast for DevTools testing)
-    const interval = setInterval(checkNetwork, 2000);
-
-    const handleOnline = () => {
-      console.log('🔄 Header: Browser online event');
-      checkNetwork();
-    };
-    
-    const handleOffline = () => {
-      console.log('🔄 Header: Browser offline event');
-      checkNetwork();
-    };
+    const interval = setInterval(checkNetwork, 3000);
+    const handleOnline = () => checkNetwork();
+    const handleOffline = () => checkNetwork();
 
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
@@ -78,38 +88,26 @@ function Header({
     };
   }, [isOnline]);
 
-  // ===== LISTEN FOR SYNC EVENTS =====
+  // ===== SYNC EVENTS =====
   useEffect(() => {
     const handleSyncStart = () => {
       setSyncing(true);
       setSyncProgress(0);
     };
-
     const handleSyncProgress = (event) => {
-      if (event.detail) {
-        setSyncProgress(event.detail.progress || 0);
-      }
+      if (event.detail) setSyncProgress(event.detail.progress || 0);
     };
-
     const handleSyncComplete = (event) => {
       setSyncing(false);
       const queueCount = syncQueue.count();
       setPendingSync(queueCount);
-      
       if (event.detail && event.detail.synced > 0) {
         console.log(`✅ Sync complete: ${event.detail.synced} items synced`);
       }
     };
-
     const handleQueueUpdated = () => {
       const queueCount = syncQueue.count();
       setPendingSync(queueCount);
-      
-      db.citizens.filter(c => c.synced === false).count().then(count => {
-        if (count > 0) {
-          console.log(`📋 ${count} offline citizens pending sync`);
-        }
-      });
     };
 
     window.addEventListener('sync-start', handleSyncStart);
@@ -181,9 +179,7 @@ function Header({
       try {
         await db.notifications.update(id, { read: true });
         if (setNotifications) {
-          const updated = notifications.map(n => 
-            n.id === id ? { ...n, read: true } : n
-          );
+          const updated = notifications.map(n => n.id === id ? { ...n, read: true } : n);
           setNotifications(updated);
         }
       } catch (error) {
@@ -202,9 +198,7 @@ function Header({
           await db.notifications.update(n.id, { read: true });
         }
         if (setNotifications) {
-          const updated = notifications.map(n => 
-            n.userId === user?.id ? { ...n, read: true } : n
-          );
+          const updated = notifications.map(n => n.userId === user?.id ? { ...n, read: true } : n);
           setNotifications(updated);
         }
       } catch (error) {
@@ -213,147 +207,32 @@ function Header({
     }
   };
 
-  const handleForceSync = async () => {
-    // Check DevTools offline first
-    if (!navigator.onLine) {
-      alert('🔌 DevTools says you are offline! Please disable offline mode in DevTools.');
-      return;
-    }
-    
-    const online = await checkRealInternet();
-    if (online) {
-      const queueCount = syncQueue.count();
-      if (queueCount === 0) {
-        alert('✅ All data is synced! No pending items.');
-        return;
-      }
-      alert(`🔄 Syncing ${queueCount} items...`);
-      window.dispatchEvent(new CustomEvent('force-sync'));
-    } else {
-      alert('❌ You are offline! Please connect to the internet to sync.');
-    }
+  // Network status display helper
+  const getNetworkDisplay = () => {
+    if (!isOnline) return { label: 'Offline', color: '#dc2626', bg: '#fee2e2' };
+    if (!navigator.connection) return { label: 'Online', color: '#065f37', bg: '#d1fae5' };
+    const typeMap = {
+      'slow-2g': '2G',
+      '2g': '2G',
+      '3g': '3G',
+      '4g': '4G',
+      '5g': '5G',
+      'unknown': 'Online'
+    };
+    const type = networkInfo.type || 'unknown';
+    const label = typeMap[type] || 'Online';
+    const speed = networkInfo.speed !== '--' ? networkInfo.speed : '';
+    const latency = networkInfo.latency !== '--' ? networkInfo.latency : '';
+    return {
+      label: label,
+      speed: speed,
+      latency: latency,
+      color: '#065f37',
+      bg: '#d1fae5'
+    };
   };
 
-  const [offlineCitizenCount, setOfflineCitizenCount] = useState(0);
-  
-  useEffect(() => {
-    const countOfflineCitizens = async () => {
-      try {
-        const count = await db.citizens.filter(c => c.synced === false).count();
-        setOfflineCitizenCount(count);
-      } catch (error) {
-        console.error('Error counting offline citizens:', error);
-      }
-    };
-    
-    countOfflineCitizens();
-    
-    const handleQueueUpdate = () => {
-      countOfflineCitizens();
-    };
-    
-    window.addEventListener('sync-queue-updated', handleQueueUpdate);
-    window.addEventListener('sync-complete', handleQueueUpdate);
-    
-    return () => {
-      window.removeEventListener('sync-queue-updated', handleQueueUpdate);
-      window.removeEventListener('sync-complete', handleQueueUpdate);
-    };
-  }, []);
-
-  // ===== SYNC DETAILS POPUP =====
-  const SyncDetailsPopup = () => {
-    if (!showSyncDetails) return null;
-    
-    return (
-      <div style={{
-        position: 'fixed',
-        top: '60px',
-        right: '20px',
-        background: 'white',
-        borderRadius: '12px',
-        boxShadow: '0 10px 40px rgba(0,0,0,0.2)',
-        padding: '16px 20px',
-        zIndex: 1000,
-        minWidth: '280px',
-        maxWidth: '350px',
-        border: '1px solid #e5e7eb'
-      }}>
-        <div style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          marginBottom: '12px'
-        }}>
-          <strong style={{ fontSize: '14px' }}>🔄 Sync Status</strong>
-          <button
-            onClick={() => setShowSyncDetails(false)}
-            style={{
-              background: 'transparent',
-              border: 'none',
-              fontSize: '18px',
-              cursor: 'pointer',
-              color: '#64748b'
-            }}
-          >
-            ✕
-          </button>
-        </div>
-        
-        <div style={{ fontSize: '13px', color: '#64748b' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0' }}>
-            <span>Status:</span>
-            <span style={{ fontWeight: '500', color: isOnline ? '#065f37' : '#991b1b' }}>
-              {isOnline ? '✅ Online' : '❌ Offline'}
-            </span>
-          </div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0' }}>
-            <span>Pending Items:</span>
-            <span style={{ fontWeight: '500', color: pendingSync > 0 ? '#92400e' : '#065f37' }}>
-              {pendingSync > 0 ? `${pendingSync} items` : '✅ All synced'}
-            </span>
-          </div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0' }}>
-            <span>Offline Citizens:</span>
-            <span style={{ fontWeight: '500', color: offlineCitizenCount > 0 ? '#92400e' : '#065f37' }}>
-              {offlineCitizenCount > 0 ? `${offlineCitizenCount} pending` : '✅ All synced'}
-            </span>
-          </div>
-          {syncing && (
-            <div style={{ 
-              marginTop: '8px',
-              padding: '8px',
-              background: '#eff6ff',
-              borderRadius: '6px',
-              fontSize: '12px',
-              color: '#1e40af'
-            }}>
-              🔄 Syncing in progress... {syncProgress > 0 && `${syncProgress}%`}
-            </div>
-          )}
-        </div>
-        
-        <button
-          onClick={handleForceSync}
-          style={{
-            width: '100%',
-            marginTop: '12px',
-            padding: '8px',
-            background: isOnline ? '#0b7e4b' : '#9ca3af',
-            color: 'white',
-            border: 'none',
-            borderRadius: '6px',
-            cursor: isOnline ? 'pointer' : 'not-allowed',
-            fontSize: '13px',
-            fontWeight: '500'
-          }}
-          disabled={!isOnline}
-        >
-          {isOnline ? '🔄 Sync Now' : '📡 Offline - Cannot Sync'}
-        </button>
-      </div>
-    );
-  };
+  const netDisplay = getNetworkDisplay();
 
   return (
     <header className="main-header" style={{
@@ -496,12 +375,8 @@ function Header({
           )}
         </div>
 
-        {/* ===== NETWORK SPEED STATUS ===== */}
-        <NetworkStatus />
-
-        {/* ===== ONLINE STATUS ===== */}
+        {/* ===== REAL NETWORK STATUS (no click, no pending info) ===== */}
         <div 
-          onClick={() => setShowSyncDetails(!showSyncDetails)}
           style={{
             display: 'flex',
             alignItems: 'center',
@@ -510,9 +385,9 @@ function Header({
             borderRadius: '20px',
             background: isOnline ? '#d1fae5' : '#fee2e2',
             border: isOnline ? '1px solid #0b7e4b' : '1px solid #dc2626',
-            cursor: 'pointer'
+            cursor: 'default',
+            userSelect: 'none'
           }}
-          title="Click for sync details"
         >
           <span style={{
             width: '8px',
@@ -522,12 +397,16 @@ function Header({
             background: isOnline ? '#0b7e4b' : '#dc2626',
             animation: isOnline ? 'none' : 'pulse 1.5s ease-in-out infinite'
           }}></span>
-          <span style={{ 
-            fontWeight: '600', 
-            fontSize: '12px',
-            color: isOnline ? '#065f37' : '#991b1b'
-          }}>
-            {isOnline ? 'Online' : 'Offline'}
+          <span style={{ fontWeight: '600', fontSize: '12px', color: isOnline ? '#065f37' : '#991b1b' }}>
+            {isOnline ? (
+              <>
+                📶 {netDisplay.label}
+                {netDisplay.speed && ` (${netDisplay.speed})`}
+                {netDisplay.latency && ` ${netDisplay.latency}`}
+              </>
+            ) : (
+              'Offline'
+            )}
           </span>
         </div>
 
@@ -553,38 +432,6 @@ function Header({
           </div>
         )}
 
-        {/* Pending Sync Badge */}
-        {pendingSync > 0 && (
-          <span 
-            onClick={() => setShowSyncDetails(!showSyncDetails)}
-            style={{
-              padding: '2px 10px',
-              borderRadius: '16px',
-              color: 'white',
-              fontSize: '11px',
-              fontWeight: '600',
-              background: isOnline ? '#0b7e4b' : '#dc2626',
-              cursor: 'pointer'
-            }}
-          >
-            {isOnline ? '🔄' : '⏳'} {pendingSync}
-          </span>
-        )}
-
-        {/* Offline Citizens Badge */}
-        {offlineCitizenCount > 0 && (
-          <span style={{
-            padding: '2px 10px',
-            borderRadius: '16px',
-            background: '#fef3c7',
-            color: '#92400e',
-            fontSize: '11px',
-            fontWeight: '500'
-          }}>
-            📋 {offlineCitizenCount} offline
-          </span>
-        )}
-
         {/* Screen Time */}
         {user?.role === 'field_officer' && screenTimeDisplay && (
           <span style={{
@@ -599,56 +446,64 @@ function Header({
           </span>
         )}
 
-        {/* Manual Sync Button */}
-        <button
-          onClick={handleForceSync}
-          disabled={!isOnline}
+        {/* User Profile */}
+        <div 
+          onClick={onProfileClick}
           style={{
-            background: isOnline ? '#1e3a5f' : '#9ca3af',
-            color: 'white',
-            border: 'none',
-            padding: '4px 12px',
-            borderRadius: '6px',
-            cursor: isOnline ? 'pointer' : 'not-allowed',
-            fontSize: '12px',
-            fontWeight: '500',
-            transition: 'background 0.2s',
-            opacity: isOnline ? 1 : 0.6
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+            cursor: 'pointer',
+            padding: '4px 8px 4px 4px',
+            borderRadius: '50px',
+            border: '1px solid #e5e7eb',
+            background: 'white',
+            transition: 'all 0.2s',
+            userSelect: 'none'
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.borderColor = '#2563eb';
+            e.currentTarget.style.boxShadow = '0 2px 8px rgba(0,0,0,0.1)';
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.borderColor = '#e5e7eb';
+            e.currentTarget.style.boxShadow = 'none';
           }}
         >
-          🔄 Sync
-        </button>
+          <div style={{
+            width: '32px',
+            height: '32px',
+            borderRadius: '50%',
+            overflow: 'hidden',
+            background: '#dbeafe',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            fontSize: '16px',
+            fontWeight: '600',
+            color: '#1e3a5f'
+          }}>
+            {user?.profilePhoto ? (
+              <img 
+                src={`http://localhost:5000${user.profilePhoto}`} 
+                alt="Profile" 
+                style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+              />
+            ) : (
+              user?.name?.charAt(0)?.toUpperCase() || '👤'
+            )}
+          </div>
+          <div style={{ lineHeight: 1.2 }}>
+            <div style={{ fontSize: '13px', fontWeight: '600', color: '#1e293b' }}>
+              {user?.name || 'User'}
+            </div>
+            <div style={{ fontSize: '10px', color: '#64748b', fontWeight: '400' }}>
+              {user?.role?.replace('_', ' ') || ''}
+            </div>
+          </div>
+        </div>
 
-        {/* Clear Queue Button (Manager Only) */}
-        {user?.role === 'manager' && (
-          <button
-            onClick={() => {
-              if (window.confirm('⚠️ Clear all pending sync items? This cannot be undone.')) {
-                syncQueue.clear();
-                localStorage.removeItem('failedSyncItems');
-                setPendingSync(0);
-                alert('✅ Sync queue cleared!');
-                window.location.reload();
-              }
-            }}
-            style={{
-              background: '#dc2626',
-              color: 'white',
-              border: 'none',
-              padding: '4px 10px',
-              borderRadius: '6px',
-              cursor: 'pointer',
-              fontSize: '11px',
-              fontWeight: '500'
-            }}
-          >
-            🗑️ Clear Queue
-          </button>
-        )}
       </div>
-
-      {/* Sync Details Popup */}
-      <SyncDetailsPopup />
 
       <style>{`
         @keyframes pulse {

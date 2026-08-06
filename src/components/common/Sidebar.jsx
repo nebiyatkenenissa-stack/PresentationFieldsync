@@ -68,6 +68,19 @@ function Sidebar({
 
   const navItems = getNavItems();
 
+  // Helper to get fallback avatar based on role
+  const getDefaultAvatar = () => {
+    if (isManager) return '👤';      // or 👔 for manager
+    if (isSupervisor) return '👨‍💼';
+    if (isOfficer) return '👤';
+    return '👤';
+  };
+
+  // Determine the avatar source
+  const avatarSrc = user?.profilePhoto 
+    ? `http://localhost:5000${user.profilePhoto}` 
+    : null;
+
   return (
     <div className="sidebar">
       <div className="sidebar-brand">
@@ -102,7 +115,22 @@ function Sidebar({
       <div className="sidebar-footer">
         <div className="user-profile">
           <div className="avatar">
-            {user?.role === 'manager' ? '👩‍💼' : user?.role === 'supervisor' ? '👨‍💼' : '👤'}
+            {avatarSrc ? (
+              <img 
+                src={avatarSrc} 
+                alt="Profile" 
+                style={{ 
+                  width: '40px', 
+                  height: '40px', 
+                  borderRadius: '50%', 
+                  objectFit: 'cover',
+                  display: 'block'
+                }}
+              />
+            ) : (
+              // Fallback: role-based emoji
+              <span style={{ fontSize: '24px' }}>{getDefaultAvatar()}</span>
+            )}
           </div>
           <div className="user-info">
             <div className="user-name">{user?.name}</div>
@@ -114,5 +142,5 @@ function Sidebar({
     </div>
   );
 }
-
+ 
 export default Sidebar;

@@ -1,4 +1,7 @@
-// components/dashboard/Dashboard.js - FINAL (no toggle, top performers filtered)
+// components/dashboard/Dashboard.js - FINAL
+// - Removed Approved/Pending/Rejected status chart
+// - Added Report Submission Trend (daily report counts)
+// - Top performers ranked by registration count (highest first)
 
 import React, { useMemo, useCallback } from 'react';
 import { getToday } from '../../utils/helpers';
@@ -27,15 +30,6 @@ function Dashboard({
   // ============================================================
   // ALL DATA COMPUTED FROM RAW ARRAYS – SYNCED-ONLY
   // ============================================================
-
-  // ----- PENDING COUNTS -----
-  const realPendingLeaves = useMemo(() => {
-    return (leaves || []).filter(l => l.status === 'pending').length;
-  }, [leaves]);
-
-  const realPendingPermissions = useMemo(() => {
-    return (permissions || []).filter(p => p.status === 'pending').length;
-  }, [permissions]);
 
   // ----- TOTALS – ONLY SYNCED RECORDS -----
   const realTotalReports = useMemo(() => {
@@ -73,19 +67,19 @@ function Dashboard({
     return data;
   }, [citizens]);
 
-  // ----- REPORT STATUS DISTRIBUTION (synced reports) -----
-  const reportStatusData = useMemo(() => {
+  // ----- REPORT SUBMISSION TREND – ONLY SYNCED REPORTS (NEW) -----
+  const reportSubmissionTrendData = useMemo(() => {
     const syncedReports = (reports || []).filter(r => r.synced === true);
-    if (!syncedReports || syncedReports.length === 0) return [];
-    const statuses = { 'Approved': 0, 'Pending': 0, 'Rejected': 0 };
-    syncedReports.forEach(r => {
-      if (r.reviewed && r.status !== 'rejected') statuses['Approved']++;
-      else if (r.status === 'rejected') statuses['Rejected']++;
-      else statuses['Pending']++;
-    });
-    return Object.entries(statuses)
-      .filter(([_, value]) => value > 0)
-      .map(([name, value]) => ({ name, value }));
+    const today = new Date();
+    const data = [];
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date(today);
+      d.setDate(d.getDate() - i);
+      const dateStr = d.toISOString().slice(0, 10);
+      const value = syncedReports.filter(r => r.reportDate === dateStr).length;
+      data.push({ date: dateStr, value });
+    }
+    return data;
   }, [reports]);
 
   // ----- TODAY'S ATTENDANCE (synced) -----
@@ -106,34 +100,6 @@ function Dashboard({
       .filter(([_, value]) => value > 0)
       .map(([name, value]) => ({ name, value }));
   }, [attendance]);
-
-  // ----- LEAVE STATUS DISTRIBUTION -----
-  const leaveStatusData = useMemo(() => {
-    if (!leaves || leaves.length === 0) return [];
-    const statuses = { 'Approved': 0, 'Pending': 0, 'Rejected': 0 };
-    leaves.forEach(l => {
-      if (l.status === 'approved') statuses['Approved']++;
-      else if (l.status === 'rejected') statuses['Rejected']++;
-      else statuses['Pending']++;
-    });
-    return Object.entries(statuses)
-      .filter(([_, value]) => value > 0)
-      .map(([name, value]) => ({ name, value }));
-  }, [leaves]);
-
-  // ----- PERMISSION STATUS DISTRIBUTION -----
-  const permissionStatusData = useMemo(() => {
-    if (!permissions || permissions.length === 0) return [];
-    const statuses = { 'Approved': 0, 'Pending': 0, 'Rejected': 0 };
-    permissions.forEach(p => {
-      if (p.status === 'approved') statuses['Approved']++;
-      else if (p.status === 'rejected') statuses['Rejected']++;
-      else statuses['Pending']++;
-    });
-    return Object.entries(statuses)
-      .filter(([_, value]) => value > 0)
-      .map(([name, value]) => ({ name, value }));
-  }, [permissions]);
 
   // ----- OFFICER PERFORMANCE (synced) -----
   const officerPerformanceData = useMemo(() => {
@@ -209,7 +175,7 @@ function Dashboard({
   }, [attendance, user, isOfficer]);
 
   // ============================================================
-  // TOP PERFORMERS – COMPUTED INTERNALLY (filtered to registrations > 0)
+  // TOP PERFORMERS – RANKED BY REGISTRATION COUNT (HIGHEST FIRST)
   // ============================================================
   const realTopPerformers = useMemo(() => {
     const map = {};
@@ -249,7 +215,7 @@ function Dashboard({
       }
     });
 
-    // 🔥 Filter: only officers with at least 1 registration
+    // 🔥 RANKED BY REGISTRATION COUNT (HIGHEST FIRST)
     return Object.values(map)
       .filter(emp => emp.totalRegistrations > 0)
       .sort((a, b) => b.totalRegistrations - a.totalRegistrations)
@@ -257,7 +223,7 @@ function Dashboard({
   }, [reports, citizens, attendance]);
 
   // ============================================================
-  // TEAM PERFORMANCE – COMPUTED INTERNALLY (filtered)
+  // TEAM PERFORMANCE – RANKED BY REGISTRATION COUNT (HIGHEST FIRST)
   // ============================================================
   const realTeamPerformance = useMemo(() => {
     if (!isSupervisor || !user || !teamMembers) return [];
@@ -296,14 +262,14 @@ function Dashboard({
         map[a.employeeId].attendanceRate = totalAtt > 0 ? Math.round((presentAtt / totalAtt) * 100) : 0;
       }
     });
-    // 🔥 Filter: only officers with at least 1 registration
+    // 🔥 RANKED BY REGISTRATION COUNT (HIGHEST FIRST)
     return Object.values(map)
       .filter(emp => emp.totalRegistrations > 0)
       .sort((a, b) => b.totalRegistrations - a.totalRegistrations);
   }, [reports, citizens, attendance, teamMembers, isSupervisor, user]);
 
   // ============================================================
-  // STYLING (light theme only, no toggle)
+  // STYLING
   // ============================================================
   const colors = {
     bg: '#f1f5f9',
@@ -345,7 +311,7 @@ function Dashboard({
     return null;
   }, []);
 
-  const renderChart = useCallback((type, data, chartColors = CHART_COLORS, xAxisKey = 'name') => {
+  const renderChart = useCallback((type, data, chartColors = CHART_COLORS, xAxisKey = 'date') => {
     if (!data || data.length === 0) {
       return (
         <div style={{ textAlign: 'center', padding: '40px', color: colors.textSecondary, fontSize: '14px' }}>
@@ -353,19 +319,6 @@ function Dashboard({
         </div>
       );
     }
-
-    const getStatusColor = (name) => {
-      const colorMap = {
-        'Approved': '#0b7e4b',
-        'Pending': '#d97706',
-        'Rejected': '#dc2626',
-        'Present': '#0b7e4b',
-        'Late': '#d97706',
-        'Absent': '#dc2626',
-        'Half Day': '#7c3aed'
-      };
-      return colorMap[name] || '#1e3a5f';
-    };
 
     const commonProps = {
       margin: { top: 20, right: 30, left: 20, bottom: 5 },
@@ -381,11 +334,7 @@ function Dashboard({
               <YAxis tick={{ fontSize: 12, fill: colors.textSecondary }} />
               <Tooltip content={CustomTooltip} />
               <Legend wrapperStyle={{ fontSize: '12px', paddingTop: '10px', color: colors.textSecondary }} />
-              <Bar dataKey="value" radius={[4, 4, 0, 0]}>
-                {data.map((entry, index) => (
-                  <Cell key={`cell-${index}`} fill={getStatusColor(entry.name) || chartColors[index % chartColors.length]} />
-                ))}
-              </Bar>
+              <Bar dataKey="value" fill={chartColors[0]} radius={[4, 4, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
         );
@@ -394,7 +343,7 @@ function Dashboard({
           <ResponsiveContainer width="100%" height={280}>
             <LineChart data={data} {...commonProps}>
               <CartesianGrid strokeDasharray="3 3" stroke={colors.chartGrid} />
-              <XAxis dataKey="date" tick={{ fontSize: 12, fill: colors.textSecondary }} />
+              <XAxis dataKey={xAxisKey} tick={{ fontSize: 12, fill: colors.textSecondary }} />
               <YAxis tick={{ fontSize: 12, fill: colors.textSecondary }} />
               <Tooltip content={CustomTooltip} />
               <Legend wrapperStyle={{ fontSize: '12px', paddingTop: '10px', color: colors.textSecondary }} />
@@ -407,7 +356,7 @@ function Dashboard({
           <ResponsiveContainer width="100%" height={280}>
             <AreaChart data={data} {...commonProps}>
               <CartesianGrid strokeDasharray="3 3" stroke={colors.chartGrid} />
-              <XAxis dataKey="date" tick={{ fontSize: 12, fill: colors.textSecondary }} />
+              <XAxis dataKey={xAxisKey} tick={{ fontSize: 12, fill: colors.textSecondary }} />
               <YAxis tick={{ fontSize: 12, fill: colors.textSecondary }} />
               <Tooltip content={CustomTooltip} />
               <Legend wrapperStyle={{ fontSize: '12px', paddingTop: '10px', color: colors.textSecondary }} />
@@ -578,11 +527,9 @@ function Dashboard({
             <StatsCard label="Supervisors" value={realSupervisors} color="#7c3aed" icon="👤" />
             <StatsCard label="Field Officers" value={realFieldOfficers} color="#d97706" icon="👥" />
             <StatsCard label="Attendance Rate (synced)" value={`${realAttendanceRate}%`} color="#0b7e4b" icon="⚡" />
-            <StatsCard label="Pending Leaves" value={realPendingLeaves} color="#dc2626" icon="📅" />
-            <StatsCard label="Pending Permissions" value={realPendingPermissions} color="#2563eb" icon="📋" />
           </div>
 
-          {/* Charts Row */}
+          {/* Charts Row – Report Submission Trend + Today's Attendance */}
           <div style={{
             display: 'grid',
             gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))',
@@ -590,32 +537,18 @@ function Dashboard({
             marginBottom: '24px',
             padding: '0 16px'
           }}>
-            {reportStatusData.length > 0 && (
-              <ChartWrapper title="📊 Report Status (synced)" subtitle="Approved, Pending, Rejected reports">
-                {renderChart('bar', reportStatusData)}
-              </ChartWrapper>
-            )}
+            <ChartWrapper title="📋 Report Submission Trend (synced)" subtitle="Daily report submissions (Last 7 days)">
+              {renderChart('bar', reportSubmissionTrendData, ['#2563eb'])}
+            </ChartWrapper>
 
             {todayAttendanceData.length > 0 && (
               <ChartWrapper title="📋 Today's Attendance (synced)" subtitle="Attendance distribution for today">
                 {renderChart('bar', todayAttendanceData)}
               </ChartWrapper>
             )}
-
-            {leaveStatusData.length > 0 && (
-              <ChartWrapper title="📅 Leave Status" subtitle="Approved, Pending, Rejected leaves">
-                {renderChart('bar', leaveStatusData)}
-              </ChartWrapper>
-            )}
-
-            {permissionStatusData.length > 0 && (
-              <ChartWrapper title="📋 Permission Status" subtitle="Approved, Pending, Rejected permissions">
-                {renderChart('bar', permissionStatusData)}
-              </ChartWrapper>
-            )}
           </div>
 
-          {/* Registration Trend */}
+          {/* Registration Trend + Report Trend */}
           <div style={{
             display: 'grid',
             gridTemplateColumns: '1fr 1fr',
@@ -624,15 +557,15 @@ function Dashboard({
             padding: '0 16px'
           }}>
             <ChartWrapper title="📈 Registration Trend (synced)" subtitle="Daily citizen registrations (Last 7 days)">
-              {renderChart('bar', registrationTrendData.map(d => ({ name: d.date, value: d.value })), ['#1e3a5f'])}
+              {renderChart('area', registrationTrendData, ['#0b7e4b'])}
             </ChartWrapper>
 
-            <ChartWrapper title="📊 Performance Distribution (synced)" subtitle="Report status breakdown">
-              {renderChart('bar', reportStatusData)}
+            <ChartWrapper title="📊 Report Submission Trend (synced)" subtitle="Daily reports submitted (Last 7 days)">
+              {renderChart('line', reportSubmissionTrendData, ['#2563eb'])}
             </ChartWrapper>
           </div>
 
-          {/* Top Performers – using computed realTopPerformers (filtered) */}
+          {/* Top Performers – RANKED BY REGISTRATIONS (HIGHEST FIRST) */}
           <div style={{
             background: colors.cardBg,
             padding: '20px',
@@ -641,7 +574,7 @@ function Dashboard({
             border: `1px solid ${colors.cardBorder}`,
             margin: '0 16px 24px'
           }}>
-            <h3 style={{ fontSize: '15px', fontWeight: '600', marginBottom: '16px', color: colors.textPrimary }}>🏆 Top Performing Officers</h3>
+            <h3 style={{ fontSize: '15px', fontWeight: '600', marginBottom: '16px', color: colors.textPrimary }}>🏆 Top Performing Officers (by Registrations)</h3>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
               {(!realTopPerformers || realTopPerformers.length === 0) ? (
                 <div style={{ textAlign: 'center', padding: '20px', color: colors.textSecondary, fontSize: '14px' }}>No performance data available</div>
@@ -723,10 +656,9 @@ function Dashboard({
             <StatsCard label="Team Members" value={teamMembers?.length || 0} color="#7c3aed" icon="👥" />
             <StatsCard label="Team Reports (synced)" value={teamReportsCount} color="#2563eb" icon="📋" />
             <StatsCard label="Team Registrations (synced)" value={teamCitizenCount} color="#0b7e4b" icon="🆔" />
-            <StatsCard label="Pending Leaves" value={realPendingLeaves} color="#dc2626" icon="📅" />
           </div>
 
-          {/* Charts */}
+          {/* Charts Row – Report Submission Trend */}
           <div style={{
             display: 'grid',
             gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))',
@@ -734,20 +666,12 @@ function Dashboard({
             marginBottom: '24px',
             padding: '0 16px'
           }}>
-            {reportStatusData.length > 0 && (
-              <ChartWrapper title="📊 Team Report Status (synced)" subtitle="Approved, Pending, Rejected reports">
-                {renderChart('bar', reportStatusData)}
-              </ChartWrapper>
-            )}
-
-            {leaveStatusData.length > 0 && (
-              <ChartWrapper title="📅 Team Leave Status" subtitle="Approved, Pending, Rejected leaves">
-                {renderChart('bar', leaveStatusData)}
-              </ChartWrapper>
-            )}
+            <ChartWrapper title="📋 Team Report Submission Trend (synced)" subtitle="Daily team report submissions (Last 7 days)">
+              {renderChart('bar', reportSubmissionTrendData, ['#2563eb'])}
+            </ChartWrapper>
           </div>
 
-          {/* Registration Trend */}
+          {/* Registration Trend + Report Trend */}
           <div style={{
             display: 'grid',
             gridTemplateColumns: '1fr 1fr',
@@ -755,16 +679,16 @@ function Dashboard({
             marginBottom: '24px',
             padding: '0 16px'
           }}>
-            <ChartWrapper title="📈 Team Registration Trend (synced)" subtitle="Daily registrations (Last 7 days)">
-              {renderChart('bar', registrationTrendData.map(d => ({ name: d.date, value: d.value })), ['#2d6a4f'])}
+            <ChartWrapper title="📈 Team Registration Trend (synced)" subtitle="Daily team registrations (Last 7 days)">
+              {renderChart('area', registrationTrendData, ['#0b7e4b'])}
             </ChartWrapper>
 
-            <ChartWrapper title="📊 Team Performance (synced)" subtitle="Team report status breakdown">
-              {renderChart('bar', reportStatusData)}
+            <ChartWrapper title="📊 Team Report Submission Trend (synced)" subtitle="Daily team reports (Last 7 days)">
+              {renderChart('line', reportSubmissionTrendData, ['#2563eb'])}
             </ChartWrapper>
           </div>
 
-          {/* Team Performance List – using computed realTeamPerformance (filtered) */}
+          {/* Team Performance – RANKED BY REGISTRATIONS (HIGHEST FIRST) */}
           <div style={{
             background: colors.cardBg,
             padding: '20px',
@@ -773,7 +697,7 @@ function Dashboard({
             border: `1px solid ${colors.cardBorder}`,
             margin: '0 16px 24px'
           }}>
-            <h3 style={{ fontSize: '15px', fontWeight: '600', marginBottom: '16px', color: colors.textPrimary }}>🏆 Team Performance</h3>
+            <h3 style={{ fontSize: '15px', fontWeight: '600', marginBottom: '16px', color: colors.textPrimary }}>🏆 Team Performance (by Registrations)</h3>
             {(!realTeamPerformance || realTeamPerformance.length === 0) ? (
               <div style={{ textAlign: 'center', padding: '20px', color: colors.textSecondary, fontSize: '14px' }}>No team performance data yet</div>
             ) : (
@@ -854,8 +778,6 @@ function Dashboard({
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '14px', marginBottom: '24px', padding: '0 16px' }}>
             <StatsCard label="My Reports (synced)" value={officerReportsCount} color="#2563eb" icon="📋" />
             <StatsCard label="Citizens Registered (synced)" value={officerTotalRegistrations} color="#0b7e4b" icon="🆔" />
-            <StatsCard label="Pending Leaves" value={realPendingLeaves} color="#dc2626" icon="📅" />
-            <StatsCard label="Pending Permissions" value={realPendingPermissions} color="#d97706" icon="📋" />
           </div>
 
           {/* Quick Stats */}

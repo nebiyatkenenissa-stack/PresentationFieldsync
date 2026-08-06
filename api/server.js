@@ -1,20 +1,169 @@
-// server.js – COMPLETE WITH ALL ROUTES (REPORTS, ATTENDANCE, CITIZENS, USERS, LEAVES, PERMISSIONS, TASKS, SCREEN TIME, AUDIT, ALERTS, VERIFICATION, SUPERVISOR REPORTS)
-// AND SYNC CASES FOR ALL ENTITIES INCLUDING leave_update, permission_update, AND verification
+// server.js – COMPLETE WITH ALL ROUTES + TEMPORARY PASSWORD + EMAIL + FORCE CHANGE + LOCATION HIERARCHY + LOGIN ROUTE
+// FIX: Always return plain password in user creation response so client can store it locally.
+// FIX: Added location_path column, fixed duplicate email/employee_id handling.
+// ADDED: /api/locations/communities endpoint for community dropdown.
 
 const express = require('express');
 const cors = require('cors');
 const { Pool } = require('pg');
+const bcrypt = require('bcrypt');
+const multer = require('multer');
+const path = require('path');
+const fs = require('fs');
+const nodemailer = require('nodemailer');
 require('dotenv').config();
 
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-// Middleware
+// ===== EMAIL TRANSPORTER =====
+const transporter = nodemailer.createTransport({
+  service: 'gmail',
+  auth: {
+    user: process.env.EMAIL_USER,
+    pass: process.env.EMAIL_PASS,
+  },
+});
+
+// ===== HELPER: Generate temporary password (10 characters) =====
+function generateTempPassword() {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+  let password = '';
+  for (let i = 0; i < 10; i++) {
+    password += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return password;
+}
+
+// ===== MIDDLEWARE =====
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ limit: '10mb', extended: true }));
 app.set('json spaces', 2);
 
-// PostgreSQL Connection
+// ============================================================
+// ===== CHANGE PASSWORD ROUTE (FORCE PASSWORD CHANGE) – MOVED TO TOP =====
+// ============================================================
+app.post('/api/auth/change-password', async (req, res) => {
+  console.log('🔑 Change password request received for:', req.body.email);
+  try {
+    const { email, currentPassword, newPassword } = req.body;
+    if (!email || !currentPassword || !newPassword) {
+      return res.status(400).json({ error: 'Missing required fields' });
+    }
+
+    // Case-insensitive email lookup
+    const trimmedEmail = email.trim().toLowerCase();
+    const userResult = await pool.query(
+      'SELECT id, password_hash, must_change_password FROM users WHERE LOWER(email) = $1',
+      [trimmedEmail]
+    );
+    if (userResult.rows.length === 0) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    const user = userResult.rows[0];
+
+    // Verify current password
+    const match = await bcrypt.compare(currentPassword, user.password_hash);
+    if (!match) {
+      return res.status(401).json({ error: 'Current password is incorrect' });
+    }
+
+    // Hash new password
+    const newHash = await bcrypt.hash(newPassword, 10);
+    await pool.query(
+      'UPDATE users SET password_hash = $1, must_change_password = false, updated_at = CURRENT_TIMESTAMP WHERE id = $2',
+      [newHash, user.id]
+    );
+
+    res.json({ success: true, message: 'Password changed successfully' });
+  } catch (error) {
+    console.error('Change password error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ============================================================
+// ===== LOGIN ROUTE (server authentication) =====
+// ============================================================
+app.post('/api/login', async (req, res) => {
+  console.log('🔑 Login request received for:', req.body.email);
+  try {
+    const { email, password } = req.body;
+    if (!email || !password) {
+      return res.status(400).json({ error: 'Email and password required' });
+    }
+
+    // Case‑insensitive email lookup
+    const trimmedEmail = email.trim().toLowerCase();
+    const userResult = await pool.query(
+      `SELECT id, employee_id, name, email, role, region, supervisor_id,
+              status, phone, shift, department, profile_photo,
+              must_change_password, password_hash,
+              country_id, region_id, zone_id, woreda_id, kebele_id, community_id,
+              location_path, created_at, updated_at
+       FROM users WHERE LOWER(email) = $1`,
+      [trimmedEmail]
+    );
+
+    if (userResult.rows.length === 0) {
+      return res.status(401).json({ error: 'Invalid email or password' });
+    }
+
+    const user = userResult.rows[0];
+    if (user.status !== 'active') {
+      return res.status(401).json({ error: 'Account is inactive' });
+    }
+
+    // Verify password
+    const match = await bcrypt.compare(password, user.password_hash);
+    if (!match) {
+      return res.status(401).json({ error: 'Invalid email or password' });
+    }
+
+    // Remove password_hash before sending
+    delete user.password_hash;
+
+    res.json({ success: true, user });
+  } catch (error) {
+    console.error('Login error:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// ===== UPLOADS FOLDER & STATIC SERVING =====
+const uploadDir = path.join(__dirname, 'uploads');
+if (!fs.existsSync(uploadDir)) {
+    fs.mkdirSync(uploadDir);
+    console.log('📁 Created uploads folder');
+}
+app.use('/uploads', express.static(uploadDir));
+
+// ===== MULTER CONFIG =====
+const storage = multer.diskStorage({
+    destination: (req, file, cb) => {
+        cb(null, uploadDir);
+    },
+    filename: (req, file, cb) => {
+        const unique = Date.now() + '-' + Math.round(Math.random() * 1E9);
+        const ext = path.extname(file.originalname);
+        cb(null, 'profile_' + unique + ext);
+    }
+});
+
+const upload = multer({
+    storage,
+    limits: { fileSize: 2 * 1024 * 1024 }, // 2 MB
+    fileFilter: (req, file, cb) => {
+        if (file.mimetype.startsWith('image/')) {
+            cb(null, true);
+        } else {
+            cb(new Error('Only images are allowed'));
+        }
+    }
+});
+
+// ===== POSTGRESQL CONNECTION =====
 const pool = new Pool({
     user: process.env.DB_USER,
     host: process.env.DB_HOST,
@@ -23,14 +172,64 @@ const pool = new Pool({
     port: process.env.DB_PORT,
 });
 
-// Test Connection
-pool.connect((err) => {
+pool.connect(async (err) => {
     if (err) {
         console.error('❌ Database connection error:', err.message);
     } else {
         console.log('✅ Connected to PostgreSQL');
+        await ensureLocationTable();
+        await addMissingColumns();
     }
 });
+
+// ============================================================
+// HELPER: Create locations table if not exists
+// ============================================================
+async function ensureLocationTable() {
+    try {
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS locations (
+                id SERIAL PRIMARY KEY,
+                name VARCHAR(100) NOT NULL,
+                level VARCHAR(20) NOT NULL CHECK (level IN ('country', 'region', 'zone', 'woreda', 'kebele', 'community')),
+                parent_id INTEGER REFERENCES locations(id) ON DELETE CASCADE,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(name, parent_id)
+            );
+        `);
+        console.log('✅ Locations table verified');
+    } catch (err) {
+        console.warn('⚠️ Could not create locations table:', err.message);
+    }
+}
+
+// ============================================================
+// HELPER: Add missing columns if they don't exist
+// ============================================================
+async function addMissingColumns() {
+    try {
+        await pool.query(`
+            ALTER TABLE users ADD COLUMN IF NOT EXISTS phone VARCHAR(50);
+            ALTER TABLE users ADD COLUMN IF NOT EXISTS shift VARCHAR(20) DEFAULT 'Day';
+            ALTER TABLE users ADD COLUMN IF NOT EXISTS department VARCHAR(100);
+            ALTER TABLE users ADD COLUMN IF NOT EXISTS profile_photo TEXT;
+            ALTER TABLE users ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
+            ALTER TABLE users ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN DEFAULT TRUE;
+            ALTER TABLE users ADD COLUMN IF NOT EXISTS country_id INTEGER REFERENCES locations(id);
+            ALTER TABLE users ADD COLUMN IF NOT EXISTS region_id INTEGER REFERENCES locations(id);
+            ALTER TABLE users ADD COLUMN IF NOT EXISTS zone_id INTEGER REFERENCES locations(id);
+            ALTER TABLE users ADD COLUMN IF NOT EXISTS woreda_id INTEGER REFERENCES locations(id);
+            ALTER TABLE users ADD COLUMN IF NOT EXISTS kebele_id INTEGER REFERENCES locations(id);
+            ALTER TABLE users ADD COLUMN IF NOT EXISTS community_id INTEGER REFERENCES locations(id);
+            ALTER TABLE users ADD COLUMN IF NOT EXISTS location_path VARCHAR(255);
+            -- Ensure region column can hold long location paths
+            ALTER TABLE users ALTER COLUMN region TYPE VARCHAR(255);
+        `);
+        console.log('✅ Database columns verified');
+    } catch (err) {
+        console.warn('⚠️ Could not add columns (they may already exist):', err.message);
+    }
+}
 
 // ============================================================
 // TEST ROUTE
@@ -56,6 +255,87 @@ app.use('/api/audit', auditRouter);
 app.use('/api/alerts', alertsRouter);
 app.use('/api/verification', verificationRouter);
 app.use('/api/supervisor-reports', supervisorReportsRouter);
+
+// ============================================================
+// LOCATION ROUTES
+// ============================================================
+
+// Get locations by level (e.g., /api/locations/level/country)
+app.get('/api/locations/level/:level', async (req, res) => {
+    try {
+        const { level } = req.params;
+        const result = await pool.query(
+            'SELECT id, name, parent_id FROM locations WHERE level = $1 ORDER BY name',
+            [level]
+        );
+        res.json(result.rows);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Get children of a parent ID (cascading dropdowns)
+app.get('/api/locations/children/:parentId', async (req, res) => {
+    try {
+        const { parentId } = req.params;
+        const result = await pool.query(
+            'SELECT id, name, level FROM locations WHERE parent_id = $1 ORDER BY name',
+            [parentId]
+        );
+        res.json(result.rows);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// ===== FIXED: Fetch communities by kebele_id (MUST be before the generic /:id route) =====
+app.get('/api/locations/communities', async (req, res) => {
+    const { kebele_id } = req.query;
+    if (!kebele_id) {
+        return res.status(400).json({ error: 'kebele_id is required' });
+    }
+    try {
+        const result = await pool.query(
+            'SELECT id, name FROM communities WHERE kebele_id = $1 ORDER BY name',
+            [kebele_id]
+        );
+        res.json(result.rows);
+    } catch (error) {
+        console.error('Error fetching communities:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Get location by ID (to fetch name for the 'region' fallback) – MUST be LAST
+app.get('/api/locations/:id', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const result = await pool.query('SELECT * FROM locations WHERE id = $1', [id]);
+        if (result.rows.length === 0) return res.status(404).json({ error: 'Location not found' });
+        res.json(result.rows[0]);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Get supervisors by woreda ID
+app.get('/api/users/supervisors-by-woreda/:woredaId', async (req, res) => {
+    try {
+        const { woredaId } = req.params;
+        const result = await pool.query(
+            `SELECT id, employee_id, name, email 
+             FROM users 
+             WHERE role = 'supervisor' 
+               AND status = 'active' 
+               AND woreda_id = $1
+             ORDER BY name`,
+            [woredaId]
+        );
+        res.json(result.rows);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
 
 // ============================================================
 // REPORT ROUTES
@@ -292,12 +572,16 @@ app.post('/api/citizens', async (req, res) => {
 });
 
 // ============================================================
-// USER ROUTES
+// USER ROUTES (UPDATED: include new fields, full profile update)
 // ============================================================
 app.get('/api/users', async (req, res) => {
     try {
         const result = await pool.query(
-            'SELECT id, employee_id, name, email, role, region, supervisor_id, status, password_hash, created_at FROM users ORDER BY name'
+            `SELECT id, employee_id, name, email, role, region, supervisor_id, 
+                    status, password_hash, phone, shift, department, profile_photo,
+                    must_change_password, country_id, region_id, zone_id, woreda_id, kebele_id, community_id,
+                    location_path, created_at, updated_at 
+             FROM users ORDER BY name`
         );
         res.json(result.rows);
     } catch (error) {
@@ -309,7 +593,11 @@ app.get('/api/users/:id', async (req, res) => {
     try {
         const { id } = req.params;
         const result = await pool.query(
-            'SELECT id, employee_id, name, email, role, region, supervisor_id, status, password_hash, created_at FROM users WHERE id = $1',
+            `SELECT id, employee_id, name, email, role, region, supervisor_id, 
+                    status, password_hash, phone, shift, department, profile_photo,
+                    must_change_password, country_id, region_id, zone_id, woreda_id, kebele_id, community_id,
+                    location_path, created_at, updated_at 
+             FROM users WHERE id = $1`,
             [id]
         );
         if (result.rows.length === 0) {
@@ -321,51 +609,245 @@ app.get('/api/users/:id', async (req, res) => {
     }
 });
 
+// ===== POST /api/users – CREATES USER (WITH TEMP PASSWORD + EMAIL + LOCATION) =====
+// Uses ON CONFLICT (email) to update if email exists, avoiding duplicate errors.
 app.post('/api/users', async (req, res) => {
     try {
         const data = req.body;
+        let plainPassword = data.password;
+        let mustChange = data.mustChangePassword !== undefined ? data.mustChangePassword : false;
+
+        // If the new user is a field officer, generate a temporary password
+        if (data.role === 'field_officer') {
+            plainPassword = generateTempPassword();
+            mustChange = true;
+        } else {
+            // For other roles, if no password provided, use default
+            if (!plainPassword) {
+                if (data.role === 'manager') plainPassword = 'manager123';
+                else if (data.role === 'supervisor') plainPassword = 'super123';
+                else plainPassword = 'officer123';
+            }
+            mustChange = false;
+        }
+
+        const hashedPassword = await bcrypt.hash(plainPassword, 10);
+
+        // Prepare location_path from region string or build from IDs
+        const locationPath = data.locationPath || data.region || '';
+
+        // Upsert on email conflict – this prevents duplicate email errors
         const result = await pool.query(
             `INSERT INTO users (
                 id, employee_id, name, email, password_hash,
-                role, region, supervisor_id, status, created_at
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-            ON CONFLICT (id) DO UPDATE SET
+                role, region, supervisor_id, status, created_at,
+                phone, shift, department, profile_photo, must_change_password,
+                country_id, region_id, zone_id, woreda_id, kebele_id, community_id,
+                location_path
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)
+            ON CONFLICT (email) DO UPDATE SET
+                employee_id = EXCLUDED.employee_id,
                 name = EXCLUDED.name,
-                email = EXCLUDED.email,
                 role = EXCLUDED.role,
                 region = EXCLUDED.region,
+                supervisor_id = EXCLUDED.supervisor_id,
                 status = EXCLUDED.status,
+                phone = EXCLUDED.phone,
+                shift = EXCLUDED.shift,
+                department = EXCLUDED.department,
+                profile_photo = EXCLUDED.profile_photo,
+                must_change_password = EXCLUDED.must_change_password,
+                country_id = EXCLUDED.country_id,
+                region_id = EXCLUDED.region_id,
+                zone_id = EXCLUDED.zone_id,
+                woreda_id = EXCLUDED.woreda_id,
+                kebele_id = EXCLUDED.kebele_id,
+                community_id = EXCLUDED.community_id,
+                location_path = EXCLUDED.location_path,
+                password_hash = EXCLUDED.password_hash,  -- update password if changed
                 updated_at = CURRENT_TIMESTAMP
             RETURNING *`,
             [
-                data.id, data.employeeId, data.name, data.email, data.password,
-                data.role, data.region, data.supervisorId || null,
-                data.status || 'active', data.createdAt || new Date().toISOString()
+                data.id, data.employeeId, data.name, data.email, hashedPassword,
+                data.role, data.region || null, data.supervisorId || null,
+                data.status || 'active', data.createdAt || new Date().toISOString(),
+                data.phone || null,
+                data.shift || 'Day',
+                data.department || null,
+                data.profilePhoto || null,
+                mustChange,
+                data.country_id || null,
+                data.region_id || null,
+                data.zone_id || null,
+                data.woreda_id || null,
+                data.kebele_id || null,
+                data.community_id || null,
+                locationPath
             ]
         );
-        res.status(201).json(result.rows[0]);
+
+        const newUser = result.rows[0];
+        delete newUser.password_hash;
+
+        // Always return the plain password so client can store it locally
+        newUser.temporaryPassword = plainPassword;
+
+        // If field officer, send email with temporary password
+        if (data.role === 'field_officer') {
+            try {
+                await transporter.sendMail({
+                    from: process.env.EMAIL_USER,
+                    to: data.email,
+                    subject: 'Your FieldSync Account',
+                    html: `
+                        <h3>Welcome to FieldSync</h3>
+                        <p>Hello ${data.name},</p>
+                        <p>Your FieldSync account has been created.</p>
+                        <p><strong>Login Email:</strong> ${data.email}</p>
+                        <p><strong>Temporary Password:</strong> ${plainPassword}</p>
+                        <p>Please log in and change your password immediately.</p>
+                        <p>Regards,<br>FieldSync Team</p>
+                    `
+                });
+                console.log(`📧 Temporary password sent to ${data.email}`);
+            } catch (emailErr) {
+                console.error('❌ Failed to send email:', emailErr);
+            }
+        }
+
+        res.status(201).json(newUser);
     } catch (error) {
-        res.status(500).json({ error: error.message });
+        // If employee_id conflict occurs, we can try to update based on employee_id
+        if (error.code === '23505' && error.constraint === 'users_employee_id_key') {
+            try {
+                // Update the existing user with the same employee_id
+                const data = req.body;
+                const hashedPassword = await bcrypt.hash(data.password || 'temp123', 10);
+                const result = await pool.query(
+                    `UPDATE users SET
+                        name = $1,
+                        email = $2,
+                        password_hash = $3,
+                        role = $4,
+                        region = $5,
+                        supervisor_id = $6,
+                        status = $7,
+                        phone = $8,
+                        shift = $9,
+                        department = $10,
+                        profile_photo = $11,
+                        must_change_password = $12,
+                        country_id = $13,
+                        region_id = $14,
+                        zone_id = $15,
+                        woreda_id = $16,
+                        kebele_id = $17,
+                        community_id = $18,
+                        location_path = $19,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE employee_id = $20
+                    RETURNING *`,
+                    [
+                        data.name,
+                        data.email,
+                        hashedPassword,
+                        data.role,
+                        data.region || null,
+                        data.supervisorId || null,
+                        data.status || 'active',
+                        data.phone || null,
+                        data.shift || 'Day',
+                        data.department || null,
+                        data.profilePhoto || null,
+                        data.mustChangePassword !== undefined ? data.mustChangePassword : false,
+                        data.country_id || null,
+                        data.region_id || null,
+                        data.zone_id || null,
+                        data.woreda_id || null,
+                        data.kebele_id || null,
+                        data.community_id || null,
+                        data.locationPath || data.region || '',
+                        data.employeeId
+                    ]
+                );
+                if (result.rows.length === 0) {
+                    throw new Error('User not found for update');
+                }
+                const updatedUser = result.rows[0];
+                delete updatedUser.password_hash;
+                updatedUser.temporaryPassword = data.password || 'updated';
+                res.status(200).json(updatedUser);
+            } catch (updateErr) {
+                console.error('Update on employee_id conflict failed:', updateErr);
+                res.status(500).json({ error: updateErr.message });
+            }
+        } else {
+            console.error('Error creating user:', error);
+            res.status(500).json({ error: error.message });
+        }
     }
 });
 
+// ===== PUT /api/users/:id – FULL PROFILE UPDATE (no password change) =====
 app.put('/api/users/:id', async (req, res) => {
     try {
         const { id } = req.params;
-        const { status } = req.body;
-        const result = await pool.query(
-            'UPDATE users SET status = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2 RETURNING *',
-            [status, id]
-        );
+        const {
+            name, email, phone, shift, department,
+            profilePhoto
+        } = req.body;
+
+        const updates = [];
+        const values = [];
+        let paramIndex = 1;
+
+        if (name !== undefined) {
+            updates.push(`name = $${paramIndex++}`);
+            values.push(name);
+        }
+        if (email !== undefined) {
+            updates.push(`email = $${paramIndex++}`);
+            values.push(email);
+        }
+        if (phone !== undefined) {
+            updates.push(`phone = $${paramIndex++}`);
+            values.push(phone);
+        }
+        if (shift !== undefined) {
+            updates.push(`shift = $${paramIndex++}`);
+            values.push(shift);
+        }
+        if (department !== undefined) {
+            updates.push(`department = $${paramIndex++}`);
+            values.push(department);
+        }
+        if (profilePhoto !== undefined) {
+            updates.push(`profile_photo = $${paramIndex++}`);
+            values.push(profilePhoto);
+        }
+
+        if (updates.length === 0) {
+            return res.status(400).json({ error: 'No fields to update' });
+        }
+
+        updates.push(`updated_at = CURRENT_TIMESTAMP`);
+        values.push(id);
+
+        const query = `UPDATE users SET ${updates.join(', ')} WHERE id = $${paramIndex} RETURNING *`;
+        const result = await pool.query(query, values);
+
         if (result.rows.length === 0) {
             return res.status(404).json({ error: 'User not found' });
         }
+        delete result.rows[0].password_hash;
         res.json(result.rows[0]);
     } catch (error) {
+        console.error('Error updating user:', error);
         res.status(500).json({ error: error.message });
     }
 });
 
+// ===== DELETE /api/users/:id =====
 app.delete('/api/users/:id', async (req, res) => {
     try {
         const { id } = req.params;
@@ -375,6 +857,31 @@ app.delete('/api/users/:id', async (req, res) => {
         }
         res.json({ message: 'User deleted successfully' });
     } catch (error) {
+        console.error('Error deleting user:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// ============================================================
+// PHOTO UPLOAD ROUTE
+// ============================================================
+app.post('/api/users/:id/photo', upload.single('profilePhoto'), async (req, res) => {
+    try {
+        const userId = req.params.id;
+        if (!req.file) {
+            return res.status(400).json({ error: 'No file uploaded' });
+        }
+        const filePath = '/uploads/' + req.file.filename;
+        const result = await pool.query(
+            'UPDATE users SET profile_photo = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2 RETURNING *',
+            [filePath, userId]
+        );
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: 'User not found' });
+        }
+        res.json({ profilePhoto: filePath });
+    } catch (error) {
+        console.error('Photo upload error:', error);
         res.status(500).json({ error: error.message });
     }
 });
@@ -772,22 +1279,58 @@ app.post('/api/sync', async (req, res) => {
                 break;
 
             case 'user':
+                let hashedPw = data.password;
+                if (data.password) {
+                    hashedPw = await bcrypt.hash(data.password, 10);
+                }
+                // Use ON CONFLICT (email) to avoid duplicate email errors
+                const locationPath = data.locationPath || data.region || '';
                 result = await pool.query(
                     `INSERT INTO users (
                         id, employee_id, name, email, password_hash,
-                        role, region, supervisor_id, status, created_at
-                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-                    ON CONFLICT (id) DO UPDATE SET
+                        role, region, supervisor_id, status, created_at,
+                        phone, shift, department, profile_photo, must_change_password,
+                        country_id, region_id, zone_id, woreda_id, kebele_id, community_id,
+                        location_path
+                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)
+                    ON CONFLICT (email) DO UPDATE SET
+                        employee_id = EXCLUDED.employee_id,
                         name = EXCLUDED.name,
-                        email = EXCLUDED.email,
                         role = EXCLUDED.role,
+                        region = EXCLUDED.region,
+                        supervisor_id = EXCLUDED.supervisor_id,
                         status = EXCLUDED.status,
+                        phone = EXCLUDED.phone,
+                        shift = EXCLUDED.shift,
+                        department = EXCLUDED.department,
+                        profile_photo = EXCLUDED.profile_photo,
+                        must_change_password = EXCLUDED.must_change_password,
+                        country_id = EXCLUDED.country_id,
+                        region_id = EXCLUDED.region_id,
+                        zone_id = EXCLUDED.zone_id,
+                        woreda_id = EXCLUDED.woreda_id,
+                        kebele_id = EXCLUDED.kebele_id,
+                        community_id = EXCLUDED.community_id,
+                        location_path = EXCLUDED.location_path,
+                        password_hash = EXCLUDED.password_hash,
                         updated_at = CURRENT_TIMESTAMP
                     RETURNING *`,
                     [
-                        data.id, data.employeeId, data.name, data.email, data.password,
-                        data.role, data.region, data.supervisorId || null,
-                        data.status || 'active', data.createdAt || new Date().toISOString()
+                        data.id, data.employeeId, data.name, data.email, hashedPw,
+                        data.role, data.region || null, data.supervisorId || null,
+                        data.status || 'active', data.createdAt || new Date().toISOString(),
+                        data.phone || null,
+                        data.shift || 'Day',
+                        data.department || null,
+                        data.profilePhoto || null,
+                        data.mustChangePassword !== undefined ? data.mustChangePassword : true,
+                        data.country_id || null,
+                        data.region_id || null,
+                        data.zone_id || null,
+                        data.woreda_id || null,
+                        data.kebele_id || null,
+                        data.community_id || null,
+                        locationPath
                     ]
                 );
                 break;
@@ -943,7 +1486,6 @@ app.post('/api/sync', async (req, res) => {
                 );
                 break;
 
-            // ===== VERIFICATION SYNC (ALREADY PRESENT) =====
             case 'verification':
                 result = await pool.query(
                     `INSERT INTO verification_history (
@@ -1075,6 +1617,14 @@ app.listen(PORT, () => {
     console.log(`   POST /api/users`);
     console.log(`   PUT  /api/users/:id`);
     console.log(`   DELETE /api/users/:id`);
+    console.log(`   POST /api/users/:id/photo`);
+    console.log(`   POST /api/auth/change-password`);
+    console.log(`   POST /api/login`);
+    console.log(`   GET  /api/locations/level/:level`);
+    console.log(`   GET  /api/locations/children/:parentId`);
+    console.log(`   GET  /api/locations/:id`);
+    console.log(`   GET  /api/locations/communities`);  // ← FIXED: now order is correct
+    console.log(`   GET  /api/users/supervisors-by-woreda/:woredaId`);
     console.log(`   GET  /api/leaves`);
     console.log(`   POST /api/leaves`);
     console.log(`   PUT  /api/leaves/:id`);

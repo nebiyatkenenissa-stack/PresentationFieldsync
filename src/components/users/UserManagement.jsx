@@ -1,34 +1,31 @@
-// components/users/UserManagement.js - WITH FULL VALIDATION
+// components/users/UserManagement.js - WITH FULL VALIDATION + LANGUAGE SELECTOR + HIERARCHICAL LOCATIONS
 
 import React, { useState } from 'react';
 import { db, syncQueue, checkRealInternet } from '../../services/database';
 import { uid } from '../../utils/helpers';
 import { useUserLanguage } from '../context/UserLanguageContext';
 import UserLanguageSelector from './UserLanguageSelector';
+import LocationSelect from '../common/LocationSelect';
 
 function UserManagement({ 
   users, 
   setUsers, 
-  addNotification 
+  addNotification,
+  // Props from parent (App.js)
+  newUser,
+  setNewUser,
+  handleCreateUser,
+  toggleUserStatus,
+  deleteUser,
+  selectedLocations,
+  onLocationSelect,
+  woredaSupervisors,
+  loadingSupervisors
 }) {
   const { userT } = useUserLanguage();
   const [isSubmitting, setIsSubmitting] = useState(false);
   
-  // Form state
-  const [localNewUser, setLocalNewUser] = useState({
-    name: '',
-    email: '',
-    password: '',
-    phone: '',
-    role: '',
-    region: '',
-    supervisorId: '',
-    assignedSites: '',
-    shift: 'Day',
-    department: ''
-  });
-
-  // Validation errors
+  // Validation errors (local to this component)
   const [errors, setErrors] = useState({
     name: '',
     password: '',
@@ -37,7 +34,6 @@ function UserManagement({
 
   // ===== VALIDATION FUNCTIONS =====
   const validateName = (name) => {
-    // Only letters, spaces, hyphens, and apostrophes allowed – no digits
     if (!name.trim()) return userT('userManagement.nameRequired') || 'Full name is required';
     if (/[0-9]/.test(name)) return userT('userManagement.nameNoNumbers') || 'Full name must not contain numbers';
     return '';
@@ -51,9 +47,8 @@ function UserManagement({
   };
 
   const validatePhone = (phone) => {
-    // Must start with +2519 and exactly 8 digits after (total 13 chars)
     const fullPhone = phone.trim();
-    if (!fullPhone) return ''; // optional field – no error if empty
+    if (!fullPhone) return ''; // optional
     if (!/^\+2519\d{8}$/.test(fullPhone)) {
       return 'Phone must be in format +2519XXXXXXXX (8 digits after +2519)';
     }
@@ -63,32 +58,25 @@ function UserManagement({
   // ===== HANDLE FIELD CHANGES WITH REAL-TIME VALIDATION =====
   const handleChange = (e) => {
     const { name, value } = e.target;
-    setLocalNewUser(prev => ({ ...prev, [name]: value }));
+    setNewUser(prev => ({ ...prev, [name]: value }));
 
-    // Validate on change
     if (name === 'name') {
       setErrors(prev => ({ ...prev, name: validateName(value) }));
     } else if (name === 'password') {
       setErrors(prev => ({ ...prev, password: validatePassword(value) }));
     } else if (name === 'phone') {
-      // Auto-prefix +2519 if not present
-      let phoneVal = value;
-      if (phoneVal && !phoneVal.startsWith('+2519')) {
-        // If user types digits, we could auto-prefix, but better to let them paste full
-        // We'll just validate the full format
-      }
-      setErrors(prev => ({ ...prev, phone: validatePhone(phoneVal) }));
+      setErrors(prev => ({ ...prev, phone: validatePhone(value) }));
     }
   };
 
-  // ===== CREATE USER =====
-  const handleSubmit = async (e) => {
+  // ===== SUBMIT =====
+  const onSubmit = async (e) => {
     e.preventDefault();
 
     // Final validation
-    const nameError = validateName(localNewUser.name);
-    const passwordError = validatePassword(localNewUser.password);
-    const phoneError = validatePhone(localNewUser.phone);
+    const nameError = validateName(newUser.name);
+    const passwordError = validatePassword(newUser.password);
+    const phoneError = validatePhone(newUser.phone);
     setErrors({ name: nameError, password: passwordError, phone: phoneError });
 
     if (nameError || passwordError || phoneError) {
@@ -96,180 +84,30 @@ function UserManagement({
       return;
     }
 
+    const userExists = users.some(u => u.email === newUser.email);
+    if (userExists) {
+      alert(userT('userManagement.userExists'));
+      return;
+    }
+
+    if (!newUser.name || !newUser.email || !newUser.password || !newUser.role) {
+      alert(userT('userManagement.fillRequired'));
+      return;
+    }
+
+    if (newUser.role === 'field_officer' && !selectedLocations.woreda) {
+      alert('Please select a Woreda for Field Officers.');
+      return;
+    }
+
     setIsSubmitting(true);
-
     try {
-      const userExists = users.some(u => u.email === localNewUser.email);
-      if (userExists) {
-        alert(userT('userManagement.userExists'));
-        setIsSubmitting(false);
-        return;
-      }
-
-      if (!localNewUser.name || !localNewUser.email || !localNewUser.password || !localNewUser.role || !localNewUser.region) {
-        alert(userT('userManagement.fillRequired'));
-        setIsSubmitting(false);
-        return;
-      }
-
-      const online = await checkRealInternet();
-
-      const newUserObj = {
-        id: uid(),
-        employeeId: localNewUser.role === 'supervisor'
-          ? `SUP${String(users.filter(u => u.role === 'supervisor').length + 1).padStart(3, '0')}`
-          : `FO${String(users.filter(u => u.role === 'field_officer').length + 1).padStart(3, '0')}`,
-        name: localNewUser.name,
-        email: localNewUser.email,
-        password: localNewUser.password,
-        phone: localNewUser.phone || '',
-        role: localNewUser.role,
-        region: localNewUser.region,
-        supervisorId: localNewUser.role === 'field_officer' ? localNewUser.supervisorId : null,
-        assignedSites: localNewUser.role === 'field_officer' ? localNewUser.assignedSites.split(',').map(s => s.trim()).filter(s => s) : [],
-        status: 'active',
-        managerId: 'm1',
-        shift: localNewUser.shift || 'Day',
-        department: localNewUser.department || '',
-        createdAt: new Date().toISOString(),
-        synced: online
-      };
-
-      // Save to IndexedDB
-      await db.users.add(newUserObj);
-      setUsers([...users, newUserObj]);
-
-      // Sync to PostgreSQL
-      if (online) {
-        try {
-          const response = await fetch('http://localhost:5000/api/users', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(newUserObj)
-          });
-          
-          if (response.ok) {
-            await db.users.update(newUserObj.id, { synced: true });
-            console.log('✅ User synced to PostgreSQL');
-          }
-        } catch (err) {
-          console.log('📡 User saved offline, will sync later');
-          syncQueue.add({ type: 'user', id: newUserObj.id, data: newUserObj });
-        }
-      } else {
-        syncQueue.add({ type: 'user', id: newUserObj.id, data: newUserObj });
-        console.log('📡 User queued for sync');
-      }
-
-      if (addNotification) {
-        addNotification(
-          newUserObj.id, 
-          'Account Created', 
-          `Welcome ${newUserObj.name}! Your account has been created.`, 
-          'success'
-        );
-      }
-      
-      alert(userT('userManagement.createSuccess', { name: newUserObj.name }));
-
-      // Reset form
-      setLocalNewUser({
-        name: '',
-        email: '',
-        password: '',
-        phone: '',
-        role: '',
-        region: '',
-        supervisorId: '',
-        assignedSites: '',
-        shift: 'Day',
-        department: ''
-      });
-      setErrors({ name: '', password: '', phone: '' });
+      await handleCreateUser(e);
     } catch (error) {
       console.error('Error creating user:', error);
       alert(userT('userManagement.createError', { error: error.message }));
     } finally {
       setIsSubmitting(false);
-    }
-  };
-
-  // ===== TOGGLE USER STATUS (unchanged) =====
-  const handleToggleStatus = async (userId) => {
-    try {
-      const user = users.find(u => u.id === userId);
-      if (!user) return;
-
-      const newStatus = user.status === 'active' ? 'inactive' : 'active';
-      const updatedUser = { ...user, status: newStatus };
-
-      await db.users.update(userId, updatedUser);
-      
-      if (setUsers) {
-        setUsers(prev => prev.map(u => u.id === userId ? updatedUser : u));
-      }
-
-      const online = await checkRealInternet();
-      if (online) {
-        try {
-          await fetch(`http://localhost:5000/api/users/${userId}`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ status: newStatus })
-          });
-        } catch (err) {
-          syncQueue.add({ type: 'user_status_update', id: userId, data: { userId, status: newStatus } });
-        }
-      } else {
-        syncQueue.add({ type: 'user_status_update', id: userId, data: { userId, status: newStatus } });
-      }
-
-      if (addNotification) {
-        addNotification(
-          userId, 
-          'Account Status Updated', 
-          `Your account has been ${newStatus === 'active' ? 'activated' : 'deactivated'}`, 
-          'info'
-        );
-      }
-      alert(`✅ User ${newStatus === 'active' ? 'activated' : 'deactivated'} successfully!`);
-    } catch (error) {
-      console.error('Error toggling user status:', error);
-      alert('❌ Error updating user status: ' + error.message);
-    }
-  };
-
-  // ===== DELETE USER (unchanged) =====
-  const handleDeleteUser = async (userId) => {
-    if (!window.confirm(userT('userManagement.deleteConfirm'))) return;
-
-    try {
-      const user = users.find(u => u.id === userId);
-      if (!user) return;
-
-      await db.users.delete(userId);
-      
-      if (setUsers) {
-        setUsers(prev => prev.filter(u => u.id !== userId));
-      }
-
-      const online = await checkRealInternet();
-      if (online) {
-        try {
-          await fetch(`http://localhost:5000/api/users/${userId}`, {
-            method: 'DELETE'
-          });
-        } catch (err) {
-          syncQueue.add({ type: 'user_delete', id: userId, data: { userId } });
-        }
-      } else {
-        syncQueue.add({ type: 'user_delete', id: userId, data: { userId } });
-      }
-
-      alert(`✅ User ${user.name} deleted successfully!`);
-    } catch (error) {
-      console.error('Error deleting user:', error);
-      alert('❌ Error deleting user: ' + error.message);
     }
   };
 
@@ -316,7 +154,8 @@ function UserManagement({
           </span>
         </div>
 
-        <form onSubmit={handleSubmit} noValidate>
+        <form onSubmit={onSubmit} noValidate>
+          {/* Basic Info */}
           <div style={{
             display: 'grid',
             gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
@@ -329,7 +168,7 @@ function UserManagement({
               <input 
                 type="text" 
                 name="name"
-                value={localNewUser.name} 
+                value={newUser.name} 
                 onChange={handleChange}
                 placeholder={userT('userManagement.enterName')} 
                 required
@@ -349,7 +188,7 @@ function UserManagement({
               <input 
                 type="email" 
                 name="email"
-                value={localNewUser.email} 
+                value={newUser.email} 
                 onChange={handleChange}
                 placeholder={userT('userManagement.enterEmail')} 
                 required
@@ -371,7 +210,7 @@ function UserManagement({
               <input 
                 type="password" 
                 name="password"
-                value={localNewUser.password} 
+                value={newUser.password} 
                 onChange={handleChange}
                 placeholder={userT('userManagement.enterPassword')} 
                 required
@@ -392,7 +231,7 @@ function UserManagement({
               <input 
                 type="tel" 
                 name="phone"
-                value={localNewUser.phone} 
+                value={newUser.phone} 
                 onChange={handleChange}
                 placeholder="+2519XXXXXXXX (8 digits after +2519)"
                 style={{
@@ -419,7 +258,7 @@ function UserManagement({
               <label style={{fontSize: '13px', fontWeight: '500', color: '#374151'}}>{userT('userManagement.role')} *</label>
               <select 
                 name="role"
-                value={localNewUser.role} 
+                value={newUser.role} 
                 onChange={handleChange}
                 required
                 style={{padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '14px'}}
@@ -430,20 +269,16 @@ function UserManagement({
               </select>
             </div>
             <div style={{display: 'flex', flexDirection: 'column', gap: '4px'}}>
-              <label style={{fontSize: '13px', fontWeight: '500', color: '#374151'}}>{userT('userManagement.region')} *</label>
+              <label style={{fontSize: '13px', fontWeight: '500', color: '#374151'}}>{userT('userManagement.shift')}</label>
               <select 
-                name="region"
-                value={localNewUser.region} 
+                name="shift"
+                value={newUser.shift} 
                 onChange={handleChange}
-                required
                 style={{padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '14px'}}
               >
-                <option value="">{userT('userManagement.selectRegion')}</option>
-                <option value="North">{userT('userManagement.north')}</option>
-                <option value="South">{userT('userManagement.south')}</option>
-                <option value="East">{userT('userManagement.east')}</option>
-                <option value="West">{userT('userManagement.west')}</option>
-                <option value="Central">{userT('userManagement.central')}</option>
+                <option value="Day">{userT('userManagement.day')}</option>
+                <option value="Night">{userT('userManagement.night')}</option>
+                <option value="Flexible">{userT('userManagement.flexible')}</option>
               </select>
             </div>
           </div>
@@ -455,24 +290,11 @@ function UserManagement({
             marginTop: '16px'
           }}>
             <div style={{display: 'flex', flexDirection: 'column', gap: '4px'}}>
-              <label style={{fontSize: '13px', fontWeight: '500', color: '#374151'}}>{userT('userManagement.shift')}</label>
-              <select 
-                name="shift"
-                value={localNewUser.shift} 
-                onChange={handleChange}
-                style={{padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '14px'}}
-              >
-                <option value="Day">{userT('userManagement.day')}</option>
-                <option value="Night">{userT('userManagement.night')}</option>
-                <option value="Flexible">{userT('userManagement.flexible')}</option>
-              </select>
-            </div>
-            <div style={{display: 'flex', flexDirection: 'column', gap: '4px'}}>
               <label style={{fontSize: '13px', fontWeight: '500', color: '#374151'}}>{userT('userManagement.department')}</label>
               <input 
                 type="text" 
                 name="department"
-                value={localNewUser.department} 
+                value={newUser.department} 
                 onChange={handleChange}
                 placeholder={userT('userManagement.enterDepartment')}
                 style={{padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '14px'}}
@@ -480,40 +302,123 @@ function UserManagement({
             </div>
           </div>
 
-          {localNewUser.role === 'field_officer' && (
+          {/* ===== LOCATION HIERARCHY ===== */}
+          <div style={{
+            marginTop: '20px',
+            paddingTop: '16px',
+            borderTop: '1px solid #e5e7eb'
+          }}>
+            <h4 style={{fontSize: '14px', fontWeight: '600', marginBottom: '12px', color: '#1e293b'}}>📍 Location</h4>
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+              gap: '16px'
+            }}>
+              <LocationSelect
+                level="country"
+                parentId={null}
+                selectedValue={selectedLocations.country}
+                onSelect={onLocationSelect}
+              />
+              <LocationSelect
+                level="region"
+                parentId={selectedLocations.country}
+                selectedValue={selectedLocations.region}
+                onSelect={onLocationSelect}
+                disabled={!selectedLocations.country}
+              />
+            </div>
             <div style={{
               display: 'grid',
               gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
               gap: '16px',
-              marginTop: '16px'
+              marginTop: '12px'
             }}>
-              <div style={{display: 'flex', flexDirection: 'column', gap: '4px'}}>
-                <label style={{fontSize: '13px', fontWeight: '500', color: '#374151'}}>{userT('userManagement.supervisor')}</label>
-                <select 
-                  name="supervisorId"
-                  value={localNewUser.supervisorId} 
-                  onChange={handleChange}
-                  style={{padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '14px'}}
-                >
-                  <option value="">{userT('userManagement.selectSupervisor')}</option>
-                  {users.filter(u => u.role === 'supervisor').map(s => (
-                    <option key={s.id} value={s.id}>{s.name} ({s.region})</option>
-                  ))}
-                </select>
-              </div>
+              <LocationSelect
+                level="zone"
+                parentId={selectedLocations.region}
+                selectedValue={selectedLocations.zone}
+                onSelect={onLocationSelect}
+                disabled={!selectedLocations.region}
+              />
+              <LocationSelect
+                level="woreda"
+                parentId={selectedLocations.zone}
+                selectedValue={selectedLocations.woreda}
+                onSelect={onLocationSelect}
+                disabled={!selectedLocations.zone}
+                required={newUser.role === 'field_officer'}
+              />
+            </div>
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+              gap: '16px',
+              marginTop: '12px'
+            }}>
+              <LocationSelect
+                level="kebele"
+                parentId={selectedLocations.woreda}
+                selectedValue={selectedLocations.kebele}
+                onSelect={onLocationSelect}
+                disabled={!selectedLocations.woreda}
+              />
+              <LocationSelect
+                level="community"
+                parentId={selectedLocations.kebele}
+                selectedValue={selectedLocations.community}
+                onSelect={onLocationSelect}
+                disabled={!selectedLocations.kebele}
+              />
+            </div>
+          </div>
+
+          {/* ===== SUPERVISOR (filtered by woreda) ===== */}
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+            gap: '16px',
+            marginTop: '16px'
+          }}>
+            <div style={{display: 'flex', flexDirection: 'column', gap: '4px'}}>
+              <label style={{fontSize: '13px', fontWeight: '500', color: '#374151'}}>{userT('userManagement.supervisor')}</label>
+              <select 
+                name="supervisorId"
+                value={newUser.supervisorId || ''} 
+                onChange={handleChange}
+                disabled={!selectedLocations.woreda || loadingSupervisors}
+                style={{
+                  padding: '8px 12px',
+                  border: '1px solid #d1d5db',
+                  borderRadius: '6px',
+                  fontSize: '14px',
+                  background: !selectedLocations.woreda ? '#f3f4f6' : 'white'
+                }}
+              >
+                <option value="">{loadingSupervisors ? 'Loading...' : 'Select Supervisor (optional)'}</option>
+                {woredaSupervisors.map((sup) => (
+                  <option key={sup.id} value={sup.id}>
+                    {sup.name} ({sup.employeeId})
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Assigned Sites (for field officers) */}
+            {newUser.role === 'field_officer' && (
               <div style={{display: 'flex', flexDirection: 'column', gap: '4px'}}>
                 <label style={{fontSize: '13px', fontWeight: '500', color: '#374151'}}>{userT('userManagement.assignedSites')}</label>
                 <input 
                   type="text" 
                   name="assignedSites"
-                  value={localNewUser.assignedSites} 
+                  value={newUser.assignedSites || ''} 
                   onChange={handleChange}
                   placeholder={userT('userManagement.sitePlaceholder')}
                   style={{padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '14px'}}
                 />
               </div>
-            </div>
-          )}
+            )}
+          </div>
 
           <div style={{marginTop: '20px', display: 'flex', gap: '12px'}}>
             <button 
@@ -623,7 +528,7 @@ function UserManagement({
                   </td>
                   <td style={{padding: '12px 16px'}}>
                     <button 
-                      onClick={() => handleToggleStatus(u.id)}
+                      onClick={() => toggleUserStatus(u.id)}
                       style={{
                         background: u.status === 'active' ? '#dc2626' : '#0b7e4b',
                         color: 'white',
@@ -641,7 +546,7 @@ function UserManagement({
                       {u.status === 'active' ? userT('userManagement.deactivate') : userT('userManagement.activate')}
                     </button>
                     <button 
-                      onClick={() => handleDeleteUser(u.id)}
+                      onClick={() => deleteUser(u.id)}
                       style={{
                         background: '#dc2626',
                         color: 'white',

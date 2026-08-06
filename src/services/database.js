@@ -1,5 +1,5 @@
 // services/database.js – FULL WITH VERIFICATION AND SUPERVISOR REPORTS SYNC
-// FIX: Added verification to sync queue processing and fixed verification_history schema
+// FIX: Schema version 4 – verification_history has 'synced' index
 
 import Dexie from 'dexie';
 import { SAMPLE_USERS } from '../utils/constants';
@@ -8,12 +8,12 @@ import { uid, getToday } from '../utils/helpers';
 const API_URL = 'http://localhost:5000/api';
 
 // ============================================================
-// Create Dexie database with corrected schema
+// Create Dexie database with corrected schema (version 4)
 // ============================================================
 const db = new Dexie('FieldSyncDB');
 
-// Version 3 – with verification_history using string `id` as primary key
-db.version(3).stores({
+// Version 4 – verification_history now includes 'synced' index
+db.version(4).stores({
   users: 'id, employeeId, email, role, region, status, pin',
   reports: 'id, reportId, employeeId, region, reportDate, synced',
   attendance: 'id, employeeId, date, status, region, synced',
@@ -30,7 +30,7 @@ db.version(3).stores({
   permissions: 'id, employeeId, status, startDate, endDate, synced',
   gps_locations: 'id, employeeId, date, timestamp, synced, latitude, longitude',
   check_ins: 'id, employeeId, date, type, checkInId, synced, timestamp',
-  // FIX: verification_history now uses string `id` as primary key and includes `synced`
+  // FIX: verification_history now includes 'synced' as an index
   verification_history: 'id, officerId, timestamp, questionId, success, synced',
   kiosk_sessions: 'id, officerId, startTime, endTime, status, synced'
 });
@@ -250,6 +250,7 @@ export const clearStuckSyncItems = async () => {
         const store = db[storeName];
         if (!store) continue;
         
+        // This now works because 'synced' is indexed on verification_history
         const items = await store
           .where('synced')
           .equals('syncing')
@@ -336,7 +337,7 @@ export const processSyncQueue = async (isOnline) => {
         'screen_time': 'screen_time',
         'screen_time_update': 'screen_time',
         'audit': 'audit',
-        'verification': 'verification_history',   // <-- verification sync
+        'verification': 'verification_history',
         'gps_location': 'gps_locations',
         'check_in': 'check_ins',
         'check_out': 'check_ins',
@@ -699,7 +700,7 @@ export const pullVerificationFromServer = async () => {
 
     for (const record of serverRecords) {
       const localRecord = {
-        id: record.id,                      // string ID from server
+        id: record.id,
         officerId: record.officer_id,
         officerName: record.officer_name,
         question: record.question,
