@@ -43,13 +43,15 @@ router.post('/', async (req, res) => {
         const result = await pool.query(
             `INSERT INTO screen_time (
                 id, employee_id, employee_name, date, login_time, logout_time,
-                total_screen_time, screen_time_limit, trust_score, is_logged_in,
+                total_screen_time, idle_time, session_start, screen_time_limit, trust_score, is_logged_in,
                 verified, verified_by, created_at, updated_at
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
             ON CONFLICT (id) DO UPDATE SET
                 login_time = EXCLUDED.login_time,
                 logout_time = EXCLUDED.logout_time,
                 total_screen_time = EXCLUDED.total_screen_time,
+                idle_time = EXCLUDED.idle_time,
+                session_start = EXCLUDED.session_start,
                 is_logged_in = EXCLUDED.is_logged_in,
                 trust_score = EXCLUDED.trust_score,
                 updated_at = CURRENT_TIMESTAMP
@@ -58,6 +60,8 @@ router.post('/', async (req, res) => {
                 data.id, data.employeeId, data.employeeName, data.date,
                 data.loginTime, data.logoutTime,
                 data.totalScreenTime || 0,
+                data.idleTime || 0,
+                data.sessionStart || null,
                 data.screenTimeLimit || 28800,
                 data.trustScore || 0,
                 data.isLoggedIn || false,

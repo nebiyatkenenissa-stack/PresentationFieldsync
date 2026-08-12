@@ -56,4 +56,17 @@ router.delete('/', async (req, res) => {
     }
 });
 
+// DELETE a single audit log by id (manager only)
+router.delete('/:id', async (req, res) => {
+    try {
+        const result = await pool.query('DELETE FROM audit_logs WHERE id = $1 RETURNING id', [req.params.id]);
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: 'Audit log not found' });
+        }
+        res.json({ message: 'Audit log deleted' });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
 module.exports = router;

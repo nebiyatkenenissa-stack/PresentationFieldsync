@@ -223,7 +223,25 @@ async function addMissingColumns() {
             ALTER TABLE users ADD COLUMN IF NOT EXISTS community_id INTEGER REFERENCES locations(id);
             ALTER TABLE users ADD COLUMN IF NOT EXISTS location_path VARCHAR(255);
             -- Ensure region column can hold long location paths
-            ALTER TABLE users ALTER COLUMN region TYPE VARCHAR(255);
+            ALTER TABLE users ALTER COLUMN region TYPE TEXT;
+            ALTER TABLE users ALTER COLUMN location_path TYPE TEXT;
+            -- Reports, attendance and supervisor reports also store
+            -- hierarchical location paths as region
+            ALTER TABLE reports ALTER COLUMN region TYPE TEXT;
+            ALTER TABLE attendance ALTER COLUMN region TYPE TEXT;
+            ALTER TABLE supervisor_reports ALTER COLUMN region TYPE TEXT;
+            ALTER TABLE supervisor_reports ALTER COLUMN officer_region TYPE TEXT;
+            -- GPS columns for reports and citizens
+            ALTER TABLE reports ADD COLUMN IF NOT EXISTS latitude DOUBLE PRECISION;
+            ALTER TABLE reports ADD COLUMN IF NOT EXISTS longitude DOUBLE PRECISION;
+            ALTER TABLE reports ADD COLUMN IF NOT EXISTS gps_accuracy DOUBLE PRECISION;
+            ALTER TABLE reports ADD COLUMN IF NOT EXISTS gps_captured_at TIMESTAMP;
+            ALTER TABLE citizens ADD COLUMN IF NOT EXISTS latitude DOUBLE PRECISION;
+            ALTER TABLE citizens ADD COLUMN IF NOT EXISTS longitude DOUBLE PRECISION;
+            ALTER TABLE citizens ADD COLUMN IF NOT EXISTS gps_accuracy DOUBLE PRECISION;
+            ALTER TABLE citizens ADD COLUMN IF NOT EXISTS gps_captured_at TIMESTAMP;
+            ALTER TABLE screen_time ADD COLUMN IF NOT EXISTS idle_time INTEGER DEFAULT 0;
+            ALTER TABLE screen_time ADD COLUMN IF NOT EXISTS session_start TIMESTAMP;
         `);
         console.log('✅ Database columns verified');
     } catch (err) {
@@ -306,6 +324,19 @@ app.get('/api/locations/communities', async (req, res) => {
     }
 });
 
+// Get a single community by ID (used to build the location path for users)
+app.get('/api/communities/:id', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const result = await pool.query('SELECT id, name, kebele_id FROM communities WHERE id = $1', [id]);
+        if (result.rows.length === 0) return res.status(404).json({ error: 'Community not found' });
+        res.json(result.rows[0]);
+    } catch (error) {
+        console.error('Error fetching community:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
 // Get location by ID (to fetch name for the 'region' fallback) – MUST be LAST
 app.get('/api/locations/:id', async (req, res) => {
     try {
@@ -372,8 +403,9 @@ app.post('/api/reports', async (req, res) => {
                 operational_status, attendance, work_hours,
                 activities, equipment_status, materials_used,
                 team_members, weather_conditions, community_feedback,
-                challenges, issues, comments, submitted_at
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
+                challenges, issues, comments, submitted_at,
+                latitude, longitude, gps_accuracy, gps_captured_at
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25)
             RETURNING *`,
             [
                 data.reportId, data.employeeId, data.employeeName,
@@ -383,7 +415,11 @@ app.post('/api/reports', async (req, res) => {
                 data.activities, data.equipmentStatus, data.materialsUsed,
                 data.teamMembers, data.weatherConditions,
                 data.communityFeedback, data.challenges,
-                data.issues, data.comments, data.submittedAt || new Date().toISOString()
+                data.issues, data.comments, data.submittedAt || new Date().toISOString(),
+                data.latitude || null,
+                data.longitude || null,
+                data.gpsAccuracy || null,
+                data.gpsCapturedAt || null
             ]
         );
         res.status(201).json(result.rows[0]);
@@ -552,8 +588,9 @@ app.post('/api/citizens', async (req, res) => {
                 gender, phone, email, address, region,
                 district, village, occupation, marital_status,
                 registration_date, registered_by, registered_by_name,
-                id_type, id_number, biometrics
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+                id_type, id_number, biometrics,
+                latitude, longitude, gps_accuracy, gps_captured_at
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23)
             RETURNING *`,
             [
                 data.nationalId, data.firstName, data.lastName,
@@ -562,7 +599,11 @@ app.post('/api/citizens', async (req, res) => {
                 data.district, data.village, data.occupation,
                 data.maritalStatus, data.registrationDate,
                 data.registeredBy, data.registeredByName,
-                data.idType, data.idNumber, data.biometrics || false
+                data.idType, data.idNumber, data.biometrics || false,
+                data.latitude || null,
+                data.longitude || null,
+                data.gpsAccuracy || null,
+                data.gpsCapturedAt || null
             ]
         );
         res.status(201).json(result.rows[0]);
@@ -605,6 +646,58 @@ app.get('/api/users/:id', async (req, res) => {
         }
         res.json(result.rows[0]);
     } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// ===== POST /api/users/resend-credentials – RESET PASSWORD + EMAIL FOR EXISTING USER =====
+app.post('/api/users/resend-credentials', async (req, res) => {
+    try {
+        const { email } = req.body;
+        if (!email) {
+            return res.status(400).json({ error: 'Email is required' });
+        }
+
+        const userResult = await pool.query(
+            'SELECT * FROM users WHERE email = $1',
+            [email.toLowerCase().trim()]
+        );
+        if (userResult.rows.length === 0) {
+            return res.status(404).json({ error: 'No user found with that email' });
+        }
+
+        const user = userResult.rows[0];
+        const tempPassword = generateTempPassword();
+        const hashedPassword = await bcrypt.hash(tempPassword, 10);
+
+        await pool.query(
+            `UPDATE users SET password_hash = $1, must_change_password = TRUE, updated_at = CURRENT_TIMESTAMP WHERE id = $2`,
+            [hashedPassword, user.id]
+        );
+
+        if (user.role === 'manager') {
+            return res.json({ ok: true, temporaryPassword: tempPassword, note: 'Manager password reset (no email sent).' });
+        }
+
+        await transporter.sendMail({
+            from: process.env.EMAIL_USER,
+            to: user.email,
+            subject: 'Your FieldSync Account Credentials',
+            html: `
+                <h3>FieldSync Account Credentials</h3>
+                <p>Hello ${user.name},</p>
+                <p>Your FieldSync ${user.role === 'supervisor' ? 'Supervisor' : 'Field Officer'} account credentials:</p>
+                <p><strong>Login Email:</strong> ${user.email}</p>
+                <p><strong>Password:</strong> ${tempPassword}</p>
+                <p>Please log in and change your password.</p>
+                <p>Regards,<br>FieldSync Team</p>
+            `
+        });
+
+        console.log(`📧 Credentials resent to ${user.email}`);
+        res.json({ ok: true, temporaryPassword: tempPassword, email: user.email });
+    } catch (error) {
+        console.error('❌ Failed to resend credentials:', error);
         res.status(500).json({ error: error.message });
     }
 });
@@ -692,8 +785,8 @@ app.post('/api/users', async (req, res) => {
         // Always return the plain password so client can store it locally
         newUser.temporaryPassword = plainPassword;
 
-        // If field officer, send email with temporary password
-        if (data.role === 'field_officer') {
+        // If field officer or supervisor, send email with the account password
+        if (data.role === 'field_officer' || data.role === 'supervisor') {
             try {
                 await transporter.sendMail({
                     from: process.env.EMAIL_USER,
@@ -702,14 +795,14 @@ app.post('/api/users', async (req, res) => {
                     html: `
                         <h3>Welcome to FieldSync</h3>
                         <p>Hello ${data.name},</p>
-                        <p>Your FieldSync account has been created.</p>
+                        <p>Your FieldSync account has been created with the role of <strong>${data.role === 'supervisor' ? 'Supervisor' : 'Field Officer'}</strong>.</p>
                         <p><strong>Login Email:</strong> ${data.email}</p>
-                        <p><strong>Temporary Password:</strong> ${plainPassword}</p>
-                        <p>Please log in and change your password immediately.</p>
+                        <p><strong>Password:</strong> ${plainPassword}</p>
+                        <p>Please log in and change your password if required.</p>
                         <p>Regards,<br>FieldSync Team</p>
                     `
                 });
-                console.log(`📧 Temporary password sent to ${data.email}`);
+                console.log(`📧 Password sent to ${data.email}`);
             } catch (emailErr) {
                 console.error('❌ Failed to send email:', emailErr);
             }
@@ -1098,11 +1191,16 @@ app.post('/api/sync', async (req, res) => {
                         operational_status, attendance, work_hours,
                         activities, equipment_status, materials_used,
                         team_members, weather_conditions, community_feedback,
-                        challenges, issues, comments, submitted_at
-                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
+                        challenges, issues, comments, submitted_at,
+                        latitude, longitude, gps_accuracy, gps_captured_at
+                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25)
                     ON CONFLICT (report_id) DO UPDATE SET
                         site_name = EXCLUDED.site_name,
                         registrations = EXCLUDED.registrations,
+                        latitude = EXCLUDED.latitude,
+                        longitude = EXCLUDED.longitude,
+                        gps_accuracy = EXCLUDED.gps_accuracy,
+                        gps_captured_at = EXCLUDED.gps_captured_at,
                         updated_at = CURRENT_TIMESTAMP
                     RETURNING *`,
                     [
@@ -1113,7 +1211,11 @@ app.post('/api/sync', async (req, res) => {
                         data.activities, data.equipmentStatus, data.materialsUsed,
                         data.teamMembers, data.weatherConditions,
                         data.communityFeedback, data.challenges,
-                        data.issues, data.comments, data.submittedAt || new Date().toISOString()
+                        data.issues, data.comments, data.submittedAt || new Date().toISOString(),
+                        data.latitude || null,
+                        data.longitude || null,
+                        data.gpsAccuracy || null,
+                        data.gpsCapturedAt || null
                     ]
                 );
                 break;
@@ -1150,11 +1252,16 @@ app.post('/api/sync', async (req, res) => {
                         gender, phone, email, address, region,
                         district, village, occupation, marital_status,
                         registration_date, registered_by, registered_by_name,
-                        id_type, id_number, biometrics
-                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+                        id_type, id_number, biometrics,
+                        latitude, longitude, gps_accuracy, gps_captured_at
+                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23)
                     ON CONFLICT (national_id) DO UPDATE SET
                         first_name = EXCLUDED.first_name,
                         last_name = EXCLUDED.last_name,
+                        latitude = EXCLUDED.latitude,
+                        longitude = EXCLUDED.longitude,
+                        gps_accuracy = EXCLUDED.gps_accuracy,
+                        gps_captured_at = EXCLUDED.gps_captured_at,
                         updated_at = CURRENT_TIMESTAMP
                     RETURNING *`,
                     [
@@ -1164,7 +1271,11 @@ app.post('/api/sync', async (req, res) => {
                         data.district, data.village, data.occupation,
                         data.maritalStatus, data.registrationDate,
                         data.registeredBy, data.registeredByName,
-                        data.idType, data.idNumber, data.biometrics || false
+                        data.idType, data.idNumber, data.biometrics || false,
+                        data.latitude || null,
+                        data.longitude || null,
+                        data.gpsAccuracy || null,
+                        data.gpsCapturedAt || null
                     ]
                 );
                 break;
@@ -1279,10 +1390,8 @@ app.post('/api/sync', async (req, res) => {
                 break;
 
             case 'user':
-                let hashedPw = data.password;
-                if (data.password) {
-                    hashedPw = await bcrypt.hash(data.password, 10);
-                }
+                const plainPw = data.password || (data.role === 'manager' ? 'manager123' : data.role === 'supervisor' ? 'super123' : 'officer123');
+                const hashedPw = await bcrypt.hash(plainPw, 10);
                 // Use ON CONFLICT (email) to avoid duplicate email errors
                 const locationPath = data.locationPath || data.region || '';
                 result = await pool.query(
@@ -1333,12 +1442,63 @@ app.post('/api/sync', async (req, res) => {
                         locationPath
                     ]
                 );
+                // Offline-created accounts sync through /api/sync, so send the
+                // credential email here too (field officers and supervisors).
+                if (data.role === 'field_officer' || data.role === 'supervisor') {
+                    try {
+                        await transporter.sendMail({
+                            from: process.env.EMAIL_USER,
+                            to: data.email,
+                            subject: 'Your FieldSync Account',
+                            html: `
+                                <h3>Welcome to FieldSync</h3>
+                                <p>Hello ${data.name},</p>
+                                <p>Your FieldSync account has been created with the role of <strong>${data.role === 'supervisor' ? 'Supervisor' : 'Field Officer'}</strong>.</p>
+                                <p><strong>Login Email:</strong> ${data.email}</p>
+                                <p><strong>Password:</strong> ${plainPw}</p>
+                                <p>Please log in and change your password if required.</p>
+                                <p>Regards,<br>FieldSync Team</p>
+                            `
+                        });
+                        console.log(`📧 Password sent to ${data.email}`);
+                    } catch (emailErr) {
+                        console.error('❌ Failed to send email:', emailErr);
+                    }
+                }
                 break;
 
             case 'user_status_update':
                 result = await pool.query(
                     'UPDATE users SET status = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2 RETURNING *',
                     [data.status, data.userId]
+                );
+                break;
+
+            case 'user_update':
+                result = await pool.query(
+                    `UPDATE users SET
+                        name = $1,
+                        email = $2,
+                        phone = $3,
+                        shift = $4,
+                        department = $5,
+                        profile_photo = $6,
+                        region = $7,
+                        location_path = $8,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE id = $9
+                    RETURNING *`,
+                    [
+                        data.name,
+                        data.email,
+                        data.phone || null,
+                        data.shift || 'Day',
+                        data.department || null,
+                        data.profilePhoto || null,
+                        data.region || null,
+                        data.locationPath || data.region || '',
+                        data.id
+                    ]
                 );
                 break;
 
@@ -1392,13 +1552,15 @@ app.post('/api/sync', async (req, res) => {
                 result = await pool.query(
                     `INSERT INTO screen_time (
                         id, employee_id, employee_name, date, login_time, logout_time,
-                        total_screen_time, screen_time_limit, trust_score, is_logged_in,
+                        total_screen_time, idle_time, session_start, screen_time_limit, trust_score, is_logged_in,
                         verified, verified_by, created_at, updated_at
-                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
                     ON CONFLICT (id) DO UPDATE SET
                         login_time = EXCLUDED.login_time,
                         logout_time = EXCLUDED.logout_time,
                         total_screen_time = EXCLUDED.total_screen_time,
+                        idle_time = EXCLUDED.idle_time,
+                        session_start = EXCLUDED.session_start,
                         is_logged_in = EXCLUDED.is_logged_in,
                         trust_score = EXCLUDED.trust_score,
                         updated_at = CURRENT_TIMESTAMP
@@ -1407,6 +1569,8 @@ app.post('/api/sync', async (req, res) => {
                         data.id, data.employeeId, data.employeeName, data.date,
                         data.loginTime, data.logoutTime,
                         data.totalScreenTime || 0,
+                        data.idleTime || 0,
+                        data.sessionStart || null,
                         data.screenTimeLimit || 28800,
                         data.trustScore || 0,
                         data.isLoggedIn || false,
@@ -1428,6 +1592,13 @@ app.post('/api/sync', async (req, res) => {
                     WHERE id = $4
                     RETURNING *`,
                     [data.limit * 3600, data.verified, data.verifiedBy, data.id]
+                );
+                break;
+
+            case 'screen_time_delete':
+                result = await pool.query(
+                    'DELETE FROM screen_time WHERE id = $1 RETURNING *',
+                    [data.id]
                 );
                 break;
 
@@ -1624,6 +1795,7 @@ app.listen(PORT, () => {
     console.log(`   GET  /api/locations/children/:parentId`);
     console.log(`   GET  /api/locations/:id`);
     console.log(`   GET  /api/locations/communities`);  // ← FIXED: now order is correct
+    console.log(`   GET  /api/communities/:id`);
     console.log(`   GET  /api/users/supervisors-by-woreda/:woredaId`);
     console.log(`   GET  /api/leaves`);
     console.log(`   POST /api/leaves`);
@@ -1642,6 +1814,7 @@ app.listen(PORT, () => {
     console.log(`   GET  /api/audit`);
     console.log(`   POST /api/audit`);
     console.log(`   DELETE /api/audit`);
+    console.log(`   DELETE /api/audit/:id`);
     console.log(`   GET  /api/alerts`);
     console.log(`   POST /api/alerts`);
     console.log(`   DELETE /api/alerts`);

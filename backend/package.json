@@ -1,23 +1,36 @@
 {
-  "name": "backend",
+  "name": "fieldsync-backend",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "description": "FieldSync backend API (TypeScript, MVC)",
+  "main": "dist/index.js",
+  "type": "module",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsx watch src/index.ts",
+    "start": "node dist/index.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "type": "commonjs",
   "dependencies": {
+    "bcrypt": "^6.0.0",
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
-    "express": "^5.2.1"
+    "express": "^5.2.1",
+    "multer": "^2.0.0",
+    "nodemailer": "^9.0.3",
+    "pg": "^8.22.0"
   },
   "devDependencies": {
-    "@types/express": "^5.0.6",
-    "@types/node": "^26.1.0",
-    "typescript": "^6.0.3"
+    "@types/bcrypt": "^5.0.2",
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.0",
+    "@types/multer": "^1.4.12",
+    "@types/node": "^22.0.0",
+    "@types/nodemailer": "^6.4.15",
+    "@types/pg": "^8.11.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0"
   }
 }

@@ -1,0 +1,297 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+  }
+
+  :root {
+    --fs-bg: #f4f6fb;
+    --fs-surface: #ffffff;
+    --fs-surface-2: #f8fafc;
+    --fs-ink: #14213d;
+    --fs-muted: #5b6b7c;
+    --fs-border: #e2e8f0;
+    --fs-navy: #1e3a5f;
+    --fs-navy-dark: #14213d;
+    --fs-green: #0b7e4b;
+    --fs-green-dark: #065f37;
+    --fs-gold: #c9a227;
+    --fs-accent: #4fc3f7;
+    --fs-header-bg: #ffffff;
+    --fs-sidebar-bg: #1e3a5f;
+    --fs-shadow: rgba(20, 33, 61, 0.12);
+    --fs-input-bg: #fafbfc;
+  }
+
+  [data-theme='dark'] {
+    --fs-bg: #0f172a;
+    --fs-surface: #1a2440;
+    --fs-surface-2: #16203a;
+    --fs-ink: #eef2f8;
+    --fs-muted: #9fb0c6;
+    --fs-border: #2b3856;
+    --fs-navy: #2b4a77;
+    --fs-navy-dark: #0f172a;
+    --fs-green: #16a35f;
+    --fs-green-dark: #0b7e4b;
+    --fs-gold: #e2b64e;
+    --fs-accent: #5cc7fb;
+    --fs-header-bg: #16203a;
+    --fs-sidebar-bg: #101a30;
+    --fs-shadow: rgba(0, 0, 0, 0.45);
+    --fs-input-bg: #1a2440;
+  }
+
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply bg-gray-50 text-gray-900 antialiased;
+    background: var(--fs-bg);
+    color: var(--fs-ink);
+    transition: background 0.3s ease, color 0.3s ease;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  }
+}
+
+/* ===== DARK MODE OVERRIDES FOR THE APP SHELL ===== */
+[data-theme='dark'] .main-header {
+  background: var(--fs-header-bg) !important;
+  border-bottom-color: var(--fs-border) !important;
+}
+[data-theme='dark'] .main-content {
+  background: var(--fs-bg);
+}
+[data-theme='dark'] .card {
+  background: var(--fs-surface);
+  color: var(--fs-ink);
+  border-color: var(--fs-border);
+  box-shadow: 0 6px 24px var(--fs-shadow);
+}
+[data-theme='dark'] .sidebar {
+  background: var(--fs-sidebar-bg);
+}
+[data-theme='dark'] input,
+[data-theme='dark'] select,
+[data-theme='dark'] textarea {
+  background: var(--fs-input-bg) !important;
+  color: var(--fs-ink) !important;
+  border-color: var(--fs-border) !important;
+}
+
+/* ===== DARK MODE: APP-WIDE OVERRIDES FOR ALL PAGES =====
+   Feature pages mostly use inline styles (white cards, gray text).
+   These scoped overrides let dark mode apply across every page
+   without touching colored status badges or charts. */
+[data-theme='dark'] .main-content,
+[data-theme='dark'] .main-content * {
+  scrollbar-color: var(--fs-border) var(--fs-surface);
+}
+[data-theme='dark'] .main-content h1,
+[data-theme='dark'] .main-content h2,
+[data-theme='dark'] .main-content h3,
+[data-theme='dark'] .main-content h4,
+[data-theme='dark'] .main-content .page-title {
+  color: var(--fs-ink) !important;
+}
+[data-theme='dark'] .main-content p,
+[data-theme='dark'] .main-content label,
+[data-theme='dark'] .main-content li,
+[data-theme='dark'] .main-content th,
+[data-theme='dark'] .main-content td,
+[data-theme='dark'] .main-content span.field-error {
+  color: var(--fs-ink) !important;
+}
+[data-theme='dark'] .main-content small {
+  color: var(--fs-muted) !important;
+}
+[data-theme='dark'] .main-content table {
+  border-color: var(--fs-border) !important;
+}
+[data-theme='dark'] .main-content tr,
+[data-theme='dark'] .main-content td,
+[data-theme='dark'] .main-content th {
+  background: transparent !important;
+  border-color: var(--fs-border) !important;
+}
+[data-theme='dark'] .main-content thead,
+[data-theme='dark'] .main-content thead th {
+  background: var(--fs-surface-2) !important;
+  color: var(--fs-ink) !important;
+}
+[data-theme='dark'] .main-content thead tr {
+  background: var(--fs-surface-2) !important;
+}
+/* White card surfaces set via inline styles */
+[data-theme='dark'] .main-content [style*="background: white"],
+[data-theme='dark'] .main-content [style*="background-color: white"],
+[data-theme='dark'] .main-content [style*="background:#fff"],
+[data-theme='dark'] .main-content [style*="background: #fff"],
+[data-theme='dark'] .main-content [style*="background-color:#fff"],
+[data-theme='dark'] .main-content [style*="background-color: #fff"],
+[data-theme='dark'] .main-content [style*="background: #ffffff"],
+[data-theme='dark'] .main-content [style*="background-color: #ffffff"],
+[data-theme='dark'] .main-content [style*="background: rgb(255, 255, 255)"] {
+  background-color: var(--fs-surface) !important;
+}
+[data-theme='dark'] .main-content [style*="background: #fafafa"],
+[data-theme='dark'] .main-content [style*="background: #f9fafb"],
+[data-theme='dark'] .main-content [style*="background: #f3f4f6"],
+[data-theme='dark'] .main-content [style*="background: #f8fafc"],
+[data-theme='dark'] .main-content [style*="background: #f1f5f9"],
+[data-theme='dark'] .main-content [style*="background: #f5f5f5"],
+[data-theme='dark'] .main-content [style*="background: #f8f9fa"],
+[data-theme='dark'] .main-content [style*="background: #fafbfc"],
+[data-theme='dark'] .main-content [style*="background: #e8edf5"],
+[data-theme='dark'] .main-content [style*="background: #f1f1f1"] {
+  background-color: var(--fs-surface-2) !important;
+}
+/* Ink / muted text set via inline styles */
+[data-theme='dark'] .main-content [style*="color: #111827"],
+[data-theme='dark'] .main-content [style*="color: #1f2937"],
+[data-theme='dark'] .main-content [style*="color: #374151"],
+[data-theme='dark'] .main-content [style*="color: #1e293b"],
+[data-theme='dark'] .main-content [style*="color: #1a202c"],
+[data-theme='dark'] .main-content [style*="color: #1a1a2e"],
+[data-theme='dark'] .main-content [style*="color: #0f172a"],
+[data-theme='dark'] .main-content [style*="color: #4a5568"],
+[data-theme='dark'] .main-content [style*="color: #475569"] {
+  color: var(--fs-ink) !important;
+}
+[data-theme='dark'] .main-content [style*="color: #6b7280"],
+[data-theme='dark'] .main-content [style*="color: #4b5563"],
+[data-theme='dark'] .main-content [style*="color: #9ca3af"],
+[data-theme='dark'] .main-content [style*="color: #64748b"],
+[data-theme='dark'] .main-content [style*="color: #6b7f94"],
+[data-theme='dark'] .main-content [style*="color: #94a3b8"] {
+  color: var(--fs-muted) !important;
+}
+/* Light borders set via inline styles */
+[data-theme='dark'] .main-content [style*="border: 1px solid #e5e7eb"],
+[data-theme='dark'] .main-content [style*="border-color: #e5e7eb"],
+[data-theme='dark'] .main-content [style*="border: 1px solid #e2e8f0"],
+[data-theme='dark'] .main-content [style*="border-color: #e2e8f0"],
+[data-theme='dark'] .main-content [style*="border-bottom: 1px solid #e5e7eb"],
+[data-theme='dark'] .main-content [style*="border-bottom: 1px solid #e2e8f0"] {
+  border-color: var(--fs-border) !important;
+}
+/* Tailwind utility classes used across pages */
+[data-theme='dark'] .main-content .bg-white,
+[data-theme='dark'] .main-content .bg-gray-50,
+[data-theme='dark'] .main-content .bg-gray-100 {
+  background-color: var(--fs-surface) !important;
+}
+[data-theme='dark'] .main-content .text-gray-500,
+[data-theme='dark'] .main-content .text-gray-600,
+[data-theme='dark'] .main-content .text-gray-700,
+[data-theme='dark'] .main-content .text-gray-900,
+[data-theme='dark'] .main-content .text-gray-800 {
+  color: var(--fs-ink) !important;
+}
+[data-theme='dark'] .main-content .border-gray-200,
+[data-theme='dark'] .main-content .border-gray-300,
+[data-theme='dark'] .main-content .divide-gray-200 > * {
+  border-color: var(--fs-border) !important;
+}
+
+/* ===== DARK MODE: FEATURE PAGE CARD CLASSES =====
+   Pages use CSS classes (.form-card, .table-card, ...) with white
+   backgrounds. These overrides flip them so every page is dark. */
+[data-theme='dark'] .main-content .form-card,
+[data-theme='dark'] .main-content .table-card,
+[data-theme='dark'] .main-content .stat-card,
+[data-theme='dark'] .main-content .quick-stat,
+[data-theme='dark'] .main-content .top-performers,
+[data-theme='dark'] .main-content .trend-chart-card,
+[data-theme='dark'] .main-content .attendance-status-card,
+[data-theme='dark'] .main-content .modal-content,
+[data-theme='dark'] .main-content .sync-log-modal {
+  background: var(--fs-surface) !important;
+  color: var(--fs-ink) !important;
+  border-color: var(--fs-border) !important;
+  box-shadow: 0 1px 3px var(--fs-shadow) !important;
+}
+[data-theme='dark'] .main-content .stat-value,
+[data-theme='dark'] .main-content .quick-stat strong,
+[data-theme='dark'] .main-content .attendance-status-card h3 {
+  color: var(--fs-ink) !important;
+}
+[data-theme='dark'] .main-content .stat-label,
+[data-theme='dark'] .main-content .quick-stat span,
+[data-theme='dark'] .main-content .form-header p {
+  color: var(--fs-muted) !important;
+}
+[data-theme='dark'] .main-content .stat-icon {
+  background: var(--fs-surface-2) !important;
+}
+
+/* ===== LANGUAGE SELECTOR ===== */
+.language-selector {
+  display: inline-flex;
+  align-items: center;
+}
+.language-select {
+  padding: 7px 10px;
+  border-radius: 999px;
+  border: 1px solid #e2e8f0;
+  background: #f1f5f9;
+  color: #14213d;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  outline: none;
+  transition: all 0.25s ease;
+}
+.language-select:hover {
+  border-color: #4fc3f7;
+}
+[data-theme='dark'] .language-select {
+  background: #2b3856;
+  border-color: #3b4a6b;
+  color: #eef2f8;
+}
+[data-theme='dark'] .language-select option {
+  background: #16203a;
+  color: #eef2f8;
+}
+
+/* ===== LOGIN PAGE DARK MODE ===== */
+[data-theme='dark'] .login-page-full {
+  background: var(--fs-bg);
+}
+[data-theme='dark'] .login-card-full {
+  background: var(--fs-surface);
+  border-color: var(--fs-border);
+  box-shadow: 0 8px 40px var(--fs-shadow);
+}
+[data-theme='dark'] .login-card-full h2,
+[data-theme='dark'] .login-card-full label {
+  color: var(--fs-ink);
+}
+[data-theme='dark'] .login-subtitle-full {
+  color: var(--fs-muted);
+}
+
+@layer components {
+  .btn-primary {
+    @apply bg-blue-600 text-white px-6 py-3 rounded-xl hover:bg-blue-700 transition-all duration-200 font-semibold;
+  }
+
+  .btn-secondary {
+    @apply bg-green-600 text-white px-6 py-3 rounded-xl hover:bg-green-700 transition-all duration-200 font-semibold;
+  }
+
+  .card {
+    @apply bg-white rounded-2xl shadow-lg p-6;
+  }
+
+  .input-field {
+    @apply w-full px-4 py-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200;
+  }
+}
