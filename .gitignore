@@ -4,12 +4,8 @@ fieldsync/
 .DS_Store
 *.log
 .env
-.vite/
 
 # Backend
 backend/node_modules/
 backend/dist/
 backend/uploads/
-
-# API
-api/uploads/
