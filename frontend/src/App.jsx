@@ -484,7 +484,30 @@ function AppContent() {
   // ============================================================
   // Session auto-restore DISABLED – always show home page first
   // ============================================================
+  // SESSION: restore on page refresh, but show home on fresh tab open
+  // ============================================================
   useEffect(() => {
+    const isRefresh = sessionStorage.getItem('fieldsync_session_active');
+    if (isRefresh) {
+      const restoreSession = async () => {
+        try {
+          const session = await db.auth.get('session');
+          if (session && session.userId) {
+            const allUsers = await db.users.toArray();
+            const foundUser = allUsers.find(u => u.id === session.userId && u.status === 'active');
+            if (foundUser) {
+              setUser(foundUser);
+              console.log('🔐 Session restored on refresh for', foundUser.name);
+            } else {
+              await db.auth.clear();
+            }
+          }
+        } catch (error) {
+          console.error('Error restoring session:', error);
+        }
+      };
+      restoreSession();
+    }
     setIsLoading(false);
   }, []);
 
@@ -670,8 +693,7 @@ function AppContent() {
                 }
               }
               finalUsers = mergedUsers;
-              await db.users.clear();
-              await db.users.bulkAdd(finalUsers);
+              await db.users.bulkPut(finalUsers);
               console.log(`✅ Synced ${finalUsers.length} users from API (passwords preserved)`);
             }
           }
@@ -1387,6 +1409,10 @@ function AppContent() {
         if (response.ok && data.success) {
           const serverUser = data.user;
           const localUser = mapServerUser(serverUser, password);
+          const existingLocal = await db.users.get(serverUser.id);
+          if (existingLocal?.profilePhoto && !localUser.profilePhoto) {
+            localUser.profilePhoto = existingLocal.profilePhoto;
+          }
           if (!localUser.employeeId) {
             const existingUser = users.find(u => u.id === localUser.id && String(u.employeeId || '').trim());
             if (existingUser) {
@@ -1405,6 +1431,7 @@ function AppContent() {
           setUser(localUser);
           setActiveTab('dashboard');
           await db.auth.put({ id: 'session', userId: localUser.id });
+          sessionStorage.setItem('fieldsync_session_active', 'true');
           setLoginError('');
           addNotification(localUser.id, '👋 Welcome Back!', `Welcome back ${localUser.name}!`, 'success');
           addAuditLog('LOGIN', { email: localUser.email, name: localUser.name });
@@ -1427,6 +1454,7 @@ function AppContent() {
       setUser(foundUser);
       setActiveTab('dashboard');
       await db.auth.put({ id: 'session', userId: foundUser.id });
+      sessionStorage.setItem('fieldsync_session_active', 'true');
       setLoginError('');
       addNotification(foundUser.id, '👋 Welcome Back!', `Welcome back ${foundUser.name}!`, 'success');
       addAuditLog('LOGIN', { email: foundUser.email, name: foundUser.name });
@@ -1551,6 +1579,7 @@ function AppContent() {
     }
     setUser(null);
     await db.auth.clear();
+    sessionStorage.removeItem('fieldsync_session_active');
     setShowForceChangePassword(false);
     setAuthView('home');
     if (user) {
