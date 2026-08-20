@@ -252,8 +252,13 @@ function UserManagement({
           });
           if (resp.ok) {
             const serverUser = await resp.json();
-            setUsers(prev => prev.map(u => u.id === editingUser.id ? { ...u, ...serverUser } : u));
-            await db.users.update(editingUser.id, serverUser);
+            const mappedUser = {
+              ...editingUser,
+              ...serverUser,
+              profilePhoto: serverUser.profile_photo || editingUser.profilePhoto || null
+            };
+            setUsers(prev => prev.map(u => u.id === editingUser.id ? { ...u, ...mappedUser } : u));
+            await db.users.update(editingUser.id, mappedUser);
             serverSuccess = true;
             console.log('✅ User updated on server');
           } else {

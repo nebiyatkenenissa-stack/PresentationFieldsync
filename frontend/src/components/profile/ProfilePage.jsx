@@ -230,7 +230,12 @@ function ProfilePage({ user, setUser, setUsers }) {
         });
         if (response.ok) {
           const serverUser = await response.json();
-          updatedUser = { ...serverUser, password: user.password };
+          updatedUser = {
+            ...user,
+            ...serverUser,
+            profilePhoto: serverUser.profile_photo || user.profilePhoto || null,
+            password: user.password
+          };
           serverSuccess = true;
           console.log('✅ Profile info updated on server');
         } else {

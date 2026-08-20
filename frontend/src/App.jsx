@@ -749,7 +749,7 @@ function AppContent() {
         const res = await fetchWithTimeout(`${base}/status/online`, {}, 5000);
         if (res.ok) {
           const serverStatuses = await res.json();
-          const mapped = serverStatuses.map((s: any) => ({
+          const mapped = serverStatuses.map((s) => ({
             employeeId: s.employeeId,
             userId: s.employeeId,
             employeeName: s.name,
