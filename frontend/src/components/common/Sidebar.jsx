@@ -54,7 +54,8 @@ function Sidebar({
     // Manager
     if (isManager) {
       items.push(
-        { id: 'users', label: '👥 ' + t('nav.users') },
+        { id: 'team', label: '👥 ' + t('nav.team') },
+        { id: 'users', label: '⚙️ ' + t('nav.users') },
         { id: 'all_reports', label: '📚 ' + t('nav.all_reports') },
         { id: 'permissions', label: '📋 ' + t('nav.permissions') },
         { id: 'citizens', label: '🆔 ' + t('nav.citizens') },

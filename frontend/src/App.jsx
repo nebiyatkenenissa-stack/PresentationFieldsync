@@ -482,34 +482,10 @@ function AppContent() {
   };
 
   // ============================================================
-  // RESTORE SESSION ON APP LOAD (persistent login)
+  // Session auto-restore DISABLED – always show home page first
   // ============================================================
-  // Session is restored so a page refresh does NOT log the user out.
-  // Logout (handleLogout) clears the session in db.auth.
   useEffect(() => {
-    const restoreSession = async () => {
-      try {
-        const session = await db.auth.get('session');
-        if (session && session.userId) {
-          const allUsers = await db.users.toArray();
-          const foundUser = allUsers.find(u => u.id === session.userId && u.status === 'active');
-          if (foundUser) {
-            if (foundUser.must_change_password) {
-              setUser(foundUser);
-              setShowForceChangePassword(true);
-            } else {
-              setUser(foundUser);
-            }
-            console.log('🔐 Session restored for', foundUser.name);
-          } else {
-            await db.auth.clear();
-          }
-        }
-      } catch (error) {
-        console.error('Error restoring session:', error);
-      }
-    };
-    restoreSession();
+    setIsLoading(false);
   }, []);
 
   // ============================================================
@@ -743,6 +719,53 @@ function AppContent() {
   }, []);
 
   // ============================================================
+  // HEARTBEAT - send online status to server every 30s
+  // ============================================================
+  useEffect(() => {
+    if (!user || !user.employeeId) return;
+    const sendHeartbeat = async () => {
+      try {
+        const base = getApiBase();
+        await fetchWithTimeout(`${base}/status/heartbeat`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ employeeId: user.employeeId })
+        }, 5000);
+      } catch (e) { /* silent */ }
+    };
+    sendHeartbeat();
+    const interval = setInterval(sendHeartbeat, 30000);
+    return () => clearInterval(interval);
+  }, [user]);
+
+  // ============================================================
+  // FETCH REAL ONLINE STATUS from server every 15s
+  // ============================================================
+  useEffect(() => {
+    if (!user) return;
+    const fetchOnlineStatus = async () => {
+      try {
+        const base = getApiBase();
+        const res = await fetchWithTimeout(`${base}/status/online`, {}, 5000);
+        if (res.ok) {
+          const serverStatuses = await res.json();
+          const mapped = serverStatuses.map((s: any) => ({
+            employeeId: s.employeeId,
+            userId: s.employeeId,
+            employeeName: s.name,
+            status: s.status,
+            lastActive: s.lastActive
+          }));
+          setLiveStatus(mapped);
+        }
+      } catch (e) { /* silent */ }
+    };
+    fetchOnlineStatus();
+    const interval = setInterval(fetchOnlineStatus, 15000);
+    return () => clearInterval(interval);
+  }, [user]);
+
+  // ============================================================
   // LOCATION HANDLERS
   // ============================================================
   const handleLocationSelect = (level, id, name) => {
@@ -759,6 +782,19 @@ function AppContent() {
   };
 
   const locationId = (loc) => (loc && loc.id !== 'OTHER' ? loc.id : null);
+
+  // Mark offline when browser/tab closes
+  useEffect(() => {
+    if (!user?.employeeId) return;
+    const handleBeforeUnload = () => {
+      try {
+        const base = getApiBase();
+        navigator.sendBeacon(`${base}/status/offline`, new Blob([JSON.stringify({ employeeId: user.employeeId })], { type: 'application/json' }));
+      } catch (e) { /* silent */ }
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [user]);
 
   // Fetch supervisors when woreda changes
   useEffect(() => {
@@ -1499,15 +1535,24 @@ function AppContent() {
   };
 
   const handleLogout = async () => {
-    // Never block logout on network calls – close the screen time session and
-    // write the audit log in the background so the click always responds.
+    // Send offline signal to server before clearing user
+    if (user?.employeeId) {
+      try {
+        const base = getApiBase();
+        await fetchWithTimeout(`${base}/status/offline`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ employeeId: user.employeeId })
+        }, 5000);
+      } catch (e) { /* silent */ }
+    }
     if (isScreenTimeRunning) {
       stopScreenTime().catch((err) => console.error('Screen time stop on logout failed:', err));
     }
     setUser(null);
     await db.auth.clear();
     setShowForceChangePassword(false);
-    setAuthView('login');
+    setAuthView('home');
     if (user) {
       addAuditLog('LOGOUT', { email: user.email, name: user.name }).catch((err) => console.error('Audit log on logout failed:', err));
     }

@@ -21,6 +21,7 @@ import auditRouter from './routes/audit.routes.js';
 import alertRouter from './routes/alert.routes.js';
 import verificationRouter from './routes/verification.routes.js';
 import supervisorReportRouter from './routes/supervisorReport.routes.js';
+import statusRouter from './routes/status.routes.js';
 
 const app = express();
 
@@ -49,6 +50,7 @@ app.use('/api/permissions', permissionRouter);
 app.use('/api/auth', authRouter);
 app.use('/api', authRouter);
 app.use('/api/sync', syncRouter);
+app.use('/api/status', statusRouter);
 
 app.get('/api/test', (_req, res) => {
   res.json({ message: 'API is working!' });
@@ -82,6 +84,14 @@ pool.connect(async (err) => {
       await addMissingColumns();
       await seedEthiopiaLocations();
       await ensureCitizenSchema();
+      // Add online status columns if missing
+      try {
+        await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_active TIMESTAMPTZ DEFAULT NOW()`);
+        await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS online_status VARCHAR(20) DEFAULT 'offline'`);
+        console.log('✅ Online status columns ensured');
+      } catch (e: any) {
+        console.warn('⚠️ Status columns issue:', e.message);
+      }
     } catch (e: any) {
       console.warn('⚠️ Schema init issue:', e.message);
     }
