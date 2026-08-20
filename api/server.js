@@ -1881,4 +1881,63 @@ app.listen(PORT, () => {
     console.log(`   PUT  /api/supervisor-reports/:id`);
     console.log(`   DELETE /api/supervisor-reports/:id`);
     console.log(`   POST /api/sync`);
+
+    // ===== STATUS ENDPOINTS =====
+    console.log(`   POST /api/status/heartbeat`);
+    console.log(`   POST /api/status/offline`);
+    console.log(`   GET  /api/status/online`);
+});
+
+// ============================================================
+// ===== ONLINE STATUS ENDPOINTS =====
+// ============================================================
+app.post('/api/status/heartbeat', async (req, res) => {
+  try {
+    const { employeeId } = req.body;
+    if (!employeeId) return res.status(400).json({ error: 'employeeId required' });
+    await pool.query(
+      `UPDATE users SET last_active = NOW(), online_status = 'online' WHERE employee_id = $1`,
+      [employeeId]
+    );
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Heartbeat error:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+app.post('/api/status/offline', async (req, res) => {
+  try {
+    const { employeeId } = req.body;
+    if (!employeeId) return res.status(400).json({ error: 'employeeId required' });
+    await pool.query(
+      `UPDATE users SET online_status = 'offline', last_active = NOW() WHERE employee_id = $1`,
+      [employeeId]
+    );
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Set offline error:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+app.get('/api/status/online', async (_req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT employee_id, name, online_status, last_active,
+              EXTRACT(EPOCH FROM (NOW() - last_active)) as seconds_ago
+       FROM users WHERE employee_id IS NOT NULL`
+    );
+    const statuses = result.rows.map(row => ({
+      employeeId: row.employee_id,
+      name: row.name,
+      status: row.online_status === 'online' && row.seconds_ago < 120 ? 'online' : 'offline',
+      lastActive: row.last_active,
+      secondsAgo: Math.round(row.seconds_ago || 0)
+    }));
+    res.json(statuses);
+  } catch (error) {
+    console.error('Get online status error:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
 });
