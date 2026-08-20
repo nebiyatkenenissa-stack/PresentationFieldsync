@@ -9,3 +9,7 @@ fieldsync/
 backend/node_modules/
 backend/dist/
 backend/uploads/
+
+# API uploads
+api/uploads/
+api/node_modules/
