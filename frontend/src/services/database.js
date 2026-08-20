@@ -1254,7 +1254,7 @@ export const initializeAllData = async () => {
       userId: o.id,
       employeeId: o.employeeId,
       employeeName: o.name,
-      status: 'online',
+      status: 'offline',
       lastActive: new Date().toISOString(),
       currentTask: '',
       productivityScore: Math.floor(70 + Math.random() * 30),

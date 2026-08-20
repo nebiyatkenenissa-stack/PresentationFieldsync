@@ -697,7 +697,7 @@ function AppContent() {
         setTasks(tasksData);
         setLeaves(leavesData);
         setAlerts(alertsData);
-        setLiveStatus(liveStatusData);
+        setLiveStatus([]);
         setAppNotifications(notificationsData);
         setPermissions(permissionsData);
 
@@ -2899,7 +2899,7 @@ function AppContent() {
             </ErrorBoundary>
 
             <ErrorBoundary>
-              {activeTab === 'team' && (isManager || isSupervisor) && (
+              {activeTab === 'team' && isSupervisor && (
                 <TeamManagement 
                   users={users}
                   user={user}
