@@ -14,6 +14,7 @@ function ReportForm({ form, setForm, handleSubmit, user, isOfficer, isSupervisor
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   const [errors, setErrors] = useState({});
   const [touched, setTouched] = useState({});
+  const [attachments, setAttachments] = useState([]);
   const [location, setLocation] = useState(() => {
     const map = {
       country: user?.country_id,
@@ -120,6 +121,67 @@ function ReportForm({ form, setForm, handleSubmit, user, isOfficer, isSupervisor
     setTouched(prev => ({ ...prev, [name]: true }));
     const error = validateField(name, form[name]);
     setErrors(prev => ({ ...prev, [name]: error }));
+  };
+
+  // ============================================================
+  // FILE / IMAGE ATTACHMENTS
+  // ============================================================
+  const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 MB
+  const MAX_FILES = 5;
+  const ALLOWED_TYPES = [
+    'image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/heic',
+    'application/pdf',
+    'application/msword',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    'application/vnd.ms-excel',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    'text/plain'
+  ];
+
+  const fileToBase64 = (file) => new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+
+  const handleFileSelect = async (e) => {
+    const files = Array.from(e.target.files || []);
+    if (!files.length) return;
+
+    const remaining = MAX_FILES - attachments.length;
+    if (remaining <= 0) {
+      alert(`Maximum ${MAX_FILES} files allowed.`);
+      return;
+    }
+
+    const validFiles = [];
+    for (const file of files.slice(0, remaining)) {
+      if (!ALLOWED_TYPES.includes(file.type)) {
+        alert(`"${file.name}" is not an allowed file type.`);
+        continue;
+      }
+      if (file.size > MAX_FILE_SIZE) {
+        alert(`"${file.name}" exceeds the 10 MB size limit.`);
+        continue;
+      }
+      const base64 = await fileToBase64(file);
+      validFiles.push({
+        id: `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+        name: file.name,
+        type: file.type,
+        size: file.size,
+        data: base64,
+        isImage: file.type.startsWith('image/')
+      });
+    }
+
+    setAttachments(prev => [...prev, ...validFiles]);
+    e.target.value = '';
+  };
+
+  const removeAttachment = (id) => {
+    setAttachments(prev => prev.filter(f => f.id !== id));
   };
 
   // ============================================================
@@ -246,6 +308,7 @@ function ReportForm({ form, setForm, handleSubmit, user, isOfficer, isSupervisor
         longitude: gpsData?.success ? gpsData.longitude : null,
         gpsAccuracy: gpsData?.success ? gpsData.accuracy : null,
         gpsCapturedAt: gpsData?.success ? gpsData.timestamp : null,
+        attachments: attachments.map(f => ({ name: f.name, type: f.type, size: f.size, data: f.data })),
         synced: false,
         syncAttempts: 0,
         syncError: null,
@@ -392,6 +455,7 @@ function ReportForm({ form, setForm, handleSubmit, user, isOfficer, isSupervisor
       });
       setErrors({});
       setTouched({});
+      setAttachments([]);
 
     } catch (error) {
       console.error('Error submitting report:', error);
@@ -941,6 +1005,92 @@ function ReportForm({ form, setForm, handleSubmit, user, isOfficer, isSupervisor
                 </span>
               )}
             </div>
+          </div>
+
+          {/* File / Image Attachments */}
+          <div style={{ marginBottom: '16px' }}>
+            <label style={{ display: 'block', fontWeight: '500', marginBottom: '4px', fontSize: '14px', color: '#374151' }}>
+              📎 Attachments (Images &amp; Files)
+            </label>
+            <div style={{
+              border: '2px dashed #d1d5db',
+              borderRadius: '8px',
+              padding: '20px',
+              textAlign: 'center',
+              background: '#f9fafb',
+              transition: 'border-color 0.2s',
+              cursor: 'pointer'
+            }}
+              onClick={() => document.getElementById('report-file-input').click()}
+              onDragOver={(e) => { e.preventDefault(); e.currentTarget.style.borderColor = '#3b82f6'; }}
+              onDragLeave={(e) => { e.currentTarget.style.borderColor = '#d1d5db'; }}
+              onDrop={(e) => { e.preventDefault(); e.currentTarget.style.borderColor = '#d1d5db'; handleFileSelect({ target: { files: e.dataTransfer.files } }); }}
+            >
+              <div style={{ fontSize: '32px', marginBottom: '8px' }}>📤</div>
+              <p style={{ margin: '0 0 4px', fontSize: '14px', color: '#374151', fontWeight: '500' }}>
+                Click to upload or drag and drop
+              </p>
+              <p style={{ margin: 0, fontSize: '12px', color: '#6b7280' }}>
+                Images (JPEG, PNG, GIF, WebP, HEIC), PDF, Word, Excel, TXT — Max 10 MB each, up to 5 files
+              </p>
+              <input
+                id="report-file-input"
+                type="file"
+                multiple
+                accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.txt"
+                onChange={handleFileSelect}
+                style={{ display: 'none' }}
+              />
+            </div>
+            {attachments.length > 0 && (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: '10px', marginTop: '12px' }}>
+                {attachments.map((file) => (
+                  <div key={file.id} style={{
+                    border: '1px solid #e5e7eb',
+                    borderRadius: '8px',
+                    padding: '8px',
+                    background: 'white',
+                    position: 'relative',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    gap: '6px'
+                  }}>
+                    {file.isImage ? (
+                      <img
+                        src={file.data}
+                        alt={file.name}
+                        style={{ width: '100%', height: '80px', objectFit: 'cover', borderRadius: '4px' }}
+                      />
+                    ) : (
+                      <div style={{
+                        width: '100%', height: '80px', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        background: '#f3f4f6', borderRadius: '4px', fontSize: '28px'
+                      }}>
+                        📄
+                      </div>
+                    )}
+                    <p style={{ margin: 0, fontSize: '11px', color: '#374151', textAlign: 'center', wordBreak: 'break-all', lineHeight: '1.3' }}>
+                      {file.name}
+                    </p>
+                    <p style={{ margin: 0, fontSize: '10px', color: '#9ca3af' }}>
+                      {(file.size / 1024).toFixed(1)} KB
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => removeAttachment(file.id)}
+                      style={{
+                        position: 'absolute', top: '4px', right: '4px',
+                        background: '#dc2626', color: 'white', border: 'none',
+                        width: '20px', height: '20px', borderRadius: '50%',
+                        cursor: 'pointer', fontSize: '12px', lineHeight: 1,
+                        display: 'flex', alignItems: 'center', justifyContent: 'center'
+                      }}
+                    >×</button>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* Submit Area */}

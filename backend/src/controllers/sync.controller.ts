@@ -3,7 +3,7 @@ import bcrypt from 'bcrypt';
 import { pool } from '../config/db.js';
 import { transporter } from '../config/mail.js';
 import { config } from '../config/env.js';
-import { saveBase64Photo } from '../utils/photo.js';
+import { saveBase64Photo, saveReportAttachment } from '../utils/photo.js';
 
 export async function sync(req: Request, res: Response): Promise<void> {
   try {
@@ -20,8 +20,9 @@ export async function sync(req: Request, res: Response): Promise<void> {
               activities, equipment_status, materials_used,
               team_members, weather_conditions, community_feedback,
               challenges, issues, comments, submitted_at,
-              latitude, longitude, gps_accuracy, gps_captured_at
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25)
+              latitude, longitude, gps_accuracy, gps_captured_at,
+              attachments
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26)
           ON CONFLICT (report_id) DO UPDATE SET
               site_name = EXCLUDED.site_name,
               registrations = EXCLUDED.registrations,
@@ -29,6 +30,7 @@ export async function sync(req: Request, res: Response): Promise<void> {
               longitude = EXCLUDED.longitude,
               gps_accuracy = EXCLUDED.gps_accuracy,
               gps_captured_at = EXCLUDED.gps_captured_at,
+              attachments = EXCLUDED.attachments,
               updated_at = CURRENT_TIMESTAMP
           RETURNING *`,
           [
@@ -44,6 +46,9 @@ export async function sync(req: Request, res: Response): Promise<void> {
             data.longitude || null,
             data.gpsAccuracy || null,
             data.gpsCapturedAt || null,
+            data.attachments ? JSON.stringify(
+              (Array.isArray(data.attachments) ? data.attachments : []).map(saveReportAttachment)
+            ) : null,
           ]
         );
         break;
@@ -73,7 +78,29 @@ export async function sync(req: Request, res: Response): Promise<void> {
         );
         break;
 
-      case 'citizen':
+      case 'citizen': {
+        // Business rule: the same first + last name is allowed, but only when
+        // the grandfather name is different. An exact match on all three means
+        // the same person was registered twice — skip the insert so the local
+        // queue clears without duplicating the record on the server.
+        if (data.firstName && data.lastName) {
+          const dup = await pool.query(
+            `SELECT national_id FROM citizens
+             WHERE LOWER(first_name) = LOWER($1)
+               AND LOWER(last_name) = LOWER($2)
+               AND LOWER(COALESCE(grandfather_name, '')) = LOWER(COALESCE($3, ''))`,
+            [data.firstName, data.lastName, data.grandfatherName || '']
+          );
+          if (dup.rows.length > 0) {
+            console.warn(`⏭️ Duplicate citizen skipped (same first+last+grandfather): ${data.firstName} ${data.lastName} ${data.grandfatherName}`);
+            res.json({
+              success: true,
+              data: dup.rows[0],
+              message: 'citizen already exists (duplicate first+last+grandfather)',
+            });
+            return;
+          }
+        }
         result = await pool.query(
           `INSERT INTO citizens (
               national_id, first_name, last_name, grandfather_name, date_of_birth,
@@ -114,6 +141,7 @@ export async function sync(req: Request, res: Response): Promise<void> {
           ]
         );
         break;
+      }
 
       case 'leave':
         result = await pool.query(
@@ -553,8 +581,10 @@ export async function sync(req: Request, res: Response): Promise<void> {
               overall_rating, status, submitted_at, region, type,
               verification_count, verification_passed, verification_score,
               verification_penalties, verification_notes,
-              screen_time_minutes, screen_time_idle_minutes, screen_time_trust_score
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28)
+              screen_time_minutes, screen_time_idle_minutes, screen_time_trust_score,
+              attachments, site_visits, issues_resolved, achievements,
+              team_morale, resource_status, overall_status
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35)
           ON CONFLICT (id) DO UPDATE SET
               performance = EXCLUDED.performance,
               attendance = EXCLUDED.attendance,
@@ -573,7 +603,14 @@ export async function sync(req: Request, res: Response): Promise<void> {
               verification_notes = EXCLUDED.verification_notes,
               screen_time_minutes = EXCLUDED.screen_time_minutes,
               screen_time_idle_minutes = EXCLUDED.screen_time_idle_minutes,
-              screen_time_trust_score = EXCLUDED.screen_time_trust_score
+              screen_time_trust_score = EXCLUDED.screen_time_trust_score,
+              attachments = EXCLUDED.attachments,
+              site_visits = EXCLUDED.site_visits,
+              issues_resolved = EXCLUDED.issues_resolved,
+              achievements = EXCLUDED.achievements,
+              team_morale = EXCLUDED.team_morale,
+              resource_status = EXCLUDED.resource_status,
+              overall_status = EXCLUDED.overall_status
           RETURNING *`,
           [
             data.id,
@@ -604,6 +641,15 @@ export async function sync(req: Request, res: Response): Promise<void> {
             data.screenTimeMinutes || 0,
             data.screenTimeIdleMinutes || 0,
             data.screenTimeTrustScore || 0,
+            data.attachments ? JSON.stringify(
+              (Array.isArray(data.attachments) ? data.attachments : []).map(saveReportAttachment)
+            ) : null,
+            data.siteVisits || null,
+            data.issuesResolved || null,
+            data.achievements || null,
+            data.teamMorale || null,
+            data.resourceStatus || null,
+            data.overallStatus || null,
           ]
         );
         break;

@@ -1,9 +1,31 @@
 // components/citizens/CitizensDatabase.js
 
 import React, { useState, useMemo, useEffect, useRef } from 'react';
-import { db, checkRealInternet, syncQueue } from '../../services/database';
+import { db, checkRealInternet, syncQueue, clearStuckCitizens } from '../../services/database';
 import { exportCSV, exportJSON, getProfilePhotoUrl } from '../../utils/helpers';
 import UserAvatar from '../common/UserAvatar';
+
+const formatDate = (v) => {
+  if (!v) return '—';
+  const d = new Date(v);
+  return isNaN(d.getTime()) ? '—' : d.toLocaleDateString();
+};
+
+const formatTime = (v) => {
+  if (!v) return '—';
+  const d = new Date(v);
+  return isNaN(d.getTime()) ? '—' : d.toLocaleTimeString();
+};
+
+// Some legacy / malformed records store coordinates as strings, so coerce
+// them to numbers before calling .toFixed() (which throws on non-numbers).
+const safeCoords = (lat, lng) => {
+  if (lat == null || lng == null) return null;
+  const la = Number(lat);
+  const lo = Number(lng);
+  if (!Number.isFinite(la) || !Number.isFinite(lo)) return null;
+  return { latitude: la, longitude: lo };
+};
 
 function CitizensDatabase({ citizens, users }) {
   const [searchTerm, setSearchTerm] = useState('');
@@ -14,6 +36,7 @@ function CitizensDatabase({ citizens, users }) {
   const [offlineCount, setOfflineCount] = useState(0);
   const [allCitizens, setAllCitizens] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
+  const hasLoadedRef = useRef(false);
 
   // Lookup users by employee ID so we can show the registering officer's photo.
   const userByEmpId = useMemo(() => {
@@ -60,8 +83,11 @@ function CitizensDatabase({ citizens, users }) {
   };
 
   // ===== LOAD ALL CITIZENS (ONLY SYNCED ONES) =====
-  const loadAllCitizens = async () => {
-    setIsLoading(true);
+  // showLoader controls whether the full-page spinner is used. Live refreshes
+  // (every few seconds / on sync events) pass false so the syncing indicator
+  // can turn ON and OFF without flickering the whole page.
+  const loadAllCitizens = async (showLoader = true) => {
+    if (showLoader) setIsLoading(true);
     try {
       // Get ONLY synced citizens from IndexedDB
       const dbCitizens = await db.citizens.toArray();
@@ -87,8 +113,9 @@ function CitizensDatabase({ citizens, users }) {
       
       setAllCitizens(syncedCitizens);
       
-      // Count offline citizens (synced === false) - these are hidden
-      const offline = dbCitizens.filter(c => c.synced === false);
+      // Count offline citizens (synced === false OR currently mid-sync as
+      // 'syncing'). These are hidden from the table.
+      const offline = dbCitizens.filter(c => c.synced === false || c.synced === 'syncing');
       setOfflineCount(offline.length);
       
     } catch (error) {
@@ -96,11 +123,11 @@ function CitizensDatabase({ citizens, users }) {
       if (citizens) {
         const synced = citizens.filter(c => c.synced === true);
         setAllCitizens(synced);
-        const offline = citizens.filter(c => c.synced === false);
+        const offline = citizens.filter(c => c.synced === false || c.synced === 'syncing');
         setOfflineCount(offline.length);
       }
     } finally {
-      setIsLoading(false);
+      if (showLoader) setIsLoading(false);
     }
   };
 
@@ -110,12 +137,19 @@ function CitizensDatabase({ citizens, users }) {
       const online = await checkRealInternet();
       setIsOnline(online);
       
-      // IF BACK ONLINE → AUTO SYNC
+      // Refresh counts live (no spinner) so the "Syncing: N citizen(s) being
+      // synced..." indicator turns ON when records need syncing and OFF as
+      // soon as the queue drains.
+      loadAllCitizens(false);
+      
+      // IF BACK ONLINE → AUTO SYNC. The global sync engine already auto-syncs
+      // the queue every 2s and on the browser 'online' event, so we do NOT
+      // re-dispatch 'force-sync' here — that would trigger redundant server
+      // pulls on every poll tick while stuck items exist.
       if (online) {
         const queueCount = syncQueue.count();
         if (queueCount > 0) {
-          console.log(`🔄 Back online! Auto-syncing ${queueCount} citizens...`);
-          window.dispatchEvent(new CustomEvent('force-sync'));
+          console.log(`🔄 ${queueCount} citizens still pending sync (auto-sync running)`);
         }
       }
     };
@@ -127,21 +161,31 @@ function CitizensDatabase({ citizens, users }) {
   }, []);
 
   // ===== LOAD DATA ON MOUNT AND CITIZENS CHANGE =====
+  // The full-page spinner is shown ONLY on the very first load. Live refreshes
+  // (citizens prop changes after every sync cycle, sync events, queue updates)
+  // reload WITHOUT the spinner, otherwise the page flickers between content
+  // and "Loading citizens..." and looks stuck.
   useEffect(() => {
-    loadAllCitizens();
+    loadAllCitizens(!hasLoadedRef.current);
+    hasLoadedRef.current = true;
   }, [citizens]);
+
+  // ===== CLEAN STUCK CITIZENS ON MOUNT =====
+  // Permanently-stuck records (mid-sync for >1min, failed past the retry
+  // limit, queued 7+ days, or orphaned queue items) are removed so they stop
+  // keeping the syncing indicator and sync loop alive forever.
+  useEffect(() => {
+    clearStuckCitizens().then(() => loadAllCitizens(false));
+  }, []);
 
   // ===== LISTEN FOR SYNC EVENTS =====
   useEffect(() => {
     const handleSyncComplete = () => {
-      loadAllCitizens();
+      loadAllCitizens(false);
     };
     
     const handleQueueUpdate = () => {
-      const count = syncQueue.count();
-      if (count === 0) {
-        loadAllCitizens();
-      }
+      loadAllCitizens(false);
     };
     
     window.addEventListener('sync-complete', handleSyncComplete);
@@ -306,18 +350,6 @@ function CitizensDatabase({ citizens, users }) {
           {isOnline ? '✅ Online' : '❌ Offline'}
         </span>
         <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
-          {isOnline && offlineCount > 0 && (
-            <span style={{
-              padding: '2px 12px',
-              borderRadius: '12px',
-              background: '#fef3c7',
-              color: '#92400e',
-              fontSize: '12px',
-              fontWeight: '500'
-            }}>
-              ⏳ {offlineCount} syncing...
-            </span>
-          )}
           {!isOnline && offlineCount > 0 && (
             <span style={{
               padding: '2px 12px',
@@ -353,26 +385,6 @@ function CitizensDatabase({ citizens, users }) {
         </div>
       )}
 
-      {/* ===== SYNCING BANNER ===== */}
-      {isOnline && offlineCount > 0 && (
-        <div style={{
-          padding: '12px 16px',
-          background: '#dbeafe',
-          border: '1px solid #3b82f6',
-          borderRadius: '8px',
-          marginBottom: '16px',
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          flexWrap: 'wrap'
-        }}>
-          <span>🔄 <strong>Syncing:</strong> {offlineCount} citizen(s) being synced...</span>
-          <span style={{ fontSize: '12px', color: '#1e40af' }}>
-            ⏳ Please wait...
-          </span>
-        </div>
-      )}
-
       {/* ===== TABLE CARD ===== */}
       <div className="table-card" style={{
         background: 'white',
@@ -397,7 +409,6 @@ function CitizensDatabase({ citizens, users }) {
             <p style={{ fontSize: '13px', color: '#64748b', margin: '4px 0 0 0' }}>
               {allCitizens.length} total citizens
               {!isOnline && offlineCount > 0 && ` • ${offlineCount} pending sync`}
-              {isOnline && offlineCount > 0 && ` • ${offlineCount} syncing...`}
             </p>
           </div>
           <div className="table-actions" style={{
@@ -503,7 +514,6 @@ function CitizensDatabase({ citizens, users }) {
               <tr style={{ background: '#f8fafc' }}>
                 <th style={{ padding: '12px 16px', textAlign: 'center', fontWeight: '600', color: '#374151', borderBottom: '2px solid #e5e7eb' }}>Photo</th>
                 <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: '600', color: '#374151', borderBottom: '2px solid #e5e7eb' }}>Name</th>
-                <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: '600', color: '#374151', borderBottom: '2px solid #e5e7eb' }}>Grandfather Name</th>
                 <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: '600', color: '#374151', borderBottom: '2px solid #e5e7eb' }}>National ID</th>
                 <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: '600', color: '#374151', borderBottom: '2px solid #e5e7eb' }}>Region</th>
                 <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: '600', color: '#374151', borderBottom: '2px solid #e5e7eb' }}>Location</th>
@@ -516,7 +526,7 @@ function CitizensDatabase({ citizens, users }) {
             <tbody>
               {filteredCitizens.length === 0 && (
                 <tr>
-                  <td colSpan="10" style={{ textAlign: 'center', padding: '40px 20px', color: '#64748b' }}>
+                  <td colSpan="9" style={{ textAlign: 'center', padding: '40px 20px', color: '#64748b' }}>
                     <div style={{ fontSize: '48px', marginBottom: '8px' }}>🆔</div>
                     <div>
                       {!isOnline && offlineCount > 0 
@@ -545,10 +555,7 @@ function CitizensDatabase({ citizens, users }) {
                     )}
                   </td>
                   <td style={{ padding: '12px 16px', fontWeight: '600' }}>
-                    {c.firstName} {c.lastName}
-                  </td>
-                  <td style={{ padding: '12px 16px' }}>
-                    {c.grandfatherName || <span style={{ color: '#9ca3af' }}>—</span>}
+                    {c.firstName} {c.lastName}{c.grandfatherName ? ` ${c.grandfatherName}` : ''}
                   </td>
                   <td style={{ padding: '12px 16px' }}>
                     <span style={{
@@ -575,24 +582,27 @@ function CitizensDatabase({ citizens, users }) {
                     </span>
                   </td>
                   <td style={{ padding: '12px 16px' }}>
-                    {c.latitude != null && c.longitude != null ? (
-                      <a
-                        href={`https://www.google.com/maps?q=${c.latitude},${c.longitude}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        style={{
-                          color: '#0b7e4b',
-                          textDecoration: 'none',
-                          fontWeight: '500',
-                          fontSize: '12px'
-                        }}
-                        title={`${c.latitude.toFixed(5)}, ${c.longitude.toFixed(5)}${c.gpsAccuracy ? ` (±${c.gpsAccuracy}m)` : ''}`}
-                      >
-                        📍 Open Map
-                      </a>
-                    ) : (
-                      <span style={{ color: '#9ca3af' }}>—</span>
-                    )}
+                    {(() => {
+                      const coords = safeCoords(c.latitude, c.longitude);
+                      return coords ? (
+                        <a
+                          href={`https://www.google.com/maps?q=${coords.latitude},${coords.longitude}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          style={{
+                            color: '#0b7e4b',
+                            textDecoration: 'none',
+                            fontWeight: '500',
+                            fontSize: '12px'
+                          }}
+                          title={`${coords.latitude.toFixed(5)}, ${coords.longitude.toFixed(5)}${c.gpsAccuracy ? ` (±${Number(c.gpsAccuracy)}m)` : ''}`}
+                        >
+                          📍 Open Map
+                        </a>
+                      ) : (
+                        <span style={{ color: '#9ca3af' }}>—</span>
+                      );
+                    })()}
                   </td>
                   <td style={{ padding: '12px 16px' }}>{c.phone}</td>
                   <td style={{ padding: '12px 16px' }}>
@@ -611,9 +621,9 @@ function CitizensDatabase({ citizens, users }) {
                     </div>
                   </td>
                   <td style={{ padding: '12px 16px', fontSize: '13px' }}>
-                    {new Date(c.registrationDate || c.createdAt).toLocaleDateString()}
+                    {formatDate(c.registrationDate || c.createdAt)}
                     <div style={{ fontSize: '11px', color: '#64748b' }}>
-                      {new Date(c.registrationDate || c.createdAt).toLocaleTimeString()}
+                      {formatTime(c.registrationDate || c.createdAt)}
                     </div>
                   </td>
                   <td style={{ padding: '12px 16px', textAlign: 'center' }}>
@@ -650,7 +660,6 @@ function CitizensDatabase({ citizens, users }) {
           <span>
             Showing {filteredCitizens.length} of {allCitizens.length} citizens
             {!isOnline && offlineCount > 0 && ` (${offlineCount} offline waiting to sync)`}
-            {isOnline && offlineCount > 0 && ` (${offlineCount} syncing...)`}
           </span>
           <span>
             {offlineCount === 0 && isOnline && (
@@ -658,9 +667,6 @@ function CitizensDatabase({ citizens, users }) {
             )}
             {!isOnline && offlineCount > 0 && (
               <span style={{ color: '#991b1b' }}>📡 {offlineCount} citizen(s) waiting for connection</span>
-            )}
-            {isOnline && offlineCount > 0 && (
-              <span style={{ color: '#1e40af' }}>🔄 {offlineCount} citizen(s) syncing...</span>
             )}
           </span>
         </div>

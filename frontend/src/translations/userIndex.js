@@ -1,5 +1,7 @@
 import userEn from './userEn';
 import userAm from './userAm';
+import userTi from './userTi';
+import userOm from './userOm';
 
 export const userLanguages = {
   en: {
@@ -11,6 +13,16 @@ export const userLanguages = {
     name: 'Amharic',
     nativeName: 'አማርኛ',
     translations: userAm
+  },
+  ti: {
+    name: 'Tigrinya',
+    nativeName: 'ትግርኛ',
+    translations: userTi
+  },
+  om: {
+    name: 'Oromo',
+    nativeName: 'Afaan Oromoo',
+    translations: userOm
   }
 };
 

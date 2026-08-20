@@ -9,6 +9,12 @@ const MIME_EXT: Record<string, string> = {
   'image/png': '.png',
   'image/webp': '.webp',
   'image/gif': '.gif',
+  'application/pdf': '.pdf',
+  'application/msword': '.doc',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document': '.docx',
+  'application/vnd.ms-excel': '.xls',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': '.xlsx',
+  'text/plain': '.txt',
 };
 
 // Converts a base64 data-URL photo into a file in the uploads directory and
@@ -35,4 +41,26 @@ export function saveBase64Photo(dataUrl?: string | null): string | null {
   }
 
   return '/uploads/' + filename;
+}
+
+// Save a base64 report attachment to disk and return { name, type, size, url }.
+// If the attachment already has a url (from a previous sync) it is returned unchanged.
+export function saveReportAttachment(att: { name: string; type: string; size: number; data?: string; url?: string }): { name: string; type: string; size: number; url: string } {
+  if (att.url) return att;
+  if (!att.data || !att.data.startsWith('data:')) return { name: att.name, type: att.type, size: att.size, url: '' };
+
+  const match = att.data.match(/^data:([^;]+);base64,(.+)$/);
+  if (!match) return { name: att.name, type: att.type, size: att.size, url: '' };
+
+  const base64 = match[2];
+  const hash = crypto.createHash('md5').update(base64).digest('hex').slice(0, 16);
+  const ext = path.extname(att.name) || MIME_EXT[match[1].split(';')[0]] || '.bin';
+  const filename = `report_${hash}${ext}`;
+  const filePath = path.join(config.uploadsDir, filename);
+
+  if (!fs.existsSync(filePath)) {
+    fs.writeFileSync(filePath, Buffer.from(base64, 'base64'));
+  }
+
+  return { name: att.name, type: att.type, size: att.size, url: '/uploads/' + filename };
 }

@@ -528,7 +528,8 @@ function UserManagement({
             }}>
               {LOCATION_LEVELS.slice(0, maxLevelIdx + 1).map((level, idx) => {
                 const prevLevel = idx === 0 ? null : LOCATION_LEVELS[idx - 1];
-                const parentId = prevLevel ? selectedLocations[prevLevel]?.id || null : null;
+                const prev = prevLevel ? selectedLocations[prevLevel] : null;
+                const parentId = prev && prev.id !== 'OTHER' ? prev.id : null;
                 return (
                   <LocationSelect
                     key={level}

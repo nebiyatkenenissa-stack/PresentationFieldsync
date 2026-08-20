@@ -8,16 +8,12 @@ import LocationSelect from './LocationSelect';
 
 const LEVELS = ['country', 'region', 'zone', 'woreda', 'kebele', 'community'];
 
-const OTHER = 'OTHER';
-
 const normalize = (value) => {
   if (!value) return null;
   if (typeof value === 'number' || typeof value === 'string') {
-    if (value === OTHER) return { id: OTHER, name: null };
     return { id: Number(value), name: null };
   }
-  const id = value.id === OTHER ? OTHER : Number(value.id);
-  return { id, name: value.name || null };
+  return { id: Number(value.id), name: value.name || null };
 };
 
 const initialKeyFor = (initial) =>

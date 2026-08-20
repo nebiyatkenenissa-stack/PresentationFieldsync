@@ -1,7 +1,7 @@
 // components/supervisor/SupervisorReports.js – FULLY FIXED (auto-display newest reports, refresh works)
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { getToday, uid } from '../../utils/helpers';
+import { getToday, uid, getServerBase } from '../../utils/helpers';
 import { db, syncQueue, checkRealInternet, pullSupervisorReportsFromServer, getApiBase } from '../../services/database';
 import UserAvatar from '../common/UserAvatar';
 
@@ -44,6 +44,16 @@ function SupervisorReports({
     recommendations: '',
     overallStatus: 'good'
   });
+
+  const [officerAttachments, setOfficerAttachments] = useState([]);
+  const [selfAttachments, setSelfAttachments] = useState([]);
+  const [viewingAttachments, setViewingAttachments] = useState(null);
+
+  const resolveAttachmentUrl = (att) => {
+    if (att.url && att.url.startsWith('/uploads/')) return `${getServerBase()}${att.url}`;
+    if (att.data && att.data.startsWith('data:')) return att.data;
+    return null;
+  };
 
   // ===== CHECK ONLINE STATUS =====
   useEffect(() => {
@@ -138,6 +148,127 @@ function SupervisorReports({
     return diffHours < 24;
   };
 
+  // ===== FILE / IMAGE ATTACHMENTS =====
+  const MAX_FILE_SIZE = 10 * 1024 * 1024;
+  const MAX_FILES = 5;
+  const ALLOWED_TYPES = [
+    'image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/heic',
+    'application/pdf',
+    'application/msword',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    'application/vnd.ms-excel',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    'text/plain'
+  ];
+
+  const fileToBase64 = (file) => new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+
+  const handleFileSelect = async (e, setAttachments, currentCount) => {
+    const files = Array.from(e.target.files || []);
+    if (!files.length) return;
+    const remaining = MAX_FILES - currentCount;
+    if (remaining <= 0) {
+      alert(`Maximum ${MAX_FILES} files allowed.`);
+      return;
+    }
+    const validFiles = [];
+    for (const file of files.slice(0, remaining)) {
+      if (!ALLOWED_TYPES.includes(file.type)) {
+        alert(`"${file.name}" is not an allowed file type.`);
+        continue;
+      }
+      if (file.size > MAX_FILE_SIZE) {
+        alert(`"${file.name}" exceeds the 10 MB size limit.`);
+        continue;
+      }
+      const base64 = await fileToBase64(file);
+      validFiles.push({
+        id: `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+        name: file.name,
+        type: file.type,
+        size: file.size,
+        data: base64,
+        isImage: file.type.startsWith('image/')
+      });
+    }
+    setAttachments(prev => [...prev, ...validFiles]);
+    e.target.value = '';
+  };
+
+  const removeAttachment = (id, setAttachments) => {
+    setAttachments(prev => prev.filter(f => f.id !== id));
+  };
+
+  const renderAttachmentUpload = (attachments, setAttachments, inputId) => (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+      <label style={{ fontSize: '13px', fontWeight: '500', color: '#374151' }}>📎 Attachments (Images &amp; Files)</label>
+      <div
+        style={{
+          border: '2px dashed #d1d5db', borderRadius: '8px', padding: '16px',
+          textAlign: 'center', background: '#f9fafb', cursor: 'pointer'
+        }}
+        onClick={() => document.getElementById(inputId).click()}
+        onDragOver={(e) => { e.preventDefault(); e.currentTarget.style.borderColor = '#3b82f6'; }}
+        onDragLeave={(e) => { e.currentTarget.style.borderColor = '#d1d5db'; }}
+        onDrop={(e) => {
+          e.preventDefault();
+          e.currentTarget.style.borderColor = '#d1d5db';
+          handleFileSelect({ target: { files: e.dataTransfer.files } }, setAttachments, attachments.length);
+        }}
+      >
+        <div style={{ fontSize: '24px', marginBottom: '4px' }}>📤</div>
+        <p style={{ margin: '0 0 2px', fontSize: '13px', color: '#374151', fontWeight: '500' }}>
+          Click or drag to upload
+        </p>
+        <p style={{ margin: 0, fontSize: '11px', color: '#6b7280' }}>
+          Images, PDF, Word, Excel, TXT — Max 10 MB, up to 5 files
+        </p>
+        <input
+          id={inputId}
+          type="file"
+          multiple
+          accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.txt"
+          onChange={(e) => handleFileSelect(e, setAttachments, attachments.length)}
+          style={{ display: 'none' }}
+        />
+      </div>
+      {attachments.length > 0 && (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))', gap: '8px', marginTop: '8px' }}>
+          {attachments.map((file) => (
+            <div key={file.id} style={{
+              border: '1px solid #e5e7eb', borderRadius: '8px', padding: '6px',
+              background: 'white', position: 'relative', display: 'flex',
+              flexDirection: 'column', alignItems: 'center', gap: '4px'
+            }}>
+              {file.isImage ? (
+                <img src={file.data} alt={file.name} style={{ width: '100%', height: '60px', objectFit: 'cover', borderRadius: '4px' }} />
+              ) : (
+                <div style={{ width: '100%', height: '60px', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f3f4f6', borderRadius: '4px', fontSize: '22px' }}>📄</div>
+              )}
+              <p style={{ margin: 0, fontSize: '10px', color: '#374151', textAlign: 'center', wordBreak: 'break-all', lineHeight: '1.2' }}>{file.name}</p>
+              <button
+                type="button"
+                onClick={() => removeAttachment(file.id, setAttachments)}
+                style={{
+                  position: 'absolute', top: '2px', right: '2px',
+                  background: '#dc2626', color: 'white', border: 'none',
+                  width: '18px', height: '18px', borderRadius: '50%',
+                  cursor: 'pointer', fontSize: '11px', lineHeight: 1,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center'
+                }}
+              >×</button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+
   // ===== HELPER: Format date/time =====
   const formatDateTime = (dateStr) => {
     if (!dateStr) return 'N/A';
@@ -181,6 +312,7 @@ function SupervisorReports({
         comments: form.comments,
         recommendations: form.recommendations,
         overallRating: form.overallRating,
+        attachments: officerAttachments.map(f => ({ name: f.name, type: f.type, size: f.size, data: f.data })),
         status: 'submitted',
         submittedAt: new Date().toISOString(),
         region: officer.region,
@@ -245,6 +377,7 @@ function SupervisorReports({
       }
       
       setShowOfficerReport(false);
+      setOfficerAttachments([]);
       setForm({
         officerId: '',
         reportDate: getToday(),
@@ -286,6 +419,7 @@ function SupervisorReports({
         resourceStatus: selfForm.resourceStatus,
         recommendations: selfForm.recommendations,
         overallStatus: selfForm.overallStatus,
+        attachments: selfAttachments.map(f => ({ name: f.name, type: f.type, size: f.size, data: f.data })),
         submittedAt: new Date().toISOString(),
         type: 'self_report',
         synced: false
@@ -346,6 +480,7 @@ function SupervisorReports({
       }
       
       setShowSelfReport(false);
+      setSelfAttachments([]);
       setSelfForm({
         reportDate: getToday(),
         region: user?.region || '',
@@ -608,6 +743,7 @@ function SupervisorReports({
                 <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: '600', fontSize: '12px', color: '#6b7280' }}>Officer / Self</th>
                 <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: '600', fontSize: '12px', color: '#6b7280' }}>Performance</th>
                 <th style={{ padding: '12px 16px', textAlign: 'center', fontWeight: '600', fontSize: '12px', color: '#6b7280' }}>Rating</th>
+                <th style={{ padding: '12px 16px', textAlign: 'center', fontWeight: '600', fontSize: '12px', color: '#6b7280' }}>Files</th>
                 <th style={{ padding: '12px 16px', textAlign: 'center', fontWeight: '600', fontSize: '12px', color: '#6b7280' }}>Status</th>
                 <th style={{ padding: '12px 16px', textAlign: 'center', fontWeight: '600', fontSize: '12px', color: '#6b7280' }}>New</th>
               </tr>
@@ -673,6 +809,17 @@ function SupervisorReports({
                     </td>
                     <td style={{ padding: '12px 16px', fontSize: '13px', textAlign: 'center' }}>
                       {r.type === 'self_report' ? 'N/A' : `${r.overallRating}/5 ⭐`}
+                    </td>
+                    <td style={{ padding: '12px 16px', textAlign: 'center', fontSize: '13px' }}>
+                      {r.attachments && r.attachments.length > 0 ? (
+                        <button onClick={() => setViewingAttachments(r.attachments)} style={{
+                          background: '#f0fdf4', color: '#166534', border: '1px solid #86efac',
+                          padding: '2px 10px', borderRadius: '12px', fontSize: '11px',
+                          fontWeight: '500', cursor: 'pointer'
+                        }}>
+                          📂 Open ({r.attachments.length})
+                        </button>
+                      ) : null}
                     </td>
                     <td style={{ padding: '12px 16px', textAlign: 'center', fontSize: '13px' }}>
                       <span className="status-tag submitted" style={{
@@ -1045,6 +1192,7 @@ function SupervisorReports({
                   }}
                 />
               </div>
+              {renderAttachmentUpload(officerAttachments, setOfficerAttachments, 'officer-report-file-input')}
               <div style={{
                 padding: '12px',
                 background: !isOnline ? '#fef3c7' : '#dbeafe',
@@ -1371,6 +1519,7 @@ function SupervisorReports({
                   }}
                 />
               </div>
+              {renderAttachmentUpload(selfAttachments, setSelfAttachments, 'self-report-file-input')}
               <div style={{
                 padding: '12px',
                 background: !isOnline ? '#fef3c7' : '#dbeafe',
@@ -1429,6 +1578,71 @@ function SupervisorReports({
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* ===== ATTACHMENT VIEWER MODAL ===== */}
+      {viewingAttachments && (
+        <div onClick={() => setViewingAttachments(null)} style={{
+          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          zIndex: 9999, padding: '20px'
+        }}>
+          <div onClick={e => e.stopPropagation()} style={{
+            background: 'white', borderRadius: '16px', padding: '24px',
+            maxWidth: '700px', width: '100%', maxHeight: '80vh',
+            overflow: 'auto', boxShadow: '0 20px 60px rgba(0,0,0,0.3)'
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+              <h3 style={{ margin: 0, fontSize: '18px', fontWeight: '700' }}>📎 Attachments ({viewingAttachments.length})</h3>
+              <button onClick={() => setViewingAttachments(null)} style={{
+                background: '#fee2e2', color: '#991b1b', border: 'none',
+                padding: '6px 14px', borderRadius: '8px', cursor: 'pointer',
+                fontWeight: '600', fontSize: '13px'
+              }}>✕ Close</button>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              {viewingAttachments.map((att, i) => {
+                const url = resolveAttachmentUrl(att);
+                const isImage = att.type?.startsWith('image/') || att.isImage;
+                return (
+                  <div key={i} style={{
+                    border: '1px solid #e5e7eb', borderRadius: '10px',
+                    padding: '12px', background: '#f9fafb'
+                  }}>
+                    {isImage && url ? (
+                      <img src={url} alt={att.name} style={{
+                        width: '100%', maxHeight: '300px', objectFit: 'contain',
+                        borderRadius: '8px', marginBottom: '8px', background: '#fff'
+                      }} />
+                    ) : (
+                      <div style={{
+                        padding: '20px', textAlign: 'center', background: '#e5e7eb',
+                        borderRadius: '8px', marginBottom: '8px', fontSize: '24px'
+                      }}>
+                        📄
+                      </div>
+                    )}
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <div>
+                        <div style={{ fontWeight: '600', fontSize: '13px' }}>{att.name}</div>
+                        <div style={{ fontSize: '11px', color: '#6b7280' }}>
+                          {att.type} &middot; {att.size ? `${(att.size / 1024).toFixed(1)} KB` : ''}
+                        </div>
+                      </div>
+                      {url && (
+                        <a href={url} download={att.name} target="_blank" rel="noopener noreferrer" style={{
+                          background: '#dbeafe', color: '#1e40af', padding: '6px 14px',
+                          borderRadius: '8px', textDecoration: 'none', fontWeight: '600',
+                          fontSize: '12px'
+                        }}>⬇️ Download</a>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
           </div>
         </div>
       )}

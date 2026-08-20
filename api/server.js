@@ -35,10 +35,31 @@ function generateTempPassword() {
   return password;
 }
 
+// ===== HELPER: Save base64 report attachment to disk =====
+const UPLOADS_DIR = path.resolve(__dirname, '../backend/uploads');
+if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+
+function saveReportAttachment(att) {
+  if (att.url) return att;
+  if (!att.data || !att.data.startsWith('data:')) return { name: att.name, type: att.type, size: att.size, url: '' };
+  const match = att.data.match(/^data:([^;]+);base64,(.+)$/);
+  if (!match) return { name: att.name, type: att.type, size: att.size, url: '' };
+  const crypto = require('crypto');
+  const base64 = match[2];
+  const hash = crypto.createHash('md5').update(base64).digest('hex').slice(0, 16);
+  const ext = path.extname(att.name) || '.bin';
+  const filename = `report_${hash}${ext}`;
+  const filePath = path.join(UPLOADS_DIR, filename);
+  if (!fs.existsSync(filePath)) {
+    fs.writeFileSync(filePath, Buffer.from(base64, 'base64'));
+  }
+  return { name: att.name, type: att.type, size: att.size, url: '/uploads/' + filename };
+}
+
 // ===== MIDDLEWARE =====
 app.use(cors());
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ limit: '10mb', extended: true }));
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ limit: '50mb', extended: true }));
 app.set('json spaces', 2);
 
 // ============================================================
@@ -240,8 +261,23 @@ async function addMissingColumns() {
             ALTER TABLE citizens ADD COLUMN IF NOT EXISTS longitude DOUBLE PRECISION;
             ALTER TABLE citizens ADD COLUMN IF NOT EXISTS gps_accuracy DOUBLE PRECISION;
             ALTER TABLE citizens ADD COLUMN IF NOT EXISTS gps_captured_at TIMESTAMP;
+            -- Region/district/village can hold full hierarchical location paths
+            -- (e.g. "Ethiopia > Amhara > ... > Kebele 01") which exceed VARCHAR(50)
+            ALTER TABLE citizens ALTER COLUMN region TYPE TEXT;
+            ALTER TABLE citizens ALTER COLUMN district TYPE TEXT;
+            ALTER TABLE citizens ALTER COLUMN village TYPE TEXT;
             ALTER TABLE screen_time ADD COLUMN IF NOT EXISTS idle_time INTEGER DEFAULT 0;
             ALTER TABLE screen_time ADD COLUMN IF NOT EXISTS session_start TIMESTAMP;
+            -- File attachments for reports (stored as JSONB)
+            ALTER TABLE reports ADD COLUMN IF NOT EXISTS attachments JSONB;
+            ALTER TABLE supervisor_reports ADD COLUMN IF NOT EXISTS attachments JSONB;
+            -- Self-report fields
+            ALTER TABLE supervisor_reports ADD COLUMN IF NOT EXISTS site_visits INTEGER;
+            ALTER TABLE supervisor_reports ADD COLUMN IF NOT EXISTS issues_resolved INTEGER;
+            ALTER TABLE supervisor_reports ADD COLUMN IF NOT EXISTS achievements TEXT;
+            ALTER TABLE supervisor_reports ADD COLUMN IF NOT EXISTS team_morale VARCHAR(20);
+            ALTER TABLE supervisor_reports ADD COLUMN IF NOT EXISTS resource_status VARCHAR(20);
+            ALTER TABLE supervisor_reports ADD COLUMN IF NOT EXISTS overall_status VARCHAR(20);
         `);
         console.log('✅ Database columns verified');
     } catch (err) {
@@ -1192,8 +1228,9 @@ app.post('/api/sync', async (req, res) => {
                         activities, equipment_status, materials_used,
                         team_members, weather_conditions, community_feedback,
                         challenges, issues, comments, submitted_at,
-                        latitude, longitude, gps_accuracy, gps_captured_at
-                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25)
+                        latitude, longitude, gps_accuracy, gps_captured_at,
+                        attachments
+                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26)
                     ON CONFLICT (report_id) DO UPDATE SET
                         site_name = EXCLUDED.site_name,
                         registrations = EXCLUDED.registrations,
@@ -1201,6 +1238,7 @@ app.post('/api/sync', async (req, res) => {
                         longitude = EXCLUDED.longitude,
                         gps_accuracy = EXCLUDED.gps_accuracy,
                         gps_captured_at = EXCLUDED.gps_captured_at,
+                        attachments = EXCLUDED.attachments,
                         updated_at = CURRENT_TIMESTAMP
                     RETURNING *`,
                     [
@@ -1215,7 +1253,8 @@ app.post('/api/sync', async (req, res) => {
                         data.latitude || null,
                         data.longitude || null,
                         data.gpsAccuracy || null,
-                        data.gpsCapturedAt || null
+                        data.gpsCapturedAt || null,
+                        data.attachments ? JSON.stringify((data.attachments || []).map(saveReportAttachment)) : null
                     ]
                 );
                 break;
@@ -1693,8 +1732,10 @@ app.post('/api/sync', async (req, res) => {
                         id, supervisor_id, supervisor_name, officer_id, officer_name,
                         officer_region, report_date, performance, attendance, quality,
                         punctuality, teamwork, communication, comments, recommendations,
-                        overall_rating, status, submitted_at, region, type
-                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
+                        overall_rating, status, submitted_at, region, type,
+                        attachments, site_visits, issues_resolved, achievements,
+                        team_morale, resource_status, overall_status
+                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27)
                     ON CONFLICT (id) DO UPDATE SET
                         performance = EXCLUDED.performance,
                         attendance = EXCLUDED.attendance,
@@ -1705,7 +1746,14 @@ app.post('/api/sync', async (req, res) => {
                         comments = EXCLUDED.comments,
                         recommendations = EXCLUDED.recommendations,
                         overall_rating = EXCLUDED.overall_rating,
-                        status = EXCLUDED.status
+                        status = EXCLUDED.status,
+                        attachments = EXCLUDED.attachments,
+                        site_visits = EXCLUDED.site_visits,
+                        issues_resolved = EXCLUDED.issues_resolved,
+                        achievements = EXCLUDED.achievements,
+                        team_morale = EXCLUDED.team_morale,
+                        resource_status = EXCLUDED.resource_status,
+                        overall_status = EXCLUDED.overall_status
                     RETURNING *`,
                     [
                         data.id,
@@ -1727,7 +1775,14 @@ app.post('/api/sync', async (req, res) => {
                         data.status || 'submitted',
                         data.submittedAt || new Date().toISOString(),
                         data.region || null,
-                        data.type || 'officer_report'
+                        data.type || 'officer_report',
+                        data.attachments ? JSON.stringify((data.attachments || []).map(saveReportAttachment)) : null,
+                        data.siteVisits || null,
+                        data.issuesResolved || null,
+                        data.achievements || null,
+                        data.teamMorale || null,
+                        data.resourceStatus || null,
+                        data.overallStatus || null
                     ]
                 );
                 break;

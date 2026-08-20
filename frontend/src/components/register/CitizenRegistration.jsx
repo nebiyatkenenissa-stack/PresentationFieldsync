@@ -1,8 +1,8 @@
-// components/register/CitizenRegistration.js – FULLY VALIDATED (18+, no duplicate name/email)
+// components/register/CitizenRegistration.js – FULLY VALIDATED (18+, grandfather name required, duplicate check on first+last+grandfather)
 
 import React, { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
-import { db, syncQueue, checkRealInternet, getApiBase } from '../../services/database';
+import { db, syncQueue, checkRealInternet, getApiBase, clearStuckCitizens } from '../../services/database';
 import { uid, generateNationalId } from '../../utils/helpers';
 import LocationCascade from '../common/LocationCascade';
 import GpsCapture from '../common/GpsCapture';
@@ -22,9 +22,10 @@ const translations = {
     lastName: 'Last Name *',
     lastNamePlaceholder: 'Enter last name',
     lastNameError: 'Last name must contain only letters and spaces',
-    grandFatherName: 'Grandfather Name',
+    grandFatherName: 'Grandfather Name *',
     grandFatherNamePlaceholder: 'Enter grandfather name',
     grandFatherNameError: 'Grandfather name must contain only letters and spaces',
+    grandfatherNameRequired: 'Grandfather name is required',
     dateOfBirth: 'Date of Birth *',
     dateOfBirthError: 'Please enter a valid date of birth (must be in the past)',
     ageError: 'Citizen must be 18 years or older',
@@ -80,8 +81,15 @@ const translations = {
     offlineMode: 'Offline Mode:',
     offlineMessage: 'Citizens will be saved locally and synced automatically when online.',
     fixErrors: 'Please fix the validation errors before submitting.',
-    duplicateName: 'A citizen with this name (including grandfather name) already exists',
+    duplicateName: 'A citizen with this name and grandfather name already exists',
+    grandfatherRequired: 'Grandfather name is required because a citizen with this first and last name already exists',
     duplicatePhone: 'This phone number is already registered',
+    clearStuck: 'Clear stuck',
+    clearStuckConfirm: 'Remove stuck pending citizens? Records saved 7+ days ago, failed to sync, or stuck mid-sync will be deleted from this device.',
+    clearStuckDone: 'Removed stuck data',
+    clearStuckRecords: 'records',
+    clearStuckQueue: 'queue items',
+    clearStuckNone: 'No stuck citizens found',
     photo: 'Photo',
     photoPlaceholder: 'Upload citizen photo'
   },
@@ -95,9 +103,10 @@ const translations = {
     lastName: 'የአባት ስም *',
     lastNamePlaceholder: 'የአባት ስም ያስገቡ',
     lastNameError: 'የአባት ስም ፊደላት እና ክፍተቶችን ብቻ መያዝ አለበት',
-    grandFatherName: 'የአያት ስም',
+    grandFatherName: 'የአያት ስም *',
     grandFatherNamePlaceholder: 'የአያት ስም ያስገቡ',
     grandFatherNameError: 'የአያት ስም ፊደላት እና ክፍተቶችን ብቻ መያዝ አለበት',
+    grandfatherNameRequired: 'የአያት ስም ያስገቡ',
     dateOfBirth: 'የትውልድ ቀን *',
     dateOfBirthError: 'እባክዎ ትክክለኛ የትውልድ ቀን ያስገቡ (ያለፈ ጊዜ መሆን አለበት)',
     ageError: 'ዜጋ ከ18 ዓመት በላይ መሆን አለበት',
@@ -153,7 +162,15 @@ const translations = {
     offlineMode: 'ከመስመር ውጭ ሁነታ፡',
     offlineMessage: 'ዜጎች በአካባቢው ይቀመጣሉ እና በመስመር ላይ ሲሆኑ በራስ-ሰር ይመሳሰላሉ።',
     fixErrors: 'ከማስገባትዎ በፊት የማረጋገጫ ስህተቶችን ያስተካክሉ።',
-    duplicateName: 'በዚህ ስም የተመዘገበ ዜጋ አለ',    duplicatePhone: 'ይህ ስልክ ቁጥር ቀድሞ ተመዝግቧል',
+    duplicateName: 'በዚህ ስም እና የአያት ስም የተመዘገበ ዜጋ አለ',
+    grandfatherRequired: 'የአያት ስም ያስገቡ ምክንያቱም በዚህ ስም እና የአባት ስም ዜጋ ቀድሞ ተመዝግቧል',
+    duplicatePhone: 'ይህ ስልክ ቁጥር ቀድሞ ተመዝግቧል',
+    clearStuck: 'ተጣብቀው የቆዩትን አጽዳ',
+    clearStuckConfirm: 'የተጣበቁ ዜጎችን ማስወገድ ይፈልጋሉ? ከ7 ቀናት በላይ የቆዩ፣ ያልተመሳሰሉ ወይም በሂደት ላይ ተጣብቀው የቆዩ መዝገቦች ከዚህ መሳሪያ ይደመሰሳሉ።',
+    clearStuckDone: 'የተጣበቁ መረጃዎች ተወግደዋል',
+    clearStuckRecords: 'መዝገቦች',
+    clearStuckQueue: 'የወረፋ እቃዎች',
+    clearStuckNone: 'ምንም የተጣበቁ ዜጎች አልተገኙም',
     photo: 'ፎቶ',
     photoPlaceholder: 'የዜጋ ፎቶ ይጫኑ'
   },
@@ -167,9 +184,10 @@ const translations = {
     lastName: 'Maqaa Abbootii *',
     lastNamePlaceholder: 'Maqaa Abbootii galchi',
     lastNameError: 'Maqaan Abbootii qubee fi bakka duwwaa qofa qabaachuu qaba',
-    grandFatherName: 'Maqaa Angafootii',
+    grandFatherName: 'Maqaa Angafootii *',
     grandFatherNamePlaceholder: 'Maqaa angafootii galchi',
     grandFatherNameError: 'Maqaan angafootii qubee fi bakka duwwaa qofa qabaachuu qaba',
+    grandfatherNameRequired: 'Maqaan angafootii barbaachisaadha',
     dateOfBirth: 'Guyyaa Dhalootaa *',
     dateOfBirthError: 'Guyyaa dhalootaa sirrii galchi (guyyaa darbe ta\'uu qaba)',
     ageError: 'Firoon waggaa 18 fi olii ta\'uu qaba',
@@ -225,8 +243,15 @@ const translations = {
     offlineMode: 'Haala Offline:',
     offlineMessage: 'Firoonni naannoo keessatti qusatamanii yeroo online ta\'an ofiifuu wal qabsiifamu.',
     fixErrors: 'Galmeessuu dura dogoggora mirkaneessaa sirreessi.',
-    duplicateName: 'Firoon maqaa kanaan dura galmeeffame',
+    duplicateName: 'Firoon maqaa kanaa fi maqaa angafootii kanaan dura galmeeffame',
+    grandfatherRequired: 'Maqaan angafootii barbaachisaadha sababni isaas firoon maqaa duraa fi abbootii kanaan dura galmeeffameera',
     duplicatePhone: 'Lakkoobsi bilbilaa kun dura galmeeffame',
+    clearStuck: 'Kan hirkate qulqulleessi',
+    clearStuckConfirm: 'Firoota kan hirkatan balleessuu barbaaddaa? Galmee guyyaa 7 olii kan turee, wal qabsiifamuu bahee ykn hojii gidduutti hirkate kun meeshaa kana irraa balleeffama.',
+    clearStuckDone: 'Odeeffannoon hirkate balleeffame',
+    clearStuckRecords: 'galmee',
+    clearStuckQueue: 'wantoota queue',
+    clearStuckNone: 'Firoon hirkate hin argamne',
     photo: 'Fakkii',
     photoPlaceholder: 'Fakkii firoota olkaa\'i'
   },
@@ -240,9 +265,10 @@ const translations = {
     lastName: 'ስም ኣቦ *',
     lastNamePlaceholder: 'ስም ኣቦ አእትዉ',
     lastNameError: 'ስም ኣቦ ፊደላትን ክፍተትን ጥራይ ክህዝ ኣለዎ',
-    grandFatherName: 'ስም ሓወልት',
+    grandFatherName: 'ስም ሓወልት *',
     grandFatherNamePlaceholder: 'ስም ሓወልት አእትዉ',
     grandFatherNameError: 'ስም ሓወልት ፊደላትን ክፍተትን ጥራይ ክህዝ ኣለዎ',
+    grandfatherNameRequired: 'ስም ሓወልት አእትዉ',
     dateOfBirth: 'ዕለት ትውልድ *',
     dateOfBirthError: 'ቅኑዕ ዕለት ትውልድ አእትዉ (ናይ ሓሊፉ ግዜ ክኸዉን ኣለዎ)',
     ageError: 'ዜጋ 18 ዓመት ወይ ንላዕሊ ክኸዉን ኣለዎ',
@@ -298,8 +324,15 @@ const translations = {
     offlineMode: 'ብልዕ መስመር ሁነታ:',
     offlineMessage: 'ዜጋታት ብአካባቢ ይቅመጡ እዮም እሞ መስመር ምስ ተመልሰ ብራሱ ይመሳሰሉ።',
     fixErrors: 'ቅድሚ ምስዳእኩም ጌጋታት ምዝገባ ኣርምዑ።',
-    duplicateName: 'ዜጋ በዚ ስም ቀደም ተመዝጊቡ',
+    duplicateName: 'ዜጋ በዚ ስምን ስም ሓወልት ቀደም ተመዝጊቡ',
+    grandfatherRequired: 'ስም ሓወልት አእትዉ ምኽንያቱ ዜጋ በዚ ስምን ስም ኣቦ ቀደም ተመዝጊቡ',
     duplicatePhone: 'እዚ ቁጽሪ ተሌፎን ቀደም ተመዝጊቡ',
+    clearStuck: 'ዝተዓቅሙ ኣጽሪሕ',
+    clearStuckConfirm: 'ዝተዓቅሙ ዜጋታት ከተኵሙ? ን7 መዓልትታት ብዝያደገ ተዓቂሩ ዝረኸበ፣ ዘይተመሳሰለ ወይ ኣብ ስራሕ ዝተዓቕመ ምዝገባ ካብዚ መሳርሒ ክድምሰስ እዩ።',
+    clearStuckDone: 'ዝተዓቀመ ሓበሬታ ተወጊዱ',
+    clearStuckRecords: 'ምዝገባታት',
+    clearStuckQueue: 'ናይ ወረፋ ኣቕሑ',
+    clearStuckNone: 'ዝተዓቕሙ ዜጋታት ኣይተረኸቡን',
     photo: 'ስእሊ',
     photoPlaceholder: 'ስእሊ ዜጋ ጽዓኑ'
   }
@@ -322,7 +355,10 @@ const seedLocationFromUser = (user) => {
   return out;
 };
 
-const toSupportedLang = (lng) => ((lng || 'en').split('-')[0] === 'am' ? 'am' : 'en');
+const toSupportedLang = (lng) => {
+  const lang = (lng || 'en').split('-')[0];
+  return ['am', 'ti', 'om'].includes(lang) ? lang : 'en';
+};
 
 function CitizenRegistration({ user, citizens, setCitizens, addNotification }) {
   const { i18n } = useTranslation();
@@ -360,6 +396,7 @@ function CitizenRegistration({ user, citizens, setCitizens, addNotification }) {
   const [successMessage, setSuccessMessage] = useState('');
   const [showSuccess, setShowSuccess] = useState(false);
   const [gps, setGps] = useState(null);
+  const [stuckInfo, setStuckInfo] = useState(null);
 
   // Get translations
   const t = translations[language] || translations.en;
@@ -367,7 +404,9 @@ function CitizenRegistration({ user, citizens, setCitizens, addNotification }) {
   // Language options
   const languages = [
     { code: 'en', label: '🇬🇧 English' },
-    { code: 'am', label: '🇪🇹 አማርኛ' }
+    { code: 'am', label: '🇪🇹 አማርኛ' },
+    { code: 'ti', label: '🇪🇹 ትግርኛ' },
+    { code: 'om', label: '🇪🇹 Afaan Oromoo' }
   ];
 
   // Keep this page's language in sync with the app-wide toggle
@@ -437,16 +476,33 @@ function CitizenRegistration({ user, citizens, setCitizens, addNotification }) {
     const dupErrors = {};
     const existing = citizens || [];
 
-    // Check duplicate full name (case-insensitive, includes grandfather name)
-    const fullNameParts = [form.firstName.trim(), form.lastName.trim(), form.grandfatherName.trim()].filter(Boolean);
-    const fullName = fullNameParts.join(' ').toLowerCase();
-    if (fullName.trim()) {
-      const nameExists = existing.some(c => {
-        const cParts = [c.firstName, c.lastName, c.grandfatherName].filter(Boolean);
-        return cParts.length > 0 && cParts.join(' ').toLowerCase() === fullName;
-      });
-      if (nameExists) {
-        dupErrors.firstName = t.duplicateName || 'A citizen with this name already exists';
+    // Check duplicate name — same first + last is allowed, but the grandfather
+    // name must be different to tell the two citizens apart.
+    const firstName = form.firstName.trim().toLowerCase();
+    const lastName = form.lastName.trim().toLowerCase();
+    const grandfatherName = form.grandfatherName.trim().toLowerCase();
+
+    if (firstName && lastName) {
+      const sameFamily = existing.filter(c =>
+        c.firstName && c.lastName &&
+        c.firstName.trim().toLowerCase() === firstName &&
+        c.lastName.trim().toLowerCase() === lastName
+      );
+
+      if (sameFamily.length > 0) {
+        // A citizen with the same first + last name already exists — require a
+        // different grandfather name so they can be distinguished.
+        if (!form.grandfatherName.trim()) {
+          dupErrors.grandfatherName = t.grandfatherRequired || 'Grandfather name is required because a citizen with this name already exists';
+        } else {
+          const exact = sameFamily.some(c =>
+            c.grandfatherName &&
+            c.grandfatherName.trim().toLowerCase() === grandfatherName
+          );
+          if (exact) {
+            dupErrors.firstName = t.duplicateName || 'A citizen with this name (including grandfather name) already exists';
+          }
+        }
       }
     }
 
@@ -476,7 +532,7 @@ function CitizenRegistration({ user, citizens, setCitizens, addNotification }) {
     const newErrors = {
       firstName: validateName(form.firstName),
       lastName: validateName(form.lastName),
-      grandfatherName: form.grandfatherName.trim() ? validateName(form.grandfatherName) : '',
+      grandfatherName: form.grandfatherName.trim() ? validateName(form.grandfatherName) : (t.grandfatherNameRequired || 'Grandfather name is required'),
       dateOfBirth: validateDateOfBirth(form.dateOfBirth),
       gender: validateGender(form.gender),
       phone: validatePhone(form.phone),
@@ -486,6 +542,7 @@ function CitizenRegistration({ user, citizens, setCitizens, addNotification }) {
     // Override with duplicate errors if any
     const dupErrors = checkDuplicates();
     if (dupErrors.firstName) newErrors.firstName = dupErrors.firstName;
+    if (dupErrors.grandfatherName) newErrors.grandfatherName = dupErrors.grandfatherName;
     if (dupErrors.email) newErrors.email = dupErrors.email;
     if (dupErrors.phone) newErrors.phone = dupErrors.phone;
 
@@ -510,7 +567,7 @@ function CitizenRegistration({ user, citizens, setCitizens, addNotification }) {
         error = validateName(newValue);
         break;
       case 'grandfatherName':
-        error = newValue.trim() ? validateName(newValue) : '';
+        error = newValue.trim() ? validateName(newValue) : (t.grandfatherNameRequired || 'Grandfather name is required');
         break;
       case 'dateOfBirth':
         error = validateDateOfBirth(newValue);
@@ -554,7 +611,7 @@ function CitizenRegistration({ user, citizens, setCitizens, addNotification }) {
         error = validateName(form[name]);
         break;
       case 'grandfatherName':
-        error = form[name]?.trim() ? validateName(form[name]) : '';
+        error = form[name]?.trim() ? validateName(form[name]) : (t.grandfatherNameRequired || 'Grandfather name is required');
         break;
       case 'dateOfBirth':
         error = validateDateOfBirth(form[name]);
@@ -581,6 +638,9 @@ function CitizenRegistration({ user, citizens, setCitizens, addNotification }) {
       const dupErrors = checkDuplicates();
       if (dupErrors.firstName) {
         setErrors(prev => ({ ...prev, firstName: dupErrors.firstName }));
+      }
+      if (dupErrors.grandfatherName) {
+        setErrors(prev => ({ ...prev, grandfatherName: dupErrors.grandfatherName }));
       }
       if (dupErrors.email) {
         setErrors(prev => ({ ...prev, email: dupErrors.email }));
@@ -649,12 +709,38 @@ function CitizenRegistration({ user, citizens, setCitizens, addNotification }) {
     window.addEventListener('sync-queue-updated', handleQueueUpdate);
     window.addEventListener('sync-complete', handleQueueUpdate);
 
+    // Clean up permanently stuck citizens (mid-sync, overdue, too many
+    // failures, or orphaned) once on page load so they stop cluttering the
+    // officer's registration screen.
+    clearStuckCitizens().then(() => setPendingCount(syncQueue.count()));
+
     return () => {
       clearInterval(interval);
       window.removeEventListener('sync-queue-updated', handleQueueUpdate);
       window.removeEventListener('sync-complete', handleQueueUpdate);
     };
   }, []);
+
+  // ============================================================
+  // CLEAR STUCK CITIZENS (manual button)
+  // ============================================================
+  const handleClearStuck = async () => {
+    if (!window.confirm(t.clearStuckConfirm)) return;
+    try {
+      const result = await clearStuckCitizens();
+      setPendingCount(syncQueue.count());
+      if (result.queue + result.store > 0) {
+        setStuckInfo({
+          type: 'success',
+          text: `${t.clearStuckDone}: ${result.store} ${t.clearStuckRecords}, ${result.queue} ${t.clearStuckQueue}`
+        });
+      } else {
+        setStuckInfo({ type: 'info', text: t.clearStuckNone });
+      }
+    } catch (err) {
+      setStuckInfo({ type: 'error', text: t.error + err.message });
+    }
+  };
 
   // ============================================================
   // SUBMIT HANDLER
@@ -672,6 +758,7 @@ function CitizenRegistration({ user, citizens, setCitizens, addNotification }) {
           const fieldNames = {
             firstName: 'First Name',
             lastName: 'Last Name',
+            grandfatherName: 'Grandfather Name',
             dateOfBirth: 'Date of Birth',
             gender: 'Gender',
             phone: 'Phone',
@@ -1007,6 +1094,25 @@ function CitizenRegistration({ user, citizens, setCitizens, addNotification }) {
               ⏳ {pendingCount} {t.pendingSync}
             </span>
           )}
+          {pendingCount > 0 && (
+            <button
+              type="button"
+              onClick={handleClearStuck}
+              style={{
+                background: '#fee2e2',
+                color: '#991b1b',
+                border: '1px solid #fca5a5',
+                padding: '4px 14px',
+                borderRadius: '20px',
+                fontSize: '12px',
+                fontWeight: '600',
+                cursor: 'pointer',
+                outline: 'none'
+              }}
+            >
+              🗑️ {t.clearStuck}
+            </button>
+          )}
           <span style={{
             background: '#e0f2fe',
             color: '#0369a1',
@@ -1052,6 +1158,21 @@ function CitizenRegistration({ user, citizens, setCitizens, addNotification }) {
         }}>
           <strong style={{ color: '#92400e' }}>📡 {t.offlineMode}</strong>
           <span style={{ color: '#92400e', marginLeft: '8px' }}>{t.offlineMessage}</span>
+        </div>
+      )}
+
+      {/* Stuck-cleanup info */}
+      {stuckInfo && (
+        <div style={{
+          padding: '12px 20px',
+          background: stuckInfo.type === 'success' ? '#f0fdf4' : (stuckInfo.type === 'error' ? '#fef2f2' : '#eff6ff'),
+          border: `1px solid ${stuckInfo.type === 'success' ? '#86efac' : (stuckInfo.type === 'error' ? '#fca5a5' : '#93c5fd')}`,
+          borderRadius: '8px',
+          marginBottom: '20px',
+          fontWeight: '500',
+          color: stuckInfo.type === 'success' ? '#166534' : (stuckInfo.type === 'error' ? '#991b1b' : '#1e40af')
+        }}>
+          {stuckInfo.text}
         </div>
       )}
 
@@ -1169,6 +1290,7 @@ function CitizenRegistration({ user, citizens, setCitizens, addNotification }) {
                   value={form.grandfatherName}
                   onChange={handleChange}
                   placeholder={t.grandFatherNamePlaceholder}
+                  required
                   style={{
                     width: '100%',
                     padding: '8px 12px',

@@ -6,7 +6,9 @@ function LanguageSelector() {
 
   const languages = [
     { code: 'en', name: 'English', flag: '🇬🇧' },
-    { code: 'am', name: 'አማርኛ', flag: '🇪🇹' }
+    { code: 'am', name: 'አማርኛ', flag: '🇪🇹' },
+    { code: 'ti', name: 'ትግርኛ', flag: '🇪🇹' },
+    { code: 'om', name: 'Afaan Oromoo', flag: '🇪🇹' }
   ];
 
   const changeLanguage = (langCode) => {
@@ -17,7 +19,7 @@ function LanguageSelector() {
   return (
     <div className="language-selector">
       <select 
-        value={['en', 'am'].includes((i18n.resolvedLanguage || i18n.language || 'en').split('-')[0]) ? (i18n.resolvedLanguage || i18n.language || 'en').split('-')[0] : 'en'} 
+        value={['en', 'am', 'ti', 'om'].includes((i18n.resolvedLanguage || i18n.language || 'en').split('-')[0]) ? (i18n.resolvedLanguage || i18n.language || 'en').split('-')[0] : 'en'} 
         onChange={(e) => changeLanguage(e.target.value)}
         className="language-select"
       >

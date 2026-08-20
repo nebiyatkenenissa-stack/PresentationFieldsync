@@ -395,6 +395,73 @@ export const clearStuckSyncItems = async () => {
 };
 
 // ============================================================
+// CLEAR STUCK CITIZENS (field officer cleanup)
+// Citizens that can never reach the server are removed from the
+// local store and the sync queue so they stop showing as stuck:
+//  - records stuck at 'syncing' for over a minute,
+//  - queue items that failed past the retry limit,
+//  - citizens queued for 7+ days (documented one-week business rule),
+//  - orphaned queue items whose local record no longer exists.
+// ============================================================
+export const clearStuckCitizens = async () => {
+  const result = { queue: 0, store: 0 };
+  try {
+    // 1) Remove citizens stuck mid-sync ('syncing' for > 60s)
+    const syncingCutoff = Date.now() - 60000;
+    const syncing = await db.citizens.where('synced').equals('syncing').toArray();
+    for (const c of syncing) {
+      if (!c.lastSyncAttempt || c.lastSyncAttempt < syncingCutoff) {
+        await db.citizens.delete(c.id);
+        result.store++;
+      }
+    }
+
+    // 2) Drop citizen queue items that can never sync
+    const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+    const now = Date.now();
+    for (const item of syncQueue.getAll()) {
+      if (item.type !== 'citizen') continue;
+      const queuedAt = item.queuedAt ? new Date(item.queuedAt).getTime() : now;
+      const tooOld = (now - queuedAt) >= WEEK_MS;
+      const tooMany = (item.attempts || 0) >= item.maxRetries;
+      const local = await db.citizens.get(item.id);
+      const orphan = !local;
+      if (tooOld || tooMany || orphan) {
+        if (local && local.synced === false) {
+          await db.citizens.delete(item.id);
+          result.store++;
+        }
+        syncQueue.remove(item.id);
+        result.queue++;
+      }
+    }
+
+    // 3) Purge citizens that failed permanently (kept locally with syncError
+    // but no longer in the sync queue). These were rejected / never synced and
+    // can never reach the server, so they only keep the "needs attention"
+    // warning alive. Citizens waiting offline (no syncError) are untouched.
+    const queuedIds = new Set(
+      syncQueue.getAll().filter(q => q.type === 'citizen').map(q => q.id)
+    );
+    const allCitizens = await db.citizens.toArray();
+    for (const c of allCitizens) {
+      if (c.synced === false && c.syncError && !queuedIds.has(c.id)) {
+        await db.citizens.delete(c.id);
+        result.store++;
+      }
+    }
+
+    if (result.queue + result.store > 0) {
+      console.log(`🧹 Cleared ${result.store} stuck citizen records and ${result.queue} stuck queue items`);
+    }
+    return result;
+  } catch (error) {
+    console.error('Error clearing stuck citizens:', error);
+    return { queue: 0, store: 0 };
+  }
+};
+
+// ============================================================
 // PROCESS SYNC QUEUE (REAL API CALLS)
 // ============================================================
 export const processSyncQueue = async (isOnline) => {
@@ -599,21 +666,14 @@ export const processSyncQueue = async (isOnline) => {
       }
       
       if (item.attempts > MAX_RETRIES) {
-        // Reports and citizens are critical data — they must not be lost, so
-        // keep retrying them even after the normal retry limit is exhausted.
-        const isCritical = item.type === 'report' || item.type === 'citizen';
-        if (isCritical) {
-          item.attempts = 1;
-          const index = syncQueue.pending.findIndex(q => q.id === item.id);
-          if (index !== -1) {
-            syncQueue.pending[index] = item;
-            syncQueue.save();
-          }
-          console.warn(`⚠️ Critical item still failing (${item.type} - ${item.id}), will keep retrying`);
-        } else {
-          console.warn(`⚠️ Max attempts (${MAX_RETRIES}) reached for ${item.id}, removing from queue`);
-          syncQueue.remove(recordId);
-        }
+        // Stop retrying automatically after the retry limit. The local record
+        // is KEPT (synced: false, still visible as "pending") so no data is
+        // lost — the officer can retry manually with the sync button. Without
+        // this, a permanently failing record (e.g. rejected by the server)
+        // stays in the queue forever, firing 'sync-queue-updated' every few
+        // seconds and keeping pages in a perpetual reload/sync loop.
+        console.warn(`⚠️ Max attempts (${MAX_RETRIES}) reached for ${item.type} - ${item.id}, pausing auto-retry`);
+        syncQueue.remove(recordId);
         failed++;
       } else {
         // Update the item in the queue for retry

@@ -5,7 +5,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { exportCSV, exportJSON } from '../../utils/helpers';
 import { db, markReportsDeleted } from '../../services/database';
-import { getRegionOptions, getEmployeeRegionMap } from '../../utils/helpers';
+import { getRegionOptions, getEmployeeRegionMap, getServerBase } from '../../utils/helpers';
 import UserAvatar from '../common/UserAvatar';
 
 function AllReports({ reports, users, supervisorReports, setReports, setSupervisorReports }) {
@@ -13,6 +13,7 @@ function AllReports({ reports, users, supervisorReports, setReports, setSupervis
   const [selectedRegion, setSelectedRegion] = useState('All');
   const [submitterFilter, setSubmitterFilter] = useState('All');
   const [dateRange, setDateRange] = useState({ start: '', end: '' });
+  const [viewingAttachments, setViewingAttachments] = useState(null);
 
   const regionOptions = useMemo(() => getRegionOptions(users), [users]);
   const employeeRegionMap = useMemo(() => getEmployeeRegionMap(users), [users]);
@@ -195,6 +196,23 @@ function AllReports({ reports, users, supervisorReports, setReports, setSupervis
     whiteSpace: 'nowrap'
   };
 
+  const openBtnStyle = {
+    background: '#f0fdf4',
+    color: '#166534',
+    border: '1px solid #86efac',
+    padding: '3px 10px',
+    borderRadius: '6px',
+    cursor: 'pointer',
+    fontSize: '12px',
+    whiteSpace: 'nowrap'
+  };
+
+  const resolveAttachmentUrl = (att) => {
+    if (att.url && att.url.startsWith('/uploads/')) return `${getServerBase()}${att.url}`;
+    if (att.data && att.data.startsWith('data:')) return att.data;
+    return null;
+  };
+
   return (
     <div className="all-reports-view">
       {/* ===== HERO HEADER (dashboard style) ===== */}
@@ -318,6 +336,7 @@ function AllReports({ reports, users, supervisorReports, setReports, setSupervis
                 <th>Submitted By</th>
                 <th>Region</th>
                 <th>Citizens</th>
+                <th>Files</th>
                 <th>Status</th>
                 <th>Sync</th>
                 <th>New</th>
@@ -327,7 +346,7 @@ function AllReports({ reports, users, supervisorReports, setReports, setSupervis
             <tbody>
               {filteredReports.length === 0 && (
                 <tr>
-                  <td colSpan="9" className="empty-state">
+                  <td colSpan="10" className="empty-state">
                     <div className="empty-icon">📋</div>
                     <div>No reports found</div>
                     <small>Try adjusting your filters</small>
@@ -347,6 +366,13 @@ function AllReports({ reports, users, supervisorReports, setReports, setSupervis
                     </td>
                     <td><span className="region-tag">{resolveRegion(r)}</span></td>
                     <td>{r.registrations}</td>
+                    <td>
+                      {r.attachments && r.attachments.length > 0 && (
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', background: '#eff6ff', color: '#1e40af', padding: '2px 8px', borderRadius: '12px', fontSize: '11px', fontWeight: '500' }}>
+                          📎 {r.attachments.length}
+                        </span>
+                      )}
+                    </td>
                     <td><span className="status-tag">{r.operationalStatus}</span></td>
                     <td>
                       {r.synced ?
@@ -371,6 +397,9 @@ function AllReports({ reports, users, supervisorReports, setReports, setSupervis
                     </td>
                     <td>
                       <div style={{ display: 'flex', gap: '6px' }}>
+                        {r.attachments && r.attachments.length > 0 && (
+                          <button onClick={() => setViewingAttachments(r.attachments)} style={openBtnStyle}>📂 Open</button>
+                        )}
                         <button onClick={() => downloadOne(r, 'report')} style={downloadBtnStyle}>⬇️</button>
                         <button onClick={() => deleteReport(r.id, r)} style={deleteBtnStyle}>🗑️</button>
                       </div>
@@ -420,6 +449,7 @@ function AllReports({ reports, users, supervisorReports, setReports, setSupervis
                 <th>Officer / Self</th>
                 <th>Performance</th>
                 <th>Rating</th>
+                <th>Files</th>
                 <th>Status</th>
                 <th>New</th>
                 <th>Action</th>
@@ -428,7 +458,7 @@ function AllReports({ reports, users, supervisorReports, setReports, setSupervis
             <tbody>
               {filteredSupervisorReports.length === 0 && (
                 <tr>
-                  <td colSpan="9" className="empty-state">
+                  <td colSpan="11" className="empty-state">
                     <div className="empty-icon">👤</div>
                     <div>No supervisor reports found</div>
                   </td>
@@ -498,6 +528,13 @@ function AllReports({ reports, users, supervisorReports, setReports, setSupervis
                     </td>
                     <td>{isSelfReport ? 'N/A' : `${r.overallRating}/5 ⭐`}</td>
                     <td>
+                      {r.attachments && r.attachments.length > 0 && (
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', background: '#eff6ff', color: '#1e40af', padding: '2px 8px', borderRadius: '12px', fontSize: '11px', fontWeight: '500' }}>
+                          📎 {r.attachments.length}
+                        </span>
+                      )}
+                    </td>
+                    <td>
                       <span className="status-tag submitted" style={{
                         padding: '2px 10px',
                         borderRadius: '12px',
@@ -526,6 +563,9 @@ function AllReports({ reports, users, supervisorReports, setReports, setSupervis
                     </td>
                     <td>
                       <div style={{ display: 'flex', gap: '6px' }}>
+                        {r.attachments && r.attachments.length > 0 && (
+                          <button onClick={() => setViewingAttachments(r.attachments)} style={openBtnStyle}>📂 Open</button>
+                        )}
                         <button onClick={() => downloadOne(r, 'supervisor_report')} style={downloadBtnStyle}>⬇️</button>
                         <button onClick={() => deleteSupervisorReport(r.id)} style={deleteBtnStyle}>🗑️</button>
                       </div>
@@ -537,6 +577,71 @@ function AllReports({ reports, users, supervisorReports, setReports, setSupervis
           </table>
         </div>
       </div>
+
+      {/* ===== ATTACHMENT VIEWER MODAL ===== */}
+      {viewingAttachments && (
+        <div onClick={() => setViewingAttachments(null)} style={{
+          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          zIndex: 9999, padding: '20px'
+        }}>
+          <div onClick={e => e.stopPropagation()} style={{
+            background: 'white', borderRadius: '16px', padding: '24px',
+            maxWidth: '700px', width: '100%', maxHeight: '80vh',
+            overflow: 'auto', boxShadow: '0 20px 60px rgba(0,0,0,0.3)'
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+              <h3 style={{ margin: 0, fontSize: '18px', fontWeight: '700' }}>📎 Attachments ({viewingAttachments.length})</h3>
+              <button onClick={() => setViewingAttachments(null)} style={{
+                background: '#fee2e2', color: '#991b1b', border: 'none',
+                padding: '6px 14px', borderRadius: '8px', cursor: 'pointer',
+                fontWeight: '600', fontSize: '13px'
+              }}>✕ Close</button>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              {viewingAttachments.map((att, i) => {
+                const url = resolveAttachmentUrl(att);
+                const isImage = att.type?.startsWith('image/') || att.isImage;
+                return (
+                  <div key={i} style={{
+                    border: '1px solid #e5e7eb', borderRadius: '10px',
+                    padding: '12px', background: '#f9fafb'
+                  }}>
+                    {isImage && url ? (
+                      <img src={url} alt={att.name} style={{
+                        width: '100%', maxHeight: '300px', objectFit: 'contain',
+                        borderRadius: '8px', marginBottom: '8px', background: '#fff'
+                      }} />
+                    ) : (
+                      <div style={{
+                        padding: '20px', textAlign: 'center', background: '#e5e7eb',
+                        borderRadius: '8px', marginBottom: '8px', fontSize: '24px'
+                      }}>
+                        📄
+                      </div>
+                    )}
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <div>
+                        <div style={{ fontWeight: '600', fontSize: '13px' }}>{att.name}</div>
+                        <div style={{ fontSize: '11px', color: '#6b7280' }}>
+                          {att.type} &middot; {att.size ? `${(att.size / 1024).toFixed(1)} KB` : ''}
+                        </div>
+                      </div>
+                      {url && (
+                        <a href={url} download={att.name} target="_blank" rel="noopener noreferrer" style={{
+                          background: '#dbeafe', color: '#1e40af', padding: '6px 14px',
+                          borderRadius: '8px', textDecoration: 'none', fontWeight: '600',
+                          fontSize: '12px'
+                        }}>⬇️ Download</a>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
