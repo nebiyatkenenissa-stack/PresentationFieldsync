@@ -6,7 +6,8 @@ import { uid } from '../../utils/helpers';
 import { syncQueue, checkRealInternet } from '../../services/database';
 import UserAvatar from '../common/UserAvatar';
 
-const API_BASE = 'http://localhost:5000/api';
+import { getServerBase } from '../../utils/helpers';
+const API_BASE = getServerBase() + '/api';
 
 function PermissionManagement({
   filteredPermissions,

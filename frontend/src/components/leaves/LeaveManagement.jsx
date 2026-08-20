@@ -5,7 +5,8 @@ import { db } from '../../services/database';
 import { uid } from '../../utils/helpers';
 import { syncQueue, checkRealInternet } from '../../services/database';
 
-const API_BASE = 'http://localhost:5000/api';
+import { getServerBase } from '../../utils/helpers';
+const API_BASE = getServerBase() + '/api';
 
 function LeaveManagement({
   filteredLeaves,

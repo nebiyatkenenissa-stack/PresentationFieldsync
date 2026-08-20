@@ -2,7 +2,7 @@
 
 import React, { useState, useMemo, useEffect } from 'react';
 import { db } from '../../services/database';
-import { getToday, uid } from '../../utils/helpers';
+import { getToday, uid, getServerBase } from '../../utils/helpers';
 import { syncQueue, checkRealInternet, clearStuckSyncItems } from '../../services/database';
 
 function AttendanceManagement({ 
@@ -227,7 +227,7 @@ function AttendanceManagement({
       if (online) {
         // ONLINE – try to send directly to the API
         try {
-          const response = await fetch('http://localhost:5000/api/attendance', {
+          const response = await fetch(getServerBase() + '/api/attendance', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload),

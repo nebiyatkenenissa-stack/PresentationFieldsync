@@ -5,7 +5,8 @@ import Dexie from 'dexie';
 import { SAMPLE_USERS } from '../utils/constants';
 import { uid, getToday } from '../utils/helpers';
 
-const API_URL = 'http://localhost:5000/api';
+import { getServerBase } from '../utils/helpers';
+const API_URL = `${getServerBase()}/api`;
 
 // Legacy demo reports used old compass regions (North/South/East/West).
 // They must never re-enter the local DB, so we filter them on every pull

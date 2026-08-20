@@ -1,7 +1,7 @@
 // components/audit/AuditLog.js
 import React, { useState, useEffect, useMemo } from 'react';
 import { db, checkRealInternet, getApiBase } from '../../services/database';
-import { exportCSV, exportJSON } from '../../utils/helpers';
+import { exportCSV, exportJSON, getServerBase } from '../../utils/helpers';
 
 function AuditLog({ auditLog, setAuditLog }) {
   const [isClearing, setIsClearing] = useState(false);
@@ -36,7 +36,7 @@ function AuditLog({ auditLog, setAuditLog }) {
   // Refresh function to pull from server and update state
   const handleRefresh = async () => {
     try {
-      const response = await fetch('http://localhost:5000/api/audit');
+      const response = await fetch(getServerBase() + '/api/audit');
       if (response.ok) {
         const serverLogs = await response.json();
         for (const log of serverLogs) {

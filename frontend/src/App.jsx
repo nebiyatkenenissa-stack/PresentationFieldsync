@@ -30,8 +30,9 @@ import {
   cleanupLegacyReports
 } from './services/database';
 import { useScreenTime } from './hooks/useScreenTime';
-import { getToday, formatTime, exportCSV, exportJSON, fakeSyncApi, convertTo12Hour } from './utils/helpers';
+import { getToday, formatTime, exportCSV, exportJSON, fakeSyncApi, convertTo12Hour, getServerBase } from './utils/helpers';
 import { uid, generateNationalId } from './utils/helpers';
+const API_BASE = getServerBase() + '/api';
 import './App.css';
 
 // Import components
@@ -532,7 +533,7 @@ function AppContent() {
     const online = await checkRealInternet();
     if (online) {
       try {
-        await fetch('http://localhost:5000/api/audit', {
+        await fetch(`${API_BASE}/audit`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(log)
@@ -1799,7 +1800,7 @@ function AppContent() {
     
     if (online) {
       try {
-        const response = await fetch('http://localhost:5000/api/tasks', {
+        const response = await fetch(`${API_BASE}/tasks`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(task)
@@ -1908,7 +1909,7 @@ function AppContent() {
       
       if (online) {
         try {
-          const response = await fetch('http://localhost:5000/api/leaves', {
+          const response = await fetch(`${API_BASE}/leaves`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(leave)
@@ -2025,7 +2026,7 @@ function AppContent() {
       
       if (online) {
         try {
-          const response = await fetch('http://localhost:5000/api/permissions', {
+          const response = await fetch(`${API_BASE}/permissions`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(permission)
@@ -2159,7 +2160,7 @@ function AppContent() {
 
     if (online) {
       try {
-        const response = await fetch('http://localhost:5000/api/citizens', {
+        const response = await fetch(`${API_BASE}/citizens`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(newCitizen)
@@ -2365,7 +2366,7 @@ function AppContent() {
 
     if (online) {
       try {
-        const response = await fetch('http://localhost:5000/api/supervisor-reports', {
+        const response = await fetch(`${API_BASE}/supervisor-reports`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(newReport)
@@ -2426,7 +2427,7 @@ function AppContent() {
 
     if (online) {
       try {
-        const response = await fetch('http://localhost:5000/api/supervisor-reports', {
+        const response = await fetch(`${API_BASE}/supervisor-reports`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(newReport)

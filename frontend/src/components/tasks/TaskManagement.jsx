@@ -5,8 +5,10 @@ import { uid } from '../../utils/helpers';
 import { db } from '../../services/database';
 import { syncQueue, checkRealInternet } from '../../services/database';
 
+import { getServerBase } from '../../utils/helpers';
+
 // Set your API base URL (adjust to your backend)
-const API_BASE_URL = 'http://localhost:5000/api';
+const API_BASE_URL = getServerBase() + '/api';
 
 function TaskManagement({
   filteredTasks,
