@@ -22,7 +22,6 @@ function TopPerformers({ performers, title = 'Top Performing Officers' }) {
             <span className="performer-name">{emp.employeeName}</span>
             <span className="performer-region">{emp.location}</span>
             <span className="performer-stats">🆔 {emp.totalRegistrations} citizens</span>
-            <span className="performer-efficiency">{emp.avgEfficiency}%</span>
           </div>
         ))}
       </div>

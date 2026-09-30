@@ -1,8 +1,10 @@
 // components/common/Header.jsx
 
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
-import { db, syncQueue, checkRealInternet, getApiBase } from '../../services/database';
+import toast from 'react-hot-toast';
+import i18n from '../../utils/i18n';
+import { db, syncQueue, checkRealInternet } from '../../services/database';
 import { getProfilePhotoUrl } from '../../utils/helpers';
 import ThemeToggle from './ThemeToggle';
 import LanguageSelector from './LanguageSelector';
@@ -19,103 +21,43 @@ function Header({
   setNotifications,
   markNotificationRead,
   markAllNotificationsRead,
-  onProfileClick
+  onProfileClick,
+  onLogout,
+  setActiveTab
 }) {
   const { t } = useTranslation();
   const [showDropdown, setShowDropdown] = useState(false);
   const [showProfilePopover, setShowProfilePopover] = useState(false);
+  const [selectedNotification, setSelectedNotification] = useState(null);
   const [isOnline, setIsOnline] = useState(propIsOnline || navigator.onLine);
   const [syncing, setSyncing] = useState(propSyncing || false);
   const [pendingSync, setPendingSync] = useState(propPendingSync || 0);
   const [syncProgress, setSyncProgress] = useState(0);
+  const [profilePhotoFailed, setProfilePhotoFailed] = useState(false);
 
-  // ===== REAL NETWORK INFO =====
-  const [networkInfo, setNetworkInfo] = useState({
-    type: 'unknown',
-    speed: '--',
-    latency: '--'
-  });
-
-  useEffect(() => {
-    const connection = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
-    let cancelled = false;
-
-    const estimateGeneration = (rttMs) => {
-      if (rttMs < 100) return '4g';
-      if (rttMs < 300) return '3g';
-      return '2g';
-    };
-
-    // Fallback when the Network Information API is not available (e.g. Safari):
-    // measure real latency against the API and map it to 2G / 3G / 4G.
-    const probeLatency = async () => {
-      try {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 5000);
-        const start = performance.now();
-        await fetch(`${getApiBase()}/api/test`, {
-          method: 'GET',
-          cache: 'no-store',
-          signal: controller.signal
-        });
-        clearTimeout(timeoutId);
-        if (!cancelled) {
-          const rtt = Math.round(performance.now() - start);
-          setNetworkInfo({ type: estimateGeneration(rtt), speed: '', latency: `${rtt}ms` });
-        }
-      } catch (e) {
-        if (!cancelled) {
-          setNetworkInfo({ type: 'unknown', speed: '', latency: '--' });
-        }
-      }
-    };
-
-    const updateNetworkInfo = () => {
-      if (connection) {
-        const type = connection.effectiveType || 'unknown'; // 'slow-2g', '2g', '3g', '4g'
-        const speed = connection.downlink ? `${connection.downlink.toFixed(1)} Mbps` : '';
-        const latency = connection.rtt ? `${connection.rtt}ms` : '';
-        setNetworkInfo({ type, speed, latency });
-      } else {
-        probeLatency();
-      }
-    };
-
-    updateNetworkInfo();
-
-    const handleOnline = () => {
-      if (!connection) probeLatency();
-    };
-
-    if (connection) {
-      connection.addEventListener('change', updateNetworkInfo);
-    }
-    window.addEventListener('online', handleOnline);
-
-    const fallbackInterval = setInterval(() => {
-      if (!connection && navigator.onLine) probeLatency();
-    }, 15000);
-
-    return () => {
-      cancelled = true;
-      if (connection) {
-        connection.removeEventListener('change', updateNetworkInfo);
-      }
-      window.removeEventListener('online', handleOnline);
-      clearInterval(fallbackInterval);
-    };
-  }, []);
+  const cachedPhotoUrl = user?.profilePhotoCache ? getProfilePhotoUrl(user.profilePhotoCache) : null;
+  const currentPhoto = user?.profilePhoto || user?.profile_photo || null;
+  const headerPhotoUrl = profilePhotoFailed && cachedPhotoUrl
+    ? cachedPhotoUrl
+    : (currentPhoto ? getProfilePhotoUrl(currentPhoto) : null);
 
   // ===== CHECK NETWORK (real internet) =====
+  const isFirstNetworkCheck = useRef(true);
   useEffect(() => {
     const checkNetwork = async () => {
-      if (!navigator.onLine) {
-        if (isOnline !== false) setIsOnline(false);
-        return;
+      let online = false;
+      if (navigator.onLine) {
+        online = await checkRealInternet();
       }
-      const online = await checkRealInternet();
       if (online !== isOnline) {
         setIsOnline(online);
+        if (!isFirstNetworkCheck.current) {
+          if (online) {
+            toast.success('🟢 Back online. Connected to the server.');
+          } else {
+            toast.error('🔴 Offline — server unreachable. Data will be saved locally.');
+          }
+        }
         if (online) {
           const queueCount = syncQueue.count();
           if (queueCount > 0) {
@@ -124,6 +66,7 @@ function Header({
           }
         }
       }
+      isFirstNetworkCheck.current = false;
     };
 
     checkNetwork();
@@ -204,6 +147,7 @@ function Header({
   const getTitle = () => {
     const titles = {
       dashboard: 'dashboard',
+      profile: 'profile',
       register: 'register',
       reports: 'reports',
       report_new: 'report_new',
@@ -262,31 +206,137 @@ function Header({
     }
   };
 
-  // Network status display helper
-  const getNetworkDisplay = () => {
-    if (!isOnline) return { label: t('header.offline'), color: '#dc2626', bg: '#fee2e2' };
-    const typeMap = {
-      'slow-2g': '2G',
-      '2g': '2G',
-      '3g': '3G',
-      '4g': '4G',
-      '5g': '5G',
-      'unknown': t('header.online')
-    };
-    const type = networkInfo.type || 'unknown';
-    const label = typeMap[type] || t('header.online');
-    const speed = networkInfo.speed !== '--' ? networkInfo.speed : '';
-    const latency = networkInfo.latency !== '--' ? networkInfo.latency : '';
-    return {
-      label: label,
-      speed: speed,
-      latency: latency,
-      color: '#065f37',
-      bg: '#d1fae5'
-    };
+  // Network status is reported via toast notifications (no inline indicator).
+
+  // ============================================================
+  // OPEN A NOTIFICATION
+  //   welcome  -> stays on the current page, just the detail box
+  //   anything else -> also follows the notification's page
+  // ============================================================
+  const NOTIFICATION_TYPES = {
+    success: { icon: '✅', color: '#0b7e4b', bg: '#ecfdf5', label: 'Success' },
+    error: { icon: '❌', color: '#dc2626', bg: '#fef2f2', label: 'Alert' },
+    warning: { icon: '⚠️', color: '#d97706', bg: '#fffbeb', label: 'Warning' },
+    info: { icon: 'ℹ️', color: '#2563eb', bg: '#eff6ff', label: 'Information' }
   };
 
-  const netDisplay = getNetworkDisplay();
+  const LINK_TO_TAB = {
+    '/dashboard': 'dashboard',
+    '/profile': 'profile',
+    '/register': 'register',
+    '/reports': 'reports',
+    '/report_new': 'report_new',
+    '/tasks': 'tasks',
+    '/permissions': 'permissions',
+    '/screentime': 'screentime',
+    '/supervisor_reports': 'supervisor_reports',
+    '/team': 'team',
+    '/users': 'users',
+    '/analytics': 'analytics',
+    '/citizens': 'citizens',
+    '/audit': 'audit',
+    '/all_reports': 'all_reports',
+    '/alerts': 'alerts',
+    '/verification': 'verification'
+  };
+
+  const TAB_ACCESS = {
+    dashboard: ['manager', 'supervisor', 'field_officer'],
+    profile: ['manager', 'supervisor', 'field_officer'],
+    register: ['field_officer'],
+    reports: ['supervisor', 'field_officer'],
+    report_new: ['field_officer'],
+    tasks: ['supervisor', 'field_officer'],
+    permissions: ['manager', 'supervisor', 'field_officer'],
+    screentime: ['supervisor'],
+    supervisor_reports: ['supervisor'],
+    team: ['supervisor'],
+    users: ['manager'],
+    analytics: ['manager'],
+    citizens: ['manager'],
+    audit: ['manager'],
+    all_reports: ['manager'],
+    alerts: ['manager', 'supervisor', 'field_officer'],
+    verification: ['supervisor']
+  };
+
+  const isWelcomeNotification = (n) => /welcome/i.test(n?.title || '');
+
+  const resolveTargetTab = (n) => {
+    const tab = LINK_TO_TAB[n?.link];
+    if (!tab) return null;
+    const allowed = TAB_ACCESS[tab];
+    if (allowed && !allowed.includes(user?.role)) return null;
+    return tab;
+  };
+
+  const handleNotificationClick = async (n) => {
+    await handleMarkRead(n.id);
+    setShowDropdown(false);
+    setSelectedNotification(n);
+    if (isWelcomeNotification(n)) return;
+    const tab = resolveTargetTab(n);
+    if (tab) setActiveTab?.(tab);
+  };
+
+  const closeNotificationDetail = () => setSelectedNotification(null);
+
+  const selectedType = NOTIFICATION_TYPES[selectedNotification?.type] || NOTIFICATION_TYPES.info;
+  const selectedTab = isWelcomeNotification(selectedNotification) ? null : resolveTargetTab(selectedNotification);
+  const selectedPageTitle = selectedTab ? t(`header.page_titles.${selectedTab}`) : null;
+
+  const timeAgo = (ts) => {
+    const then = new Date(ts).getTime();
+    if (Number.isNaN(then)) return null;
+    const diffSeconds = Math.round((then - Date.now()) / 1000);
+    const units = [
+      ['year', 31536000], ['month', 2592000], ['week', 604800],
+      ['day', 86400], ['hour', 3600], ['minute', 60]
+    ];
+    try {
+      const rtf = new Intl.RelativeTimeFormat(i18n.language, { numeric: 'auto' });
+      for (const [unit, seconds] of units) {
+        if (Math.abs(diffSeconds) >= seconds || unit === 'minute') {
+          return rtf.format(Math.round(diffSeconds / seconds), unit);
+        }
+      }
+    } catch (e) {
+      return null;
+    }
+    return null;
+  };
+
+  // Escape closes the detail box without leaving the current page.
+  useEffect(() => {
+    if (!selectedNotification) return;
+    const onKeyDown = (e) => {
+      if (e.key === 'Escape') setSelectedNotification(null);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [selectedNotification]);
+
+  // The profile popover now carries the logout action, so dismiss it on
+  // outside click or Escape instead of leaving it stuck open.
+  useEffect(() => {
+    if (!showProfilePopover) return;
+    const onPointerDown = (e) => {
+      if (
+        e.target.closest('[data-profile-chip]') ||
+        e.target.closest('[data-profile-popover]')
+      ) return;
+      setShowProfilePopover(false);
+    };
+    const onKeyDown = (e) => {
+      if (e.key === 'Escape') setShowProfilePopover(false);
+    };
+    document.addEventListener('mousedown', onPointerDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', onPointerDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [showProfilePopover]);
 
   return (
     <header className="main-header" style={{
@@ -348,7 +398,7 @@ function Header({
                 alignItems: 'center',
                 justifyContent: 'center'
               }}>
-                {unreadCount > 9 ? '9+' : unreadCount}
+                {unreadCount > 99 ? '99+' : unreadCount}
               </span>
             )}
           </button>
@@ -410,21 +460,25 @@ function Header({
                 {userNotifications.slice(0, 15).map(n => (
                   <div 
                     key={n.id} 
-                    onClick={() => handleMarkRead(n.id)}
+                    onClick={() => handleNotificationClick(n)}
                     style={{
                       padding: '10px 16px',
                       borderBottom: '1px solid #f3f4f6',
                       cursor: 'pointer',
                       transition: 'background 0.2s',
                       background: !n.read ? '#eff6ff' : 'white',
-                      borderLeft: !n.read ? '3px solid #2563eb' : 'none'
+                      borderLeft: !n.read ? '3px solid #2563eb' : 'none',
+                      textDecoration: 'none'
                     }}
                     onMouseEnter={(e) => e.currentTarget.style.background = '#f8fafc'}
                     onMouseLeave={(e) => e.currentTarget.style.background = !n.read ? '#eff6ff' : 'white'}
                   >
-                    <div style={{fontWeight: '500', fontSize: '13px'}}>{n.title}</div>
-                    <div style={{fontSize: '12px', color: '#64748b', marginTop: '2px'}}>{n.message}</div>
-                    <div style={{fontSize: '10px', color: '#9ca3af', marginTop: '4px'}}>
+                    <div style={{fontWeight: '500', fontSize: '13px', display: 'flex', alignItems: 'center', gap: '6px', textDecoration: 'none'}}>
+                      {n.read && <span style={{ color: '#065f37', fontSize: '11px' }}>✓</span>}
+                      <span style={{ textDecoration: 'none', opacity: n.read ? 0.7 : 1 }}>{n.title}</span>
+                    </div>
+                    <div style={{fontSize: '12px', color: '#64748b', marginTop: '2px', textDecoration: 'none'}}>{n.message}</div>
+                    <div style={{fontSize: '10px', color: '#9ca3af', marginTop: '4px', textDecoration: 'none'}}>
                       {new Date(n.timestamp).toLocaleString()}
                     </div>
                   </div>
@@ -434,40 +488,7 @@ function Header({
           )}
         </div>
 
-        {/* ===== REAL NETWORK STATUS (no click, no pending info) ===== */}
-        <div 
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '6px',
-            padding: '4px 12px',
-            borderRadius: '20px',
-            background: isOnline ? '#d1fae5' : '#fee2e2',
-            border: isOnline ? '1px solid #0b7e4b' : '1px solid #dc2626',
-            cursor: 'default',
-            userSelect: 'none'
-          }}
-        >
-          <span style={{
-            width: '8px',
-            height: '8px',
-            borderRadius: '50%',
-            display: 'inline-block',
-            background: isOnline ? '#0b7e4b' : '#dc2626',
-            animation: isOnline ? 'none' : 'pulse 1.5s ease-in-out infinite'
-          }}></span>
-          <span style={{ fontWeight: '600', fontSize: '12px', color: isOnline ? '#065f37' : '#991b1b' }}>
-            {isOnline ? (
-              <>
-                📶 {netDisplay.label}
-                {netDisplay.speed && ` (${netDisplay.speed})`}
-                {netDisplay.latency && ` ${netDisplay.latency}`}
-              </>
-            ) : (
-              t('header.offline')
-            )}
-          </span>
-        </div>
+        {/* ===== REAL NETWORK STATUS: now reported via toast notifications ===== */}
 
         {/* Syncing Indicator */}
         {syncing && (
@@ -508,7 +529,8 @@ function Header({
 
         {/* User Profile (view-only chip + popover) */}
         <div style={{ position: 'relative' }}>
-          <div 
+          <div
+            data-profile-chip
             onClick={() => setShowProfilePopover(v => !v)}
             style={{
               display: 'flex',
@@ -544,11 +566,12 @@ function Header({
               fontWeight: '600',
               color: '#1e3a5f'
             }}>
-              {user?.profilePhoto ? (
+              {headerPhotoUrl ? (
                 <img 
-                  src={getProfilePhotoUrl(user.profilePhoto)} 
+                  src={headerPhotoUrl} 
                   alt="Profile" 
                   style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                  onError={() => { if (!profilePhotoFailed && cachedPhotoUrl) setProfilePhotoFailed(true); }}
                 />
               ) : (
                 user?.name?.charAt(0)?.toUpperCase() || '👤'
@@ -565,18 +588,20 @@ function Header({
           </div>
 
           {showProfilePopover && (
-            <div style={{
-              position: 'absolute',
-              top: '100%',
-              right: 0,
-              width: '280px',
-              background: 'white',
-              borderRadius: '12px',
-              boxShadow: '0 10px 40px rgba(0,0,0,0.15)',
-              overflow: 'hidden',
-              zIndex: 1000,
-              marginTop: '8px'
-            }}>
+            <div
+              data-profile-popover
+              style={{
+                position: 'absolute',
+                top: '100%',
+                right: 0,
+                width: '280px',
+                background: 'white',
+                borderRadius: '12px',
+                boxShadow: '0 10px 40px rgba(0,0,0,0.15)',
+                overflow: 'hidden',
+                zIndex: 1000,
+                marginTop: '8px'
+              }}>
               <div style={{
                 padding: '16px',
                 display: 'flex',
@@ -598,11 +623,12 @@ function Header({
                   color: '#1e3a5f',
                   flexShrink: 0
                 }}>
-                  {user?.profilePhoto ? (
+                  {headerPhotoUrl ? (
                     <img 
-                      src={getProfilePhotoUrl(user.profilePhoto)} 
+                      src={headerPhotoUrl} 
                       alt="Profile" 
                       style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                      onError={() => { if (!profilePhotoFailed && cachedPhotoUrl) setProfilePhotoFailed(true); }}
                     />
                   ) : (
                     user?.name?.charAt(0)?.toUpperCase() || '👤'
@@ -653,12 +679,128 @@ function Header({
                 >
                   {t('header.view_profile') || 'View / Edit Profile'}
                 </button>
+
+                {onLogout && (
+                  <button
+                    onClick={() => {
+                      setShowProfilePopover(false);
+                      onLogout();
+                    }}
+                    className="header-logout-btn"
+                    style={{
+                      width: '100%',
+                      marginTop: '8px',
+                      padding: '9px 12px',
+                      borderRadius: '8px',
+                      border: '1px solid #fecaca',
+                      background: '#fef2f2',
+                      color: '#dc2626',
+                      fontSize: '13px',
+                      fontWeight: '600',
+                      cursor: 'pointer'
+                    }}
+                    onMouseEnter={(e) => { e.currentTarget.style.background = '#fee2e2'; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.background = '#fef2f2'; }}
+                  >
+                    🚪 {t('nav.logout') || 'Logout'}
+                  </button>
+                )}
               </div>
             </div>
           )}
         </div>
 
       </div>
+
+      {/* ===== NOTIFICATION DETAIL BOX (welcome stays put, others follow their page) ===== */}
+      {selectedNotification && (
+        <div
+          className="notification-detail-overlay"
+          role="presentation"
+          onClick={closeNotificationDetail}
+        >
+          <div
+            className="notification-detail-box"
+            role="dialog"
+            aria-modal="true"
+            aria-label={selectedNotification.title}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="notification-detail-head">
+              <span
+                className="notification-detail-type"
+                style={{ background: selectedType.bg, color: selectedType.color }}
+              >
+                <span aria-hidden="true">{selectedType.icon}</span>
+                {selectedType.label}
+              </span>
+              <div className="notification-detail-title">{selectedNotification.title}</div>
+              <button
+                className="notification-detail-close"
+                onClick={closeNotificationDetail}
+                aria-label={t('header.close')}
+                title={t('header.close')}
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="notification-detail-body">
+              <p className="notification-detail-message">
+                {selectedNotification.message || selectedNotification.title}
+              </p>
+
+              <dl className="notification-detail-meta">
+                <div className="notification-detail-row">
+                  <dt>{t('header.notification_status')}</dt>
+                  <dd className={selectedNotification.read ? 'is-read' : 'is-unread'}>
+                    {selectedNotification.read
+                      ? t('header.notification_read')
+                      : t('header.notification_unread')}
+                  </dd>
+                </div>
+
+                <div className="notification-detail-row">
+                  <dt>{t('header.notification_received')}</dt>
+                  <dd>{new Date(selectedNotification.timestamp).toLocaleString()}</dd>
+                </div>
+
+                {timeAgo(selectedNotification.timestamp) && (
+                  <div className="notification-detail-row">
+                    <dt>{t('header.notification_when')}</dt>
+                    <dd>{timeAgo(selectedNotification.timestamp)}</dd>
+                  </div>
+                )}
+
+                {selectedPageTitle && (
+                  <div className="notification-detail-row">
+                    <dt>{t('header.notification_page')}</dt>
+                    <dd>{selectedPageTitle}</dd>
+                  </div>
+                )}
+              </dl>
+            </div>
+
+            <div className="notification-detail-foot">
+              <button className="notification-detail-ghost" onClick={closeNotificationDetail}>
+                {t('header.close')}
+              </button>
+              {selectedTab && (
+                <button
+                  className="notification-detail-action"
+                  onClick={() => {
+                    setActiveTab?.(selectedTab);
+                    closeNotificationDetail();
+                  }}
+                  style={{ background: selectedType.color }}
+                >
+                  {t('header.notification_go_to', { page: selectedPageTitle })}
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       <style>{`
         @keyframes pulse {

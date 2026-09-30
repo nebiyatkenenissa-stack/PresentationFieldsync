@@ -1,6 +1,9 @@
 // components/alerts/AlertManagement.js - FULL WITH SERVER SYNC
 
 import React, { useState, useEffect, useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
+import toast from 'react-hot-toast';
+import { confirmToast } from '../../utils/confirmToast';
 import { db, checkRealInternet, syncQueue, getApiBase } from '../../services/database';
 import { uid, exportCSV, getToday } from '../../utils/helpers';
 import UserAvatar from '../common/UserAvatar';
@@ -8,11 +11,11 @@ import UserAvatar from '../common/UserAvatar';
 const API_BASE_URL = getApiBase();
 
 function AlertManagement({ alerts, setAlerts, users, user, isManager, isSupervisor, isOfficer, teamMembers, addNotification }) {
+  const { t } = useTranslation();
   const [showModal, setShowModal] = useState(false);
   const [modalMode, setModalMode] = useState('alert');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isOnline, setIsOnline] = useState(navigator.onLine);
-  const [pendingCount, setPendingCount] = useState(0);
   const [newAlert, setNewAlert] = useState({
     title: '',
     message: '',
@@ -39,12 +42,20 @@ function AlertManagement({ alerts, setAlerts, users, user, isManager, isSupervis
   const teamOfficers = (teamMembers && teamMembers.length > 0 ? teamMembers : users)
     .filter(u => u && u.role === 'field_officer' && u.supervisorId === user?.id);
 
-  const myManager = (users || []).find(u => u.role === 'manager' && u.id === user?.managerId);
+  const myManager = (users || []).reduce((best, u) => {
+    if (u.role !== 'manager' || u.id !== user?.managerId) return best;
+    if (!best || (u.source === 'server' && best.source !== 'server')) return u;
+    return best;
+  }, undefined);
 
   // Lookup users by employee ID so we can show their profile photo next to a message.
   const userByEmpId = useMemo(() => {
     const map = {};
-    (users || []).forEach(u => { if (u && u.employeeId) map[u.employeeId] = u; });
+    (users || []).forEach(u => {
+      if (!u || !u.employeeId) return;
+      const prev = map[u.employeeId];
+      if (!prev || (u.source === 'server' && prev.source !== 'server')) map[u.employeeId] = u;
+    });
     return map;
   }, [users]);
 
@@ -82,23 +93,13 @@ function AlertManagement({ alerts, setAlerts, users, user, isManager, isSupervis
     const checkNetwork = async () => {
       const online = await checkRealInternet();
       setIsOnline(online);
-      setPendingCount(syncQueue.count());
     };
 
     checkNetwork();
     const interval = setInterval(checkNetwork, 5000);
 
-    const handleQueueUpdate = () => {
-      setPendingCount(syncQueue.count());
-    };
-
-    window.addEventListener('sync-queue-updated', handleQueueUpdate);
-    window.addEventListener('sync-complete', handleQueueUpdate);
-
     return () => {
       clearInterval(interval);
-      window.removeEventListener('sync-queue-updated', handleQueueUpdate);
-      window.removeEventListener('sync-complete', handleQueueUpdate);
     };
   }, []);
 
@@ -109,33 +110,16 @@ function AlertManagement({ alerts, setAlerts, users, user, isManager, isSupervis
     .filter(a => a.pending !== true)
     .filter(a => a.sentBy !== user?.employeeId)
     .filter(a => !deletedIds.includes(a.id))
+    // A message is only shown to the users it was actually addressed to (the
+    // selected recipients) or to everyone for broadcasts. Role-based heuristics
+    // leaked messages to officers/supervisors that were never selected.
     .filter(a => {
-    if (isManager) {
-      // Manager only sees messages addressed to them or broadcast to everyone.
-      // Officer messages sent to the supervisor only stay hidden from the manager.
-      const targets = a.targetUsers || [];
-      const isForMe = targets.some(t => t.id === user?.id) || a.targetEmployeeId === user?.employeeId;
       const isBroadcast = a.targetAll === true;
-      return isForMe || isBroadcast;
-    }
-    const targets = a.targetUsers || [];
-    const isForMe = targets.some(t => t.id === user?.id) || a.targetEmployeeId === user?.employeeId;
-    const isMine = a.sentBy === user?.employeeId;
-    const managerEmployeeId = (users || []).find(u => u.role === 'manager')?.employeeId;
-    if (isSupervisor) {
-      const forMyTeam = targets.some(t => t.supervisorId === user?.id || teamOfficers.some(o => o.id === t.id));
-      const fromMyTeamOfficer = teamOfficers.some(o => o.employeeId === a.sentBy);
-      const fromManager = a.sentBy === managerEmployeeId;
-      return isForMe || isMine || forMyTeam || fromMyTeamOfficer || fromManager;
-    }
-    if (isOfficer) {
-      const mySupervisor = (users || []).find(u => u.id === user?.supervisorId);
-      const fromMySupervisor = !!mySupervisor && a.sentBy === mySupervisor.employeeId;
-      const fromManager = a.sentBy === managerEmployeeId;
-      return isForMe || isMine || fromMySupervisor || fromManager;
-    }
-    return true;
-  });
+      if (isBroadcast) return true;
+      const isTargetedToMe = (Array.isArray(a.targetUsers) && a.targetUsers.some(t => t.id === user?.id))
+        || a.targetEmployeeId === user?.employeeId;
+      return isTargetedToMe;
+    });
 
   const getTargetUsers = () => {
     const targetUsers = [];
@@ -167,16 +151,18 @@ function AlertManagement({ alerts, setAlerts, users, user, isManager, isSupervis
       return dedupe(selected.length > 0 ? selected : candidates);
     }
 
-    // Manager -> all officers + supervisors (+ other managers)
+    // Manager -> all officers + supervisors (+ other managers), but ONLY for a
+    // broadcast. A message to a specific officer goes solely to that officer so
+    // unselected users never receive it.
     if (newAlert.targetAll) {
       const fieldUsers = users.filter(u => u.role === 'field_officer' || u.role === 'supervisor');
       targetUsers.push(...fieldUsers);
+      const managers = users.filter(u => u.role === 'manager' && u.id !== user?.id);
+      targetUsers.push(...managers);
     } else if (newAlert.targetEmployeeId) {
       const targetUser = users.find(u => u.employeeId === newAlert.targetEmployeeId);
       if (targetUser) targetUsers.push(targetUser);
     }
-    const managers = users.filter(u => u.role === 'manager' && u.id !== user?.id);
-    targetUsers.push(...managers);
 
     return dedupe(targetUsers);
   };
@@ -197,7 +183,7 @@ function AlertManagement({ alerts, setAlerts, users, user, isManager, isSupervis
     e.preventDefault();
     
     if (!newAlert.title || !newAlert.message) {
-      alert('Please fill all required fields');
+      toast(t('alerts.fill_required'));
       return;
     }
 
@@ -241,29 +227,16 @@ function AlertManagement({ alerts, setAlerts, users, user, isManager, isSupervis
         setAlerts(prev => [alertObj, ...(prev || [])]);
       }
 
-      // 2. Create notifications for all target users (both online and offline)
+      // 2. Create notifications for all target users (both online and offline).
+      // 'addNotification' persists to IndexedDB AND updates app state, so it is
+      // the only place notifications are written – creating another record here
+      // made every message appear twice in the bell.
       for (const targetUser of targetUsers) {
-        const notification = {
-          id: uid(),
-          userId: targetUser.id,
-          title: `🚨 ${alertObj.title}`,
-          message: alertObj.message,
-          type: 'error',
-          read: false,
-          timestamp: new Date().toISOString(),
-          link: '/alerts'
-        };
+        if (!addNotification) continue;
         try {
-          await db.notifications.add(notification);
+          await addNotification(targetUser.id, `🚨 ${alertObj.title}`, alertObj.message, 'error', '/alerts');
         } catch (err) {
-          console.error(`Error saving notification for ${targetUser.name}:`, err);
-        }
-        if (addNotification) {
-          try {
-            await addNotification(targetUser.id, `🚨 ${alertObj.title}`, alertObj.message, 'error', '/alerts');
-          } catch (err) {
-            console.error(`Error calling addNotification:`, err);
-          }
+          console.error(`Error calling addNotification:`, err);
         }
       }
       
@@ -295,7 +268,6 @@ function AlertManagement({ alerts, setAlerts, users, user, isManager, isSupervis
             id: alertObj.id,
             data: alertObj
           });
-          setPendingCount(syncQueue.count());
         }
       } else {
         syncQueue.add({
@@ -303,11 +275,13 @@ function AlertManagement({ alerts, setAlerts, users, user, isManager, isSupervis
           id: alertObj.id,
           data: alertObj
         });
-        setPendingCount(syncQueue.count());
         console.log('📡 Alert saved offline. Notifications created locally.');
       }
 
-      alert(`${isBottleneck ? '🚧 Bottleneck report sent to' : '✉️ Message sent to'} ${targetUsers.length} recipient(s)!`);
+      toast(t('alerts.sent_to', {
+        message: isBottleneck ? t('alerts.sent_bottleneck') : t('alerts.sent_message'),
+        count: targetUsers.length
+      }));
       setShowModal(false);
       setModalMode('alert');
       setNewAlert({
@@ -320,7 +294,7 @@ function AlertManagement({ alerts, setAlerts, users, user, isManager, isSupervis
       });
     } catch (error) {
       console.error('Error sending alert:', error);
-      alert('❌ Error sending alert: ' + error.message);
+      toast.error(t('alerts.send_error', { error: error.message }));
     } finally {
       setIsSubmitting(false);
     }
@@ -342,7 +316,6 @@ function AlertManagement({ alerts, setAlerts, users, user, isManager, isSupervis
           id: alertId,
           data: { alertId, read: true }
         });
-        setPendingCount(syncQueue.count());
       } else {
         // Also update server if online (PUT /api/alerts/:id)
         try {
@@ -371,7 +344,7 @@ function AlertManagement({ alerts, setAlerts, users, user, isManager, isSupervis
 
   const handleDeleteAlert = async (e, alertId) => {
     e.stopPropagation();
-    if (!window.confirm('Delete this message from your inbox?')) return;
+    if (!await confirmToast(t('alerts.delete_confirm'))) return;
     try {
       await db.alerts.delete(alertId);
       if (setAlerts) setAlerts(prev => (prev || []).filter(a => a.id !== alertId));
@@ -382,8 +355,8 @@ function AlertManagement({ alerts, setAlerts, users, user, isManager, isSupervis
   };
 
   const handleDeleteAllAlerts = async () => {
-    if (filteredAlerts.length === 0) { alert('No messages to delete'); return; }
-    if (!window.confirm(`Delete all ${filteredAlerts.length} message(s) from your inbox?`)) return;
+    if (filteredAlerts.length === 0) { toast(t('alerts.no_messages_to_delete')); return; }
+    if (!await confirmToast(t('alerts.delete_all_confirm', { count: filteredAlerts.length }))) return;
     const ids = filteredAlerts.map(a => a.id);
     try {
       await db.alerts.bulkDelete(ids);
@@ -395,20 +368,19 @@ function AlertManagement({ alerts, setAlerts, users, user, isManager, isSupervis
   };
 
   const handleDownloadMessages = () => {
-    if (filteredAlerts.length === 0) { alert('No messages to download'); return; }
+    if (filteredAlerts.length === 0) { toast(t('alerts.no_messages_to_download')); return; }
     const data = filteredAlerts.map(a => ({
       Title: a.title,
       Message: a.message,
       Priority: a.priority,
       From: a.sentByName || a.sentBy,
       'Sent Date': new Date(a.timestamp).toLocaleString(),
-      Read: a.read ? 'Yes' : 'No'
+      Read: a.read ? t('alerts.read_yes') : t('alerts.read_no')
     }));
     exportCSV(data, `messages_${getToday()}`);
   };
 
   const unreadCount = filteredAlerts.filter(a => !a.read).length;
-  const pendingSyncAlerts = filteredAlerts.filter(a => !a.synced).length;
 
   return (
     <div className="alerts-view" style={{ padding: '20px' }}>
@@ -427,11 +399,11 @@ function AlertManagement({ alerts, setAlerts, users, user, isManager, isSupervis
         gap: '16px'
       }}>
         <div>
-          <h2 style={{ fontSize: '24px', fontWeight: '700', margin: '0 0 6px 0' }}>✉️ Messages &amp; Alerts</h2>
+          <h2 style={{ fontSize: '24px', fontWeight: '700', margin: '0 0 6px 0' }}>{t('alerts.title')}</h2>
           <p style={{ fontSize: '14px', opacity: 0.85, margin: 0, maxWidth: '540px' }}>
             {isOfficer
-              ? 'Send and receive messages with your supervisor and manager'
-              : 'Send and manage messages'}
+              ? t('alerts.subtitle_officer')
+              : t('alerts.subtitle_other')}
           </p>
         </div>
         <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'center' }}>
@@ -443,7 +415,7 @@ function AlertManagement({ alerts, setAlerts, users, user, isManager, isSupervis
             fontSize: '13px',
             fontWeight: '600'
           }}>
-            📋 {filteredAlerts.length} Messages
+            {t('alerts.messages', { count: filteredAlerts.length })}
           </span>
           <span style={{
             background: 'rgba(248,113,113,0.25)',
@@ -453,20 +425,8 @@ function AlertManagement({ alerts, setAlerts, users, user, isManager, isSupervis
             fontSize: '13px',
             fontWeight: '600'
           }}>
-            {unreadCount} Unread
+            {t('alerts.unread', { count: unreadCount })}
           </span>
-          {pendingSyncAlerts > 0 && (
-            <span style={{
-              background: 'rgba(251,191,36,0.15)',
-              border: '1px solid rgba(252,211,77,0.4)',
-              padding: '6px 14px',
-              borderRadius: '24px',
-              fontSize: '13px',
-              fontWeight: '600'
-            }}>
-              📡 {pendingSyncAlerts} Pending Sync
-            </span>
-          )}
           <button
             onClick={() => { setModalMode('alert'); setShowModal(true); }}
             style={{
@@ -480,7 +440,7 @@ function AlertManagement({ alerts, setAlerts, users, user, isManager, isSupervis
               fontWeight: '600'
             }}
           >
-            ✉️ Send Message {!isOnline && '📡'}
+            {t('alerts.send_message')}{!isOnline && ' 📡'}
           </button>
         </div>
       </div>
@@ -494,13 +454,8 @@ function AlertManagement({ alerts, setAlerts, users, user, isManager, isSupervis
         flexWrap: 'wrap', gap: '8px'
       }}>
         <span style={{ fontWeight: '500', color: isOnline ? '#065f37' : '#991b1b' }}>
-          {isOnline ? '✅ Online' : '❌ Offline'}
+          {isOnline ? t('alerts.online') : t('alerts.offline')}
         </span>
-        {pendingCount > 0 && (
-          <span style={{ background: '#f59e0b', color: 'white', padding: '2px 12px', borderRadius: '12px', fontSize: '12px' }}>
-            ⏳ {pendingCount} pending sync
-          </span>
-        )}
       </div>
 
       {!isOnline && (
@@ -509,7 +464,7 @@ function AlertManagement({ alerts, setAlerts, users, user, isManager, isSupervis
           borderRadius: '8px', marginBottom: '16px', display: 'flex',
           justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap'
         }}>
-          <span>📡 You are offline. Alerts will be saved locally and notifications sent immediately.</span>
+          <span>{t('alerts.offline_banner')}</span>
         </div>
       )}
 
@@ -522,9 +477,9 @@ function AlertManagement({ alerts, setAlerts, users, user, isManager, isSupervis
           marginBottom: '20px', flexWrap: 'wrap', gap: '10px'
         }}>
           <div>
-            <h3 style={{fontSize: '16px', fontWeight: '600'}}>📥 Inbox</h3>
+            <h3 style={{fontSize: '16px', fontWeight: '600'}}>{t('alerts.inbox')}</h3>
             <p style={{fontSize: '13px', color: '#64748b'}}>
-              {filteredAlerts.length} message(s) in your inbox
+              {t('alerts.inbox_subtitle', { count: filteredAlerts.length })}
             </p>
           </div>
           <div style={{display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap'}}>
@@ -538,7 +493,7 @@ function AlertManagement({ alerts, setAlerts, users, user, isManager, isSupervis
                   alignItems: 'center', gap: '6px'
                 }}
               >
-                ⬇️ Download
+                {t('alerts.download')}
               </button>
             )}
             {filteredAlerts.length > 0 && (
@@ -551,7 +506,7 @@ function AlertManagement({ alerts, setAlerts, users, user, isManager, isSupervis
                   alignItems: 'center', gap: '6px'
                 }}
               >
-                🗑️ Delete All
+                {t('alerts.delete_all')}
               </button>
             )}
           </div>
@@ -561,7 +516,7 @@ function AlertManagement({ alerts, setAlerts, users, user, isManager, isSupervis
           {filteredAlerts.length === 0 && (
             <div style={{ textAlign: 'center', padding: '40px 20px', color: '#64748b' }}>
               <div style={{fontSize: '48px', marginBottom: '8px'}}>✉️</div>
-              <div>No messages</div>
+              <div>{t('alerts.no_messages')}</div>
             </div>
           )}
           {filteredAlerts.map(a => (
@@ -579,15 +534,14 @@ function AlertManagement({ alerts, setAlerts, users, user, isManager, isSupervis
               <div style={{flex: 1}}>
                 <div style={{fontWeight: '600', fontSize: '15px'}}>
                   {a.title}
-                  {a.type === 'bottleneck' && <span style={{ marginLeft: '8px', background: '#d97706', color: 'white', padding: '1px 8px', borderRadius: '12px', fontSize: '10px', fontWeight: '600' }}>BOTTLENECK</span>}
-                  {!a.read && <span style={{ marginLeft: '8px', background: '#d97706', color: 'white', padding: '1px 8px', borderRadius: '12px', fontSize: '10px', fontWeight: '600' }}>NEW</span>}
-                  {!a.synced && <span style={{ marginLeft: '8px', background: '#f59e0b', color: 'white', padding: '1px 8px', borderRadius: '12px', fontSize: '10px', fontWeight: '600' }}>📡</span>}
+                  {a.type === 'bottleneck' && <span style={{ marginLeft: '8px', background: '#d97706', color: 'white', padding: '1px 8px', borderRadius: '12px', fontSize: '10px', fontWeight: '600' }}>{t('alerts.bottleneck_only')}</span>}
+                  {!a.read && <span style={{ marginLeft: '8px', background: '#d97706', color: 'white', padding: '1px 8px', borderRadius: '12px', fontSize: '10px', fontWeight: '600' }}>{t('alerts.new_badge')}</span>}
                 </div>
                 <div style={{color: '#374151', fontSize: '14px', marginTop: '2px'}}>{a.message}</div>
                 <div style={{ display: 'flex', gap: '16px', fontSize: '12px', color: '#64748b', marginTop: '4px', flexWrap: 'wrap' }}>
                   <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
                     <UserAvatar user={userByEmpId[a.sentBy]} name={a.sentByName} size={20} />
-                    <span>From: {a.sentByName}</span>
+                    <span>{t('alerts.from', { name: a.sentByName })}</span>
                   </span>
                   <span>{new Date(a.timestamp).toLocaleString()}</span>
                   <span style={{
@@ -595,12 +549,12 @@ function AlertManagement({ alerts, setAlerts, users, user, isManager, isSupervis
                     background: a.priority === 'high' || a.priority === 'critical' ? '#fee2e2' : a.priority === 'medium' ? '#fef3c7' : '#dbeafe',
                     color: a.priority === 'high' || a.priority === 'critical' ? '#991b1b' : a.priority === 'medium' ? '#92400e' : '#1e40af',
                     fontSize: '10px', fontWeight: '500'
-                  }}>{a.priority}</span>
+                  }}>{t(`alerts.${a.priority}`, { defaultValue: a.priority })}</span>
                 </div>
               </div>
               <button
                 onClick={(e) => handleDeleteAlert(e, a.id)}
-                title="Delete message"
+                title={t('alerts.delete_message')}
                 style={{
                   background: 'transparent', border: 'none', cursor: 'pointer',
                   fontSize: '16px', color: '#9ca3af', padding: '4px',
@@ -627,50 +581,50 @@ function AlertManagement({ alerts, setAlerts, users, user, isManager, isSupervis
           }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
               <h3 style={{fontSize: '20px', fontWeight: '600'}}>
-                {modalMode === 'bottleneck' ? '🚧 Report Bottleneck' : '✉️ Send Message'}
-                {!isOnline && <span style={{fontSize: '12px', color: '#f59e0b', marginLeft: '8px'}}>📡 Offline</span>}
+                {modalMode === 'bottleneck' ? t('alerts.bottleneck_modal') : t('alerts.title_modal')}
+                {!isOnline && <span style={{fontSize: '12px', color: '#f59e0b', marginLeft: '8px'}}>{t('alerts.offline_badge')}</span>}
               </h3>
               <button onClick={() => { setShowModal(false); setModalMode('alert'); }} style={{ background: 'transparent', border: 'none', fontSize: '24px', cursor: 'pointer', color: '#64748b' }}>✕</button>
             </div>
 
             {!isOnline && (
               <div style={{ padding: '12px 16px', background: '#fef3c7', border: '1px solid #f59e0b', borderRadius: '8px', marginBottom: '16px' }}>
-                <strong>📡 Offline Mode:</strong> Notifications will be sent immediately. Alert data will sync when online.
+                <strong>{t('alerts.offline_mode_label')}</strong> {t('alerts.offline_mode_text')}
               </div>
             )}
 
             <form onSubmit={handleSendAlert} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
               <div>
-                <label style={{fontSize: '13px', fontWeight: '500'}}>{modalMode === 'bottleneck' ? 'Problem Title *' : 'Title *'}</label>
-                <input type="text" value={newAlert.title} onChange={e => setNewAlert({...newAlert, title: e.target.value})} placeholder={modalMode === 'bottleneck' ? 'e.g. Road blocked, no network, broken equipment' : 'Enter title'} required style={{padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '14px', width: '100%'}} />
+                <label style={{fontSize: '13px', fontWeight: '500'}}>{modalMode === 'bottleneck' ? t('alerts.problem_title') : t('alerts.title_label')}</label>
+                <input type="text" value={newAlert.title} onChange={e => setNewAlert({...newAlert, title: e.target.value})} placeholder={modalMode === 'bottleneck' ? t('alerts.problem_title_placeholder') : t('alerts.title_placeholder')} required style={{padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '14px', width: '100%'}} />
               </div>
               <div>
-                <label style={{fontSize: '13px', fontWeight: '500'}}>{modalMode === 'bottleneck' ? 'Description *' : 'Message *'}</label>
-                <textarea value={newAlert.message} onChange={e => setNewAlert({...newAlert, message: e.target.value})} placeholder={modalMode === 'bottleneck' ? 'Describe the problem, where it happened, and how it is blocking your work...' : 'Enter alert message'} rows="4" required style={{padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '14px', resize: 'vertical', minHeight: '60px', width: '100%'}} />
+                <label style={{fontSize: '13px', fontWeight: '500'}}>{modalMode === 'bottleneck' ? t('alerts.description_label') : t('alerts.message_label')}</label>
+                <textarea value={newAlert.message} onChange={e => setNewAlert({...newAlert, message: e.target.value})} placeholder={modalMode === 'bottleneck' ? t('alerts.description_placeholder') : t('alerts.message_placeholder')} rows="4" required style={{padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '14px', resize: 'vertical', minHeight: '60px', width: '100%'}} />
               </div>
               {modalMode !== 'bottleneck' && (
               <>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
                 <div>
-                  <label style={{fontSize: '13px', fontWeight: '500'}}>Priority</label>
+                  <label style={{fontSize: '13px', fontWeight: '500'}}>{t('alerts.priority')}</label>
                   <select value={newAlert.priority} onChange={e => setNewAlert({...newAlert, priority: e.target.value})} style={{padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '14px', width: '100%'}}>
-                    <option value="low">Low</option>
-                    <option value="medium">Medium</option>
-                    <option value="high">High</option>
-                    <option value="critical">Critical</option>
+                    <option value="low">{t('alerts.low')}</option>
+                    <option value="medium">{t('alerts.medium')}</option>
+                    <option value="high">{t('alerts.high')}</option>
+                    <option value="critical">{t('alerts.critical')}</option>
                   </select>
                 </div>
                 {isManager ? (
                   <div>
-                    <label style={{fontSize: '13px', fontWeight: '500'}}>Target</label>
+                    <label style={{fontSize: '13px', fontWeight: '500'}}>{t('alerts.target')}</label>
                     <select value={newAlert.targetAll} onChange={e => setNewAlert({...newAlert, targetAll: e.target.value === 'true'})} style={{padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '14px', width: '100%'}}>
-                      <option value="true">All Officers</option>
-                      <option value="false">Specific Officer</option>
+                      <option value="true">{t('alerts.all_officers')}</option>
+                      <option value="false">{t('alerts.specific_officer')}</option>
                     </select>
                   </div>
                 ) : (
                   <div>
-                    <label style={{fontSize: '13px', fontWeight: '500'}}>Recipients</label>
+                    <label style={{fontSize: '13px', fontWeight: '500'}}>{t('alerts.recipients')}</label>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: '6px', maxHeight: '170px', overflowY: 'auto', background: 'white' }}>
                       {getRecipientOptions().map(u => (
                         <label key={u.id} style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', color: '#1f2937', cursor: 'pointer' }}>
@@ -681,23 +635,23 @@ function AlertManagement({ alerts, setAlerts, users, user, isManager, isSupervis
                             style={{ width: '16px', height: '16px' }}
                           />
                           {u.name}
-                          <span style={{ color: '#6b7280', fontSize: '11px' }}>({u.role === 'manager' ? 'Manager' : 'Team'})</span>
+                          <span style={{ color: '#6b7280', fontSize: '11px' }}>({u.role === 'manager' ? t('alerts.manager') : t('alerts.team')})</span>
                         </label>
                       ))}
                     </div>
                     <div style={{ fontSize: '12px', color: '#64748b', marginTop: '4px' }}>
                       {newAlert.recipients.length === 0
-                        ? (isSupervisor ? 'No selection – sent to your whole team + the manager' : 'No selection – sent to your supervisor + the manager')
-                        : `${newAlert.recipients.length} recipient(s) selected`}
+                        ? (isSupervisor ? t('alerts.no_selection_supervisor') : t('alerts.no_selection_officer'))
+                        : t('alerts.recipients_selected', { count: newAlert.recipients.length })}
                     </div>
                   </div>
                 )}
               </div>
               {isManager && !newAlert.targetAll && (
                 <div>
-                  <label style={{fontSize: '13px', fontWeight: '500'}}>Target Officer</label>
+                  <label style={{fontSize: '13px', fontWeight: '500'}}>{t('alerts.target_officer')}</label>
                   <select value={newAlert.targetEmployeeId} onChange={e => setNewAlert({...newAlert, targetEmployeeId: e.target.value})} style={{padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '14px', width: '100%'}}>
-                    <option value="">Select Officer</option>
+                    <option value="">{t('alerts.select_officer')}</option>
                     {users.filter(u => u.role === 'field_officer').map(u => (
                       <option key={u.id} value={u.employeeId}>{u.name} ({u.region})</option>
                     ))}
@@ -708,12 +662,12 @@ function AlertManagement({ alerts, setAlerts, users, user, isManager, isSupervis
               )}
               {modalMode === 'bottleneck' && (
                 <div style={{ padding: '12px', background: '#fef3c7', borderRadius: '8px', fontSize: '13px', color: '#92400e' }}>
-                  <strong>🚧</strong> This report will be sent to your {isOfficer ? 'supervisor and the manager' : 'manager'} so the bottleneck can be resolved quickly.
+                  {isOfficer ? t('alerts.bottleneck_note_officer') : t('alerts.bottleneck_note')}
                 </div>
               )}
               <div style={{ padding: '12px', background: !isOnline ? '#fef3c7' : '#dbeafe', borderRadius: '8px', fontSize: '13px', color: !isOnline ? '#92400e' : '#1e40af' }}>
-                <strong>ℹ️ {isOnline ? 'Online' : 'Offline'}:</strong>
-                {isOnline ? ' Alert and notifications sent immediately.' : ' Notifications sent immediately. Alert synced when online.'}
+                <strong>{t('alerts.online_badge_label', { status: isOnline ? t('alerts.online_short') : t('alerts.offline_short') })}</strong>
+                {isOnline ? t('alerts.online_info') : t('alerts.offline_info')}
               </div>
               <div style={{display: 'flex', gap: '12px', marginTop: '8px'}}>
                 <button type="submit" disabled={isSubmitting} style={{
@@ -721,13 +675,13 @@ function AlertManagement({ alerts, setAlerts, users, user, isManager, isSupervis
                   borderRadius: '6px', cursor: isSubmitting ? 'not-allowed' : 'pointer', fontSize: '14px',
                   fontWeight: '500', opacity: isSubmitting ? 0.7 : 1
                 }}>
-                  {isSubmitting ? 'Sending...' : (isOnline ? (modalMode === 'bottleneck' ? '🚧 Send Report' : '✉️ Send Message') : '💾 Save Offline')}
+                  {isSubmitting ? t('alerts.sending') : (isOnline ? (modalMode === 'bottleneck' ? t('alerts.send_report') : t('alerts.send_message_btn')) : t('alerts.save_offline_btn'))}
                 </button>
                 <button type="button" onClick={() => { setShowModal(false); setModalMode('alert'); }} style={{
                   background: '#e5e7eb', color: '#374151', border: 'none', padding: '10px 24px',
                   borderRadius: '6px', cursor: 'pointer', fontSize: '14px', fontWeight: '500'
                 }}>
-                  Cancel
+                  {t('alerts.cancel')}
                 </button>
               </div>
             </form>

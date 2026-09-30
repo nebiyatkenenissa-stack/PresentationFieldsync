@@ -14,6 +14,15 @@ body {
   line-height: 1.6;
 }
 
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+body {
+  overflow-x: hidden;
+}
+
 /* ============================================================
    APP LAYOUT
    ============================================================ */
@@ -1865,11 +1874,6 @@ tr:hover {
 .performer-stats {
   color: #2563eb;
   font-weight: 500;
-}
-
-.performer-efficiency {
-  color: #0b7e4b;
-  font-weight: 600;
 }
 
 .performer-attendance {

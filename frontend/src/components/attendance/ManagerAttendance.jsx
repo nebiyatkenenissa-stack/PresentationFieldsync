@@ -1,8 +1,12 @@
 // components/attendance/ManagerAttendance.js – FULL FIXED (manager sees only synced records)
 
 import React, { useState, useMemo, useEffect } from 'react';
+import toast from 'react-hot-toast';
 import { getToday } from '../../utils/helpers';
 import { db, syncQueue, checkRealInternet, clearStuckSyncItems, processSyncQueue } from '../../services/database';
+import useRegions from '../../hooks/useRegions';
+import { buildRegionOptions, regionOfPath } from '../../utils/regions';
+import { useTranslation } from 'react-i18next';
 
 function ManagerAttendance({ 
   attendance, 
@@ -18,6 +22,9 @@ function ManagerAttendance({
   const [pendingCount, setPendingCount] = useState(0);
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncError, setSyncError] = useState(null);
+  const { t } = useTranslation();
+  // The REAL region list (Amhara, Oromia, ...) from the backend.
+  const regionList = useRegions();
 
   // ===== CHECK ONLINE STATUS & AUTO-SYNC =====
   useEffect(() => {
@@ -132,9 +139,9 @@ function ManagerAttendance({
       filtered = filtered.filter(a => a.date === selectedDate);
     }
     
-    // Region filter
+    // Region filter (compares the real region name, not the raw path)
     if (selectedRegion !== 'all') {
-      filtered = filtered.filter(a => a.region === selectedRegion);
+      filtered = filtered.filter(a => regionOfPath(a.region, regionList) === selectedRegion);
     }
     
     // Status filter
@@ -151,7 +158,7 @@ function ManagerAttendance({
     filtered.sort((a, b) => new Date(b.date) - new Date(a.date));
     
     return filtered;
-  }, [attendance, selectedDate, selectedRegion, selectedStatus, selectedSupervisor]);
+  }, [attendance, selectedDate, selectedRegion, selectedStatus, selectedSupervisor, regionList]);
 
   // Attendance stats
   const attendanceStats = useMemo(() => {
@@ -177,16 +184,11 @@ function ManagerAttendance({
     };
   }, [filteredAttendance]);
 
-  // Regions
-  const regions = useMemo(() => {
-    const unique = new Set(
-      attendance
-        .filter(a => a.submittedToManager === true)
-        .map(a => a.region)
-        .filter(Boolean)
-    );
-    return ['all', ...unique];
-  }, [attendance]);
+  // Regions come from the REAL region list (utils/regions.js).
+  const regions = useMemo(
+    () => buildRegionOptions(attendance.filter(a => a.submittedToManager === true).map(a => a.region), regionList),
+    [attendance, regionList]
+  );
 
   // Count offline records (waiting to sync)
   const offlineCount = useMemo(() => {
@@ -202,13 +204,13 @@ function ManagerAttendance({
   const handleClearStuck = async () => {
     try {
       const result = await clearStuckSyncItems();
-      alert(`🧹 Cleared ${result.clearedStore} stuck records and ${result.clearedQueue} stuck queue items`);
+      toast(t('managerattendance.cleared_stuck_toast', { clearedStore: result.clearedStore, clearedQueue: result.clearedQueue }));
       const updatedAttendance = await db.attendance.toArray();
       if (setAttendance) setAttendance(updatedAttendance);
       setPendingCount(syncQueue.count());
     } catch (error) {
       console.error('Error clearing stuck items:', error);
-      alert('Error clearing stuck items: ' + error.message);
+      toast(t('managerattendance.error_clearing_stuck', { error: error.message }));
     }
   };
 
@@ -233,9 +235,10 @@ function ManagerAttendance({
         if (supervisor) {
           await addNotification(
             supervisor.id,
-            '👁️ Attendance Seen by Manager',
-            `Manager has reviewed attendance for ${record.employeeName} on ${record.date}`,
-            'info'
+            t('managerattendance.notif_seen_title'),
+            t('managerattendance.notif_seen_manager_body', { name: record.employeeName, date: record.date }),
+            'info',
+            '/dashboard'
           );
         }
       }
@@ -244,9 +247,10 @@ function ManagerAttendance({
       if (officer && addNotification) {
         await addNotification(
           officer.id,
-          '👁️ Attendance Seen by Manager',
-          `Manager has reviewed your attendance for ${record.date}`,
-          'info'
+          t('managerattendance.notif_seen_title'),
+          t('managerattendance.notif_seen_officer_body', { date: record.date }),
+          'info',
+          '/dashboard'
         );
       }
     } catch (error) {
@@ -265,7 +269,7 @@ function ManagerAttendance({
         approved: approve,
         approvedBy: 'manager',
         approvedAt: new Date().toISOString(),
-        managerNotes: approve ? 'Approved by Manager' : 'Rejected by Manager',
+        managerNotes: approve ? t('managerattendance.approved_by_manager') : t('managerattendance.rejected_by_manager'),
         seenByManager: true,
         seenAt: new Date().toISOString()
       };
@@ -278,9 +282,10 @@ function ManagerAttendance({
         if (supervisor) {
           await addNotification(
             supervisor.id,
-            approve ? '✅ Attendance Approved' : '❌ Attendance Rejected',
-            `Manager has ${approve ? 'approved' : 'rejected'} attendance for ${record.employeeName} on ${record.date}`,
-            approve ? 'success' : 'error'
+            approve ? t('managerattendance.notif_approved_title') : t('managerattendance.notif_rejected_title'),
+            approve ? t('managerattendance.notif_approved_manager_body', { name: record.employeeName, date: record.date }) : t('managerattendance.notif_rejected_manager_body', { name: record.employeeName, date: record.date }),
+            approve ? 'success' : 'error',
+            '/dashboard'
           );
         }
       }
@@ -289,22 +294,23 @@ function ManagerAttendance({
       if (officer && addNotification) {
         await addNotification(
           officer.id,
-          approve ? '✅ Attendance Approved' : '❌ Attendance Rejected',
-          `Your attendance on ${record.date} has been ${approve ? 'approved ✅' : 'rejected ❌'} by Manager`,
-          approve ? 'success' : 'error'
+          approve ? t('managerattendance.notif_approved_title') : t('managerattendance.notif_rejected_title'),
+          approve ? t('managerattendance.notif_approved_officer_body', { date: record.date }) : t('managerattendance.notif_rejected_officer_body', { date: record.date }),
+          approve ? 'success' : 'error',
+          '/dashboard'
         );
       }
       
-      alert(`Attendance ${approve ? 'approved' : 'rejected'} successfully!`);
+      toast(approve ? t('managerattendance.attendance_approved_success') : t('managerattendance.attendance_rejected_success'));
     } catch (error) {
       console.error('Error updating attendance:', error);
-      alert('Error updating attendance: ' + error.message);
+      toast(t('managerattendance.error_updating_attendance', { error: error.message }));
     }
   };
 
   const getSupervisorName = (supervisorId) => {
     const supervisor = users.find(u => u.id === supervisorId);
-    return supervisor ? supervisor.name : 'N/A';
+    return supervisor ? supervisor.name : t('supervisor.na');
   };
 
   const getStatusBadge = (status) => {
@@ -336,32 +342,32 @@ function ManagerAttendance({
         gap: '8px'
       }}>
         <span style={{ fontWeight: '500', color: isOnline ? '#065f37' : '#991b1b' }}>
-          {isOnline ? '✅ Online' : '❌ Offline'}
+          {isOnline ? `✅ ${t('header.online')}` : `❌ ${t('header.offline')}`}
         </span>
         <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
           {isSyncing && (
             <span style={{ padding: '2px 12px', borderRadius: '12px', background: '#dbeafe', color: '#1e40af', fontSize: '12px', fontWeight: '500' }}>
-              🔄 Syncing...
+🔄 {t('header.syncing')}
             </span>
           )}
           {stuckCount > 0 && (
             <span style={{ padding: '2px 12px', borderRadius: '12px', background: '#fee2e2', color: '#991b1b', fontSize: '12px', fontWeight: '500' }}>
-              ⚠️ {stuckCount} stuck
+              ⚠ ️ {t('managerattendance.stuck_count', { count: stuckCount })}
             </span>
           )}
           {offlineCount > 0 && (
             <span style={{ padding: '2px 12px', borderRadius: '12px', background: '#fef3c7', color: '#92400e', fontSize: '12px', fontWeight: '500' }}>
-              📡 {offlineCount} waiting to sync
+              📡 {t('managerattendance.waiting_to_sync', { count: offlineCount })}
             </span>
           )}
           {isOnline && pendingCount > 0 && (
             <span style={{ padding: '2px 12px', borderRadius: '12px', background: '#dbeafe', color: '#1e40af', fontSize: '12px', fontWeight: '500' }}>
-              🔄 {pendingCount} syncing...
+              🔄 {t('managerattendance.pending_syncing', { count: pendingCount })}
             </span>
           )}
           {syncError && (
             <span style={{ padding: '2px 12px', borderRadius: '12px', background: '#fee2e2', color: '#991b1b', fontSize: '12px', fontWeight: '500' }}>
-              ❌ {syncError}
+              ❌ {t('managerattendance.sync_error', { error: syncError })}
             </span>
           )}
         </div>
@@ -381,17 +387,17 @@ function ManagerAttendance({
           flexWrap: 'wrap'
         }}>
           <span>
-            📡 <strong>Waiting for sync:</strong> {offlineCount} attendance record(s) waiting to sync. 
-            {isOnline ? ' Will appear automatically when sync completes.' : ' Will sync when internet is back.'}
+            📡 <strong>{t('managerattendance.waiting_for_sync_title')}</strong> {t('managerattendance.waiting_for_sync_records', { count: offlineCount })}{' '}
+            {isOnline ? t('managerattendance.will_appear_auto') : t('managerattendance.will_sync_when_online')}
           </span>
           {isOnline && !isSyncing && offlineCount > 0 && (
-            <span style={{ fontSize: '12px', color: '#0b7e4b' }}>⏳ Auto-sync starting...</span>
+            <span style={{ fontSize: '12px', color: '#0b7e4b' }}>⏳ {t('managerattendance.auto_sync_starting')}</span>
           )}
           {isSyncing && (
-            <span style={{ fontSize: '12px', color: '#1e40af' }}>🔄 Syncing...</span>
+            <span style={{ fontSize: '12px', color: '#1e40af' }}>🔄 {t('header.syncing')}</span>
           )}
           {!isOnline && (
-            <span style={{ fontSize: '12px', color: '#92400e' }}>⏳ Waiting for connection...</span>
+            <span style={{ fontSize: '12px', color: '#92400e' }}>⏳ {t('managerattendance.waiting_for_connection')}</span>
           )}
         </div>
       )}
@@ -410,11 +416,10 @@ function ManagerAttendance({
           flexWrap: 'wrap'
         }}>
           <span>
-            ⚠️ <strong>Stuck sync detected:</strong> {stuckCount} record(s) are stuck in 'syncing' state.
-            Auto-clearing in progress...
+            ⚠ ️ <strong>{t('managerattendance.stuck_detected_title')}</strong> {t('managerattendance.stuck_detected_records', { count: stuckCount })}{' '}{t('managerattendance.auto_clearing_in_progress')}
           </span>
           <button onClick={handleClearStuck} style={{ background: '#dc2626', color: 'white', border: 'none', padding: '4px 12px', borderRadius: '4px', cursor: 'pointer', fontSize: '12px' }}>
-            🧹 Clear Stuck
+            🧹 {t('managerattendance.clear_stuck')}
           </button>
         </div>
       )}
@@ -434,9 +439,9 @@ function ManagerAttendance({
         gap: '16px'
       }}>
         <div>
-          <h2 style={{ fontSize: '24px', fontWeight: '700', margin: '0 0 6px 0' }}>📋 Manager Attendance Review</h2>
+          <h2 style={{ fontSize: '24px', fontWeight: '700', margin: '0 0 6px 0' }}>📋 {t('managerattendance.title')}</h2>
           <p style={{ fontSize: '14px', opacity: 0.85, margin: 0, maxWidth: '540px' }}>
-            Review attendance submitted by supervisors (only synced records)
+            {t('managerattendance.hero_subtitle')}
           </p>
         </div>
         <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
@@ -448,7 +453,7 @@ function ManagerAttendance({
             fontSize: '13px',
             fontWeight: '600'
           }}>
-            ⏳ {attendanceStats.pendingApproval} Pending
+            ⏳ {t('managerattendance.pending_count', { count: attendanceStats.pendingApproval })}
           </span>
           <span style={{
             background: 'rgba(96,165,250,0.2)',
@@ -458,7 +463,7 @@ function ManagerAttendance({
             fontSize: '13px',
             fontWeight: '600'
           }}>
-            👁️ {attendanceStats.seen} Seen
+            👁️ {t('managerattendance.seen_count', { count: attendanceStats.seen })}
           </span>
           <span style={{
             background: 'rgba(248,113,113,0.25)',
@@ -468,7 +473,7 @@ function ManagerAttendance({
             fontSize: '13px',
             fontWeight: '600'
           }}>
-            👁️‍🗨️ {attendanceStats.notSeen} Not Seen
+            👁️‍🗨️ {t('managerattendance.not_seen_count', { count: attendanceStats.notSeen })}
           </span>
           {offlineCount > 0 && (
             <span style={{
@@ -479,7 +484,7 @@ function ManagerAttendance({
               fontSize: '13px',
               fontWeight: '600'
             }}>
-              📡 {offlineCount} Offline
+              📡 {t('managerattendance.offline_count', { count: offlineCount })}
             </span>
           )}
           {stuckCount > 0 && (
@@ -491,7 +496,7 @@ function ManagerAttendance({
               fontSize: '13px',
               fontWeight: '600'
             }}>
-              ⚠️ {stuckCount} Stuck
+              ⚠ ️ {t('managerattendance.stuck_badge', { count: stuckCount })}
             </span>
           )}
         </div>
@@ -501,12 +506,12 @@ function ManagerAttendance({
         {/* Stats Cards */}
         <div style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: '12px', marginBottom: '20px'}}>
           {[
-            { label: '✅ Present', value: attendanceStats.present, color: '#0b7e4b' },
-            { label: '⏰ Late', value: attendanceStats.late, color: '#d97706' },
-            { label: '❌ Absent', value: attendanceStats.absent, color: '#dc2626' },
-            { label: '📊 Half Day', value: attendanceStats.halfDay, color: '#6b7280' },
-            { label: '⏳ Pending', value: attendanceStats.pendingApproval, color: '#f59e0b' },
-            { label: '📋 Total', value: attendanceStats.total, color: '#2563eb' }
+            { label: `✅ ${t('managerattendance.status.present')}`, value: attendanceStats.present, color: '#0b7e4b' },
+            { label: `⏰ ${t('managerattendance.status.late')}`, value: attendanceStats.late, color: '#d97706' },
+            { label: `❌ ${t('managerattendance.status.absent')}`, value: attendanceStats.absent, color: '#dc2626' },
+            { label: `📊 ${t('managerattendance.status.half_day')}`, value: attendanceStats.halfDay, color: '#6b7280' },
+            { label: `⏳ ${t('managerattendance.pending')}`, value: attendanceStats.pendingApproval, color: '#f59e0b' },
+            { label: `📋 ${t('managerattendance.total')}`, value: attendanceStats.total, color: '#2563eb' }
           ].map((stat, i) => (
             <div key={i} style={{borderLeft: `4px solid ${stat.color}`, padding: '12px 16px', background: '#f8fafc', borderRadius: '6px'}}>
               <div style={{fontSize: '22px', fontWeight: 'bold', color: stat.color}}>{stat.value}</div>
@@ -517,26 +522,27 @@ function ManagerAttendance({
 
         {/* Filters */}
         <div style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '12px', marginBottom: '20px'}}>
-          <div><label style={{fontSize: '13px', fontWeight: '500'}}>Date</label>
+          <div><label style={{fontSize: '13px', fontWeight: '500'}}>{t('common.date')}</label>
             <input type="date" value={selectedDate} onChange={e => setSelectedDate(e.target.value)} style={{padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '14px', width: '100%'}} />
           </div>
-          <div><label style={{fontSize: '13px', fontWeight: '500'}}>Region</label>
+          <div><label style={{fontSize: '13px', fontWeight: '500'}}>{t('common.region')}</label>
             <select value={selectedRegion} onChange={e => setSelectedRegion(e.target.value)} style={{padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '14px', width: '100%'}}>
-              {regions.map(r => <option key={r} value={r}>{r === 'all' ? 'All Regions' : r}</option>)}
+              <option value="all">{t('managerattendance.all_regions')}</option>
+              {regions.map(r => <option key={r} value={r}>{r}</option>)}
             </select>
           </div>
-          <div><label style={{fontSize: '13px', fontWeight: '500'}}>Status</label>
+          <div><label style={{fontSize: '13px', fontWeight: '500'}}>{t('common.status')}</label>
             <select value={selectedStatus} onChange={e => setSelectedStatus(e.target.value)} style={{padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '14px', width: '100%'}}>
-              <option value="all">All Status</option>
-              <option value="present">Present</option>
-              <option value="late">Late</option>
-              <option value="absent">Absent</option>
-              <option value="half_day">Half Day</option>
+              <option value="all">{t('managerattendance.all_status')}</option>
+              <option value="present">{t('managerattendance.status.present')}</option>
+              <option value="late">{t('managerattendance.status.late')}</option>
+              <option value="absent">{t('managerattendance.status.absent')}</option>
+              <option value="half_day">{t('managerattendance.status.half_day')}</option>
             </select>
           </div>
-          <div><label style={{fontSize: '13px', fontWeight: '500'}}>Supervisor</label>
+          <div><label style={{fontSize: '13px', fontWeight: '500'}}>{t('managerattendance.supervisor_label')}</label>
             <select value={selectedSupervisor} onChange={e => setSelectedSupervisor(e.target.value)} style={{padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '14px', width: '100%'}}>
-              <option value="all">All Supervisors</option>
+              <option value="all">{t('managerattendance.all_supervisors')}</option>
               {supervisors.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
             </select>
           </div>
@@ -547,45 +553,45 @@ function ManagerAttendance({
           <table style={{width: '100%', borderCollapse: 'collapse', fontSize: '13px'}}>
             <thead>
               <tr style={{background: '#f8fafc', borderBottom: '2px solid #e2e8f0'}}>
-                <th style={{padding: '10px', textAlign: 'left'}}>Employee</th>
-                <th style={{padding: '10px', textAlign: 'left'}}>Region</th>
-                <th style={{padding: '10px', textAlign: 'left'}}>Supervisor</th>
-                <th style={{padding: '10px', textAlign: 'left'}}>Date</th>
-                <th style={{padding: '10px', textAlign: 'left'}}>Status</th>
-                <th style={{padding: '10px', textAlign: 'left'}}>Check In</th>
-                <th style={{padding: '10px', textAlign: 'left'}}>Check Out</th>
-                <th style={{padding: '10px', textAlign: 'left'}}>Hours</th>
-                <th style={{padding: '10px', textAlign: 'left'}}>Submitted By</th>
-                <th style={{padding: '10px', textAlign: 'left'}}>Seen</th>
-                <th style={{padding: '10px', textAlign: 'left'}}>Approval</th>
-                <th style={{padding: '10px', textAlign: 'left'}}>Actions</th>
+                <th style={{padding: '10px', textAlign: 'left'}}>{t('managerattendance.employee')}</th>
+                <th style={{padding: '10px', textAlign: 'left'}}>{t('common.region')}</th>
+                <th style={{padding: '10px', textAlign: 'left'}}>{t('managerattendance.supervisor_label')}</th>
+                <th style={{padding: '10px', textAlign: 'left'}}>{t('common.date')}</th>
+                <th style={{padding: '10px', textAlign: 'left'}}>{t('common.status')}</th>
+                <th style={{padding: '10px', textAlign: 'left'}}>{t('attendance.check_in')}</th>
+                <th style={{padding: '10px', textAlign: 'left'}}>{t('attendance.check_out')}</th>
+                <th style={{padding: '10px', textAlign: 'left'}}>{t('attendance.hours_worked')}</th>
+                <th style={{padding: '10px', textAlign: 'left'}}>{t('managerattendance.submitted_by')}</th>
+                <th style={{padding: '10px', textAlign: 'left'}}>{t('managerattendance.seen')}</th>
+                <th style={{padding: '10px', textAlign: 'left'}}>{t('managerattendance.approval')}</th>
+                <th style={{padding: '10px', textAlign: 'left'}}>{t('common.actions')}</th>
               </tr>
             </thead>
             <tbody>
               {filteredAttendance.length === 0 ? (
                 <tr><td colSpan="12" style={{textAlign: 'center', padding: '40px', color: '#94a3b8'}}>
                   <div style={{fontSize: '40px', marginBottom: '8px'}}>📋</div>
-                  <div>{offlineCount > 0 ? `${offlineCount} record(s) waiting to sync.` : 'No attendance records submitted by supervisors'}</div>
+                  <div>{offlineCount > 0 ? t('managerattendance.records_waiting_to_sync', { count: offlineCount }) : t('managerattendance.no_records_submitted')}</div>
                 </td></tr>
               ) : (
                 filteredAttendance.map(a => (
                   <tr key={a.id} style={{borderBottom: '1px solid #e2e8f0', background: a.seenByManager ? 'white' : '#fef9e7'}}>
                     <td style={{padding: '10px'}}><strong>{a.employeeName}</strong></td>
-                    <td style={{padding: '10px'}}>{a.region || 'N/A'}</td>
+                    <td style={{padding: '10px'}}>{a.region || t('supervisor.na')}</td>
                     <td style={{padding: '10px'}}>{getSupervisorName(a.supervisorId)}</td>
                     <td style={{padding: '10px'}}>{a.date}</td>
-                    <td style={{padding: '10px'}}><span style={getStatusBadge(a.status)}>{a.status || 'Not Marked'}</span></td>
+                    <td style={{padding: '10px'}}><span style={getStatusBadge(a.status)}>{t(`managerattendance.status.${a.status || 'not_marked'}`, { defaultValue: a.status || 'Not Marked' })}</span></td>
                     <td style={{padding: '10px'}}>{a.checkIn || '--'}</td>
                     <td style={{padding: '10px'}}>{a.checkOut || '--'}</td>
-                    <td style={{padding: '10px'}}><strong>{a.workHours || 0}h</strong></td>
-                    <td style={{padding: '10px'}}>{a.updatedByName || a.supervisorName || 'N/A'}</td>
-                    <td style={{padding: '10px'}}>{a.seenByManager ? <span style={{color: '#0b7e4b'}}>✅ Seen</span> : <span style={{color: '#dc2626'}}>🔴 Not Seen</span>}</td>
-                    <td style={{padding: '10px'}}>{a.approved ? <span style={{padding: '4px 12px', borderRadius: '20px', background: '#d1fae5', color: '#065f37', fontSize: '12px'}}>✅ Approved</span> : <span style={{padding: '4px 12px', borderRadius: '20px', background: '#fef3c7', color: '#92400e', fontSize: '12px'}}>⏳ Pending</span>}</td>
+                    <td style={{padding: '10px'}}><strong>{a.workHours || 0}{t('managerattendance.hours_unit')}</strong></td>
+                    <td style={{padding: '10px'}}>{a.updatedByName || a.supervisorName || t('supervisor.na')}</td>
+                    <td style={{padding: '10px'}}>{a.seenByManager ? <span style={{color: '#0b7e4b'}}>✅ {t('managerattendance.seen')}</span> : <span style={{color: '#dc2626'}}>🔴 {t('managerattendance.not_seen')}</span>}</td>
+                    <td style={{padding: '10px'}}>{a.approved ? <span style={{padding: '4px 12px', borderRadius: '20px', background: '#d1fae5', color: '#065f37', fontSize: '12px'}}>✅ {t('managerattendance.approved')}</span> : <span style={{padding: '4px 12px', borderRadius: '20px', background: '#fef3c7', color: '#92400e', fontSize: '12px'}}>⏳ {t('managerattendance.pending')}</span>}</td>
                     <td style={{padding: '10px'}}>
                       <div style={{display: 'flex', flexWrap: 'wrap', gap: '4px'}}>
-                        {!a.seenByManager && <button onClick={() => markAsSeen(a.id)} style={{background: '#1e3a5f', color: 'white', border: 'none', padding: '4px 10px', borderRadius: '4px', cursor: 'pointer', fontSize: '11px'}}>👁️ Mark Seen</button>}
-                        {!a.approved && <><button onClick={() => approveAttendance(a.id, true)} style={{background: '#0b7e4b', color: 'white', border: 'none', padding: '4px 10px', borderRadius: '4px', cursor: 'pointer', fontSize: '11px'}}>✅ Approve</button><button onClick={() => approveAttendance(a.id, false)} style={{background: '#dc2626', color: 'white', border: 'none', padding: '4px 10px', borderRadius: '4px', cursor: 'pointer', fontSize: '11px'}}>❌ Reject</button></>}
-                        {a.approved && <span style={{padding: '4px 10px', borderRadius: '4px', fontSize: '11px', background: '#d1fae5', color: '#065f37'}}>✅ Done</span>}
+                        {!a.seenByManager && <button onClick={() => markAsSeen(a.id)} style={{background: '#1e3a5f', color: 'white', border: 'none', padding: '4px 10px', borderRadius: '4px', cursor: 'pointer', fontSize: '11px'}}>👁️ {t('managerattendance.mark_seen')}</button>}
+                        {!a.approved && <><button onClick={() => approveAttendance(a.id, true)} style={{background: '#0b7e4b', color: 'white', border: 'none', padding: '4px 10px', borderRadius: '4px', cursor: 'pointer', fontSize: '11px'}}>✅ {t('common.approve')}</button><button onClick={() => approveAttendance(a.id, false)} style={{background: '#dc2626', color: 'white', border: 'none', padding: '4px 10px', borderRadius: '4px', cursor: 'pointer', fontSize: '11px'}}>❌ {t('common.reject')}</button></>}
+                        {a.approved && <span style={{padding: '4px 10px', borderRadius: '4px', fontSize: '11px', background: '#d1fae5', color: '#065f37'}}>✅ {t('managerattendance.done')}</span>}
                       </div>
                     </td>
                   </tr>
@@ -600,3 +606,4 @@ function ManagerAttendance({
 }
 
 export default ManagerAttendance;
+

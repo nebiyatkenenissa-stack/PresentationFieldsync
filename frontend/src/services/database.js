@@ -83,7 +83,7 @@ export const getApiBase = () => {
     if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1') {
       return API_URL;
     }
-    return `http://${hostname}:5000/api`;
+    return getServerBase() + '/api';
   } catch (e) {
     return API_URL;
   }
@@ -95,7 +95,7 @@ export const getApiBase = () => {
 const db = new Dexie('FieldSyncDB');
 
 // Version 4 – verification_history now includes 'synced' index
-db.version(4).stores({
+db.version(5).stores({
   users: 'id, employeeId, email, role, region, status, pin',
   reports: 'id, reportId, employeeId, region, reportDate, synced',
   attendance: 'id, employeeId, date, status, region, synced',
@@ -115,6 +115,13 @@ db.version(4).stores({
   // FIX: verification_history now includes 'synced' as an index
   verification_history: 'id, officerId, timestamp, questionId, success, synced',
   kiosk_sessions: 'id, officerId, startTime, endTime, status, synced'
+});
+
+// Version 6 – screen_time gains the 'synced' index so records stranded at
+// synced:'syncing' (tab closed mid-flush) can be found and reset by
+// clearStuckSyncItems(). Only the changed table needs to be listed.
+db.version(6).stores({
+  screen_time: 'id, employeeId, date, trustScore, synced'
 });
 
 export { db };
@@ -150,12 +157,22 @@ export const syncQueue = {
   },
   
   add: (item) => {
-    const exists = syncQueue.pending.some(q => q.id === item.id && q.type === item.type);
-    if (exists) {
-      console.log(`⚠️ Item ${item.id} already in queue`);
+    // Update in place when this (id, type) is already queued. Screen time is
+    // the one record type that keeps mutating after it is queued (the session
+    // start snapshot is all zeros, the real totals arrive at logout), so a
+    // plain "already queued -> ignore" would keep sending the stale payload.
+    // Replacing `data` keeps the newest values while preserving the queue
+    // position, `attempts` and the original `queuedAt` so the retry counter and
+    // the 7-day overdue rule are not reset by a mid-flight update.
+    const index = syncQueue.pending.findIndex(q => q.id === item.id && q.type === item.type);
+    if (index !== -1) {
+      const existing = syncQueue.pending[index];
+      syncQueue.pending[index] = { ...existing, data: item.data };
+      syncQueue.save();
+      console.log(`🔄 Updated queued item: ${item.type} - ${item.id}`);
       return;
     }
-    
+
     syncQueue.pending.push({
       ...item,
       queuedAt: new Date().toISOString(),
@@ -203,6 +220,15 @@ export const syncQueue = {
   
   count: () => {
     return syncQueue.pending.length;
+  },
+
+  // Count only the pending items that belong to a given set of types. The
+  // global queue holds records from every module (tasks, permissions, reports,
+  // citizens, ...), so a page should never show a count that includes items
+  // it does not own. This returns the count for exactly the given type(s).
+  countByTypes: (types) => {
+    const list = Array.isArray(types) ? types : [types];
+    return syncQueue.pending.filter(item => list.includes(item.type)).length;
   }
 };
 
@@ -337,8 +363,9 @@ export const clearStuckSyncItems = async () => {
     console.log('🧹 Clearing stuck sync operations...');
     
     const storesToCheck = [
-      'reports', 'attendance', 'citizens', 'tasks', 
-      'leaves', 'permissions', 'supervisor_reports', 'verification_history'
+      'reports', 'attendance', 'citizens', 'tasks',
+      'leaves', 'permissions', 'supervisor_reports', 'verification_history',
+      'screen_time'
     ];
     
     const stuckThreshold = Date.now() - 60000;
@@ -375,9 +402,10 @@ export const clearStuckSyncItems = async () => {
     let queueCleared = 0;
 
     for (const item of pending) {
-      // Reports and citizens are critical data and must never be dropped from
-      // the queue — they are retried until they sync.
-      const isCritical = item.type === 'report' || item.type === 'citizen';
+      // Reports, citizens and screen time are critical data and must never be
+      // dropped from the queue — they are retried until they sync.
+      const isCritical = item.type === 'report' || item.type === 'citizen' ||
+        item.type === 'screen_time' || item.type === 'screen_time_update';
       if (!isCritical && item.attempts >= item.maxRetries) {
         syncQueue.remove(item.id);
         queueCleared++;
@@ -518,6 +546,66 @@ export const processSyncQueue = async (isOnline) => {
       
       const store = storeMap[item.type];
       const isServerDelete = item.type === 'screen_time_delete' || item.type === 'verification_delete';
+      const isPhotoUpload = item.type === 'user_photo_upload';
+
+      if (isPhotoUpload) {
+        // Special handling: upload a base64 photo to the server
+        try {
+          const { userId, photoBase64 } = item.data || {};
+          if (!userId || !photoBase64) {
+            syncQueue.remove(item.id);
+            synced++;
+            continue;
+          }
+
+          // Convert base64 data URL to a Blob for FormData upload
+          const response = await fetch(photoBase64);
+          const blob = await response.blob();
+          const ext = photoBase64.match(/^data:image\/(\w+);/)?.[1] || 'jpg';
+          const file = new File([blob], `profile.${ext}`, { type: `image/${ext}` });
+          const formData = new FormData();
+          formData.append('profilePhoto', file);
+
+          const uploadRes = await fetch(`${getApiBase()}/users/${userId}/photo`, {
+            method: 'POST',
+            body: formData
+          });
+
+          if (uploadRes.ok) {
+            const result = await uploadRes.json();
+            // Update local user with the server file path instead of base64
+            const localUser = await db.users.get(userId);
+            if (localUser) {
+              const updated = { ...localUser, profilePhoto: result.profilePhoto };
+              await db.users.update(userId, updated);
+            }
+            syncQueue.remove(item.id);
+            synced++;
+            console.log(`✅ Synced queued photo upload for user ${userId}`);
+            // Let every open page refresh so the new photo appears instantly.
+            if (typeof window !== 'undefined') {
+              window.dispatchEvent(new CustomEvent('users-updated', { detail: { userId } }));
+            }
+          } else {
+            throw new Error(`Upload returned ${uploadRes.status}`);
+          }
+        } catch (photoErr) {
+          console.error(`❌ Failed to sync queued photo:`, photoErr.message);
+          item.attempts = (item.attempts || 0) + 1;
+          if (item.attempts > 3) {
+            syncQueue.remove(item.id);
+            failed++;
+          } else {
+            const idx = syncQueue.pending.findIndex(q => q.id === item.id);
+            if (idx !== -1) {
+              syncQueue.pending[idx] = item;
+              syncQueue.save();
+            }
+            failed++;
+          }
+        }
+        continue;
+      }
 
       if (isServerDelete) {
         // The local record is already gone – just ask the server to delete it.
@@ -554,12 +642,22 @@ export const processSyncQueue = async (isOnline) => {
         }
         
         console.log(`🔄 Syncing to PostgreSQL: ${item.type} - ${recordId}`);
-        
+
+        // Re-read the live record before sending. The queued payload is a
+        // snapshot from the moment the item was enqueued; for continuously
+        // mutating records (screen time) it would still hold the start-of-
+        // session zeros. The local row is the source of truth at flush time.
+        let payload = item.data;
+        if (!isDelete && store && db[store]) {
+          const live = await db[store].get(recordId);
+          if (live) payload = live;
+        }
+
         // Send to /api/sync
         const response = await fetch(`${getApiBase()}/sync`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ type: item.type, data: item.data })
+          body: JSON.stringify({ type: item.type, data: payload })
         });
         
         if (response.ok) {
@@ -667,14 +765,27 @@ export const processSyncQueue = async (isOnline) => {
       }
       
       if (item.attempts > MAX_RETRIES) {
-        // Stop retrying automatically after the retry limit. The local record
-        // is KEPT (synced: false, still visible as "pending") so no data is
-        // lost — the officer can retry manually with the sync button. Without
-        // this, a permanently failing record (e.g. rejected by the server)
-        // stays in the queue forever, firing 'sync-queue-updated' every few
-        // seconds and keeping pages in a perpetual reload/sync loop.
-        console.warn(`⚠️ Max attempts (${MAX_RETRIES}) reached for ${item.type} - ${item.id}, pausing auto-retry`);
-        syncQueue.remove(recordId);
+        // Screen time is a running tally of the officer's workday. Dropping it
+        // after a few failures would erase hours of tracked time for good, so
+        // it stays queued (and keeps its latest totals) and is retried on the
+        // next sync pass. Every other type stops after the retry limit: the
+        // local record is KEPT (synced: false, still visible as "pending") so
+        // no data is lost and the officer can retry manually with the sync
+        // button. Without this, a permanently failing record (e.g. rejected by
+        // the server) stays in the queue forever, firing 'sync-queue-updated'
+        // every few seconds and keeping pages in a perpetual reload/sync loop.
+        if (item.type === 'screen_time' || item.type === 'screen_time_update') {
+          item.attempts = 0;
+          const keepIndex = syncQueue.pending.findIndex(q => q.id === item.id && q.type === item.type);
+          if (keepIndex !== -1) {
+            syncQueue.pending[keepIndex] = item;
+            syncQueue.save();
+          }
+          console.warn(`⚠️ Sync still failing for ${item.type} - ${item.id}, keeping it queued for retry`);
+        } else {
+          console.warn(`⚠️ Max attempts (${MAX_RETRIES}) reached for ${item.type} - ${item.id}, pausing auto-retry`);
+          syncQueue.remove(recordId);
+        }
         failed++;
       } else {
         // Update the item in the queue for retry
@@ -871,6 +982,61 @@ export const deleteScreenTimeRecords = async (records) => {
 };
 
 // ============================================================
+// AUDIT LOG TOMBSTONES (persist cleared/deleted ids per device so
+// pullAuditLogsFromServer never re-adds logs the user removed)
+// ============================================================
+const readAuditTombstones = () => {
+  try {
+    const parsed = JSON.parse(localStorage.getItem('fieldsync_cleared_audit') || 'null');
+    if (parsed && typeof parsed === 'object') {
+      return {
+        ids: Array.isArray(parsed.ids) ? parsed.ids : [],
+        clearedAt: parsed.clearedAt || null
+      };
+    }
+  } catch (e) {
+    console.warn('Could not read audit tombstones:', e);
+  }
+  return { ids: [], clearedAt: null };
+};
+
+export const markAuditCleared = (ids) => {
+  const prev = readAuditTombstones();
+  const data = {
+    ids: [...new Set([...prev.ids, ...(Array.isArray(ids) ? ids : [])])],
+    clearedAt: new Date().toISOString()
+  };
+  try {
+    localStorage.setItem('fieldsync_cleared_audit', JSON.stringify(data));
+  } catch (e) {
+    console.warn('Could not persist audit tombstones:', e);
+  }
+};
+
+export const markAuditDeleted = (id) => {
+  const prev = readAuditTombstones();
+  const data = {
+    ids: [...new Set([...prev.ids, id].filter(Boolean))],
+    clearedAt: prev.clearedAt
+  };
+  try {
+    localStorage.setItem('fieldsync_cleared_audit', JSON.stringify(data));
+  } catch (e) {
+    console.warn('Could not persist audit tombstone:', e);
+  }
+};
+
+const isAuditLogCleared = (log) => {
+  if (!log || !log.id) return false;
+  const tombstones = readAuditTombstones();
+  if (tombstones.ids.includes(log.id)) return true;
+  // Any log recorded at or before the last "clear all" is also hidden, which
+  // also covers logs that were regenerated with a fresh id after a clear.
+  if (tombstones.clearedAt && log.timestamp && Date.parse(log.timestamp) <= Date.parse(tombstones.clearedAt)) return true;
+  return false;
+};
+
+// ============================================================
 // PULL AUDIT LOGS FROM SERVER
 // ============================================================
 export const pullAuditLogsFromServer = async () => {
@@ -898,6 +1064,7 @@ export const pullAuditLogsFromServer = async () => {
         timestamp: log.timestamp,
         ip: log.ip,
       };
+      if (isAuditLogCleared(localLog)) continue;
       const existing = await db.audit.get(log.id);
       if (!existing) {
         await db.audit.add(localLog);
@@ -953,6 +1120,13 @@ export const pullAlertsFromServer = async () => {
       };
       await db.alerts.put(localAlert);
       console.log(`🔄 Updated alert: ${alert.title}`);
+
+      // A brand new message (not previously on this device) arrived while
+      // offline and only just became visible when the internet came back –
+      // let the app create a bell notification for the recipient immediately.
+      if (!existing && typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('alert-received', { detail: { alert: localAlert } }));
+      }
     }
     console.log('✅ Alerts pull completed');
   } catch (error) {
@@ -1259,8 +1433,7 @@ export const initializeAllData = async () => {
       currentTask: '',
       productivityScore: Math.floor(70 + Math.random() * 30),
       tasksCompleted: Math.floor(Math.random() * 5),
-      tasksInProgress: Math.floor(Math.random() * 3),
-      efficiency: Math.floor(65 + Math.random() * 35)
+      tasksInProgress: Math.floor(Math.random() * 3)
     }));
     await db.status.bulkAdd(status);
 

@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import * as citizenModel from '../models/citizen.model.js';
 import { saveBase64Photo } from '../utils/photo.js';
+import { sendCitizenNotification } from '../utils/notifyCitizen.js';
 import { pool } from '../config/db.js';
 
 export async function getAll(req: Request, res: Response): Promise<void> {
@@ -55,6 +56,7 @@ export async function create(req: Request, res: Response): Promise<void> {
     }
 
     const row = await citizenModel.create(body);
+    if (row) await sendCitizenNotification(row);
     res.status(201).json(row);
   } catch (error: any) {
     res.status(500).json({ error: error.message });

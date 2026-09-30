@@ -76,11 +76,16 @@ const GpsCapture = ({ onCoords, autoCapture = true, compact = false }) => {
             GPS captured: {coords.latitude.toFixed(5)}, {coords.longitude.toFixed(5)}
             {coords.accuracy ? ` (±${coords.accuracy}m)` : ''}
           </span>
-          {coords.accuracy > 100 && (
-            <span style={{ color: '#b45309', fontWeight: '500' }}>
-              ⚠️ Low accuracy – location may not match your exact position
+          {coords.networkEstimate ? (
+            <span style={{ color: '#b91c1c', fontWeight: '600' }}>
+              ⚠️ This is a network estimate, not a real GPS fix — the map location is probably WRONG. Move to an open
+              area, ensure precise location is ON, and recapture.
             </span>
-          )}
+          ) : coords.lowAccuracy ? (
+            <span style={{ color: '#b45309', fontWeight: '500' }}>
+              ⚠️ Low accuracy fix (±{coords.accuracy}m) — map may not match your exact position. Recapture if possible.
+            </span>
+          ) : null}
           <a
             href={`https://www.google.com/maps?q=${coords.latitude},${coords.longitude}`}
             target="_blank"

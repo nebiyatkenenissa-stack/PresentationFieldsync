@@ -1,6 +1,7 @@
 // components/users/UserManagement.js - WITH FULL VALIDATION + LANGUAGE SELECTOR + HIERARCHICAL LOCATIONS
 
 import React, { useState } from 'react';
+import toast from 'react-hot-toast';
 import { db, syncQueue, checkRealInternet, getApiBase } from '../../services/database';
 import { useUserLanguage } from '../context/UserLanguageContext';
 import UserLanguageSelector from './UserLanguageSelector';
@@ -87,7 +88,7 @@ function UserManagement({
   const resendCredentials = async (u) => {
     const online = await checkRealInternet();
     if (!online) {
-      alert('You are offline. The password reset email cannot be sent right now.');
+      toast('You are offline. The password reset email cannot be sent right now.');
       return;
     }
     try {
@@ -118,16 +119,16 @@ function UserManagement({
       if (response.ok && tempPassword) {
         await db.users.update(u.id, { password: tempPassword, synced: true, must_change_password: true });
         setUsers(prev => prev.map(x => x.id === u.id ? { ...x, password: tempPassword, synced: true, must_change_password: true } : x));
-        alert(`🔑 Password reset and sent to ${u.email}.\n\nNew password: ${tempPassword}\n\nShare this with the user (they will be asked to change it on first login).`);
+        toast(`🔑 Password reset and sent to ${u.email}.\n\nNew password: ${tempPassword}\n\nShare this with the user (they will be asked to change it on first login).`);
         if (addNotification) {
-          addNotification(u.id, '🔑 Credentials Reset', `Your FieldSync password was reset. Check ${u.email} for the new password.`, 'info');
+          addNotification(u.id, '🔑 Credentials Reset', `Your FieldSync password was reset. Check ${u.email} for the new password.`, 'info', '/profile');
         }
       } else {
-        alert('Could not reset the password: ' + (result.error || 'unknown error'));
+        toast('Could not reset the password: ' + (result.error || 'unknown error'));
       }
     } catch (err) {
       console.error('Error resetting credentials:', err);
-      alert('Failed to reach the server. Please try again.');
+      toast('Failed to reach the server. Please try again.');
     }
   };
   
@@ -210,15 +211,15 @@ function UserManagement({
     const employeeIdError = validateEmployeeId(editForm.employeeId, editingUser.id);
     setEditErrors(prev => ({ ...prev, employeeId: employeeIdError }));
     if (employeeIdError) {
-      alert(employeeIdError);
+      toast(employeeIdError);
       return;
     }
     if (!editForm.name.trim() || !editForm.email.trim()) {
-      alert('Name and Email are required.');
+      toast('Name and Email are required.');
       return;
     }
     if (editForm.role === 'field_officer' && !editForm.supervisorId) {
-      alert('Please select a Supervisor for the Field Officer.');
+      toast('Please select a Supervisor for the Field Officer.');
       return;
     }
 
@@ -275,13 +276,13 @@ function UserManagement({
         if (!alreadyQueued) {
           syncQueue.add({ type: 'user_update', id: editingUser.id, data: updatedUser });
         }
-        if (!online) alert('📋 User saved offline. Will sync when online.');
+        if (!online) toast('📋 User saved offline. Will sync when online.');
       }
-      alert(`✅ User ${updatedUser.name} updated successfully.`);
+      toast(`✅ User ${updatedUser.name} updated successfully.`);
       setEditingUser(null);
     } catch (err) {
       console.error('Error updating user:', err);
-      alert('Failed to update user. Please try again.');
+      toast('Failed to update user. Please try again.');
     } finally {
       setIsSavingEdit(false);
     }
@@ -325,33 +326,33 @@ function UserManagement({
     setErrors({ name: nameError, phone: phoneError });
 
     if (nameError || phoneError) {
-      alert('Please fix the validation errors before submitting.');
+      toast('Please fix the validation errors before submitting.');
       return;
     }
 
     const userExists = users.some(u => u.email === newUser.email);
     if (userExists) {
-      alert(userT('userManagement.userExists'));
+      toast(userT('userManagement.userExists'));
       return;
     }
 
     if (!newUser.name || !newUser.email || !newUser.role) {
-      alert(userT('userManagement.fillRequired'));
+      toast(userT('userManagement.fillRequired'));
       return;
     }
 
     if (newUser.role === 'field_officer' && !selectedLocations.woreda) {
-      alert('Please select a Woreda for Field Officers.');
+      toast('Please select a Woreda for Field Officers.');
       return;
     }
 
     if (!selectedLocations[requiredLevel]) {
-      alert(`Please select the ${requiredLevel} for ${newUser.role}.`);
+      toast(`Please select the ${requiredLevel} for ${newUser.role}.`);
       return;
     }
 
     if (newUser.role === 'field_officer' && !newUser.supervisorId) {
-      alert('Please select a Supervisor for the Field Officer.');
+      toast('Please select a Supervisor for the Field Officer.');
       return;
     }
 
@@ -360,7 +361,7 @@ function UserManagement({
       await handleCreateUser(e);
     } catch (error) {
       console.error('Error creating user:', error);
-      alert(userT('userManagement.createError', { error: error.message }));
+      toast(userT('userManagement.createError', { error: error.message }));
     } finally {
       setIsSubmitting(false);
     }
@@ -781,7 +782,7 @@ function UserManagement({
                         >
                           {userT('userManagement.delete')}
                         </button>
-                        {u.role !== 'manager' && (
+                        {(
                           <button
                             onClick={() => resendCredentials(u)}
                             style={{

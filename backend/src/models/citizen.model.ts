@@ -1,10 +1,15 @@
 import { pool } from '../config/db.js';
 import { saveBase64Photo } from '../utils/photo.js';
 
-// Adds the grandfather_name column used to disambiguate citizen registrations.
-// Safe to run on every boot (no-op once the column exists).
+// Adds the grandfather_name/family/birth columns used to disambiguate citizen
+// registrations and enrich national-ID records.
+// Safe to run on every boot (no-op once the columns exist).
 export async function ensureCitizenSchema(): Promise<void> {
   await pool.query('ALTER TABLE citizens ADD COLUMN IF NOT EXISTS grandfather_name TEXT');
+  await pool.query('ALTER TABLE citizens ADD COLUMN IF NOT EXISTS father_name TEXT');
+  await pool.query('ALTER TABLE citizens ADD COLUMN IF NOT EXISTS mother_name TEXT');
+  await pool.query('ALTER TABLE citizens ADD COLUMN IF NOT EXISTS birth_place TEXT');
+  await pool.query('ALTER TABLE citizens ADD COLUMN IF NOT EXISTS birth_certificate_number VARCHAR(100)');
 }
 
 // Lazily migrates legacy base64 photos (data URLs) stored in the DB into file
@@ -39,8 +44,9 @@ export async function create(data: any): Promise<any> {
         district, village, occupation, marital_status,
         registration_date, registered_by, registered_by_name,
         id_type, id_number, biometrics, photo,
-        latitude, longitude, gps_accuracy, gps_captured_at
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25)
+        latitude, longitude, gps_accuracy, gps_captured_at,
+        father_name, mother_name, birth_place, birth_certificate_number
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29)
     RETURNING *`,
     [
       data.nationalId, data.firstName, data.lastName,
@@ -55,6 +61,10 @@ export async function create(data: any): Promise<any> {
       data.longitude || null,
       data.gpsAccuracy || null,
       data.gpsCapturedAt || null,
+      data.fatherName || null,
+      data.motherName || null,
+      data.birthPlace || null,
+      data.birthCertificateNo || null,
     ]
   );
   return result.rows[0];

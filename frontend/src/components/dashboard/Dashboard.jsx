@@ -4,8 +4,13 @@
 // - Top performers ranked by registration count (highest first)
 
 import React, { useMemo, useCallback, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { getToday } from '../../utils/helpers';
 import { OLD_REGION_NAMES } from '../../services/database';
+import useRegions from '../../hooks/useRegions';
+import {
+  buildRecordLocationPath, parseLocationHierarchy, regionOfPath
+} from '../../utils/regions';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
   ResponsiveContainer, LineChart, Line, AreaChart, Area, Cell,
@@ -13,18 +18,38 @@ import {
 } from 'recharts';
 import VerificationPopup from '../verification/VerificationPopup';
 import { useVerification } from '../../hooks/useVerification';
+import useIsMobile from '../../hooks/useIsMobile';
 
 function Dashboard({
   isManager, isSupervisor, isOfficer, user,
   reports, supervisorReports, users, leaves, permissions, citizens,
   teamMembers, liveStatus, loading
 }) {
+  const isMobile = useIsMobile();
+  const { t, i18n } = useTranslation();
+
+  const todayLabel = useMemo(() => {
+    const lng = i18n.resolvedLanguage || i18n.language || 'en';
+    const locale = lng === 'en' ? 'en-US' : lng;
+    const options = { calendar: 'gregory', weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' };
+    try {
+      return new Date().toLocaleDateString(locale, options);
+    } catch (e) {
+      return new Date().toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
+    }
+  }, [i18n.resolvedLanguage, i18n.language]);
+
   // ===== VERIFICATION =====
   const {
     showPopup,
     handleAnswer,
     handleClose
   } = useVerification(isOfficer ? user?.id : null, isOfficer ? user?.name : null);
+
+  // The REAL Ethiopia region list (Amhara, Oromia, Addis Ababa, ...) loaded
+  // from the backend `locations` table. Every region label below comes from
+  // this list, never from a kebele / woreda / zone name.
+  const regions = useRegions();
 
   // ============================================================
   // ALL DATA COMPUTED FROM RAW ARRAYS – REAL DATA
@@ -45,37 +70,21 @@ function Dashboard({
   const realFieldOfficers = useMemo(() => (users || []).filter(u => u.role === 'field_officer').length, [users]);
 
   // ----- REGIONAL HIERARCHY (Country > Region > Zone > Woreda > Kebele > Community) -----
-  const parseHierarchy = useCallback((path) => {
-    if (!path || typeof path !== 'string') {
-      return { country: '', region: '', zone: '', woreda: '', kebele: '', community: '' };
-    }
-    const parts = path.split('>').map(p => p.trim()).filter(Boolean);
-    return {
-      country: parts[0] || '',
-      region: parts[1] || '',
-      zone: parts[2] || '',
-      woreda: parts[3] || '',
-      kebele: parts[4] || '',
-      community: parts[5] || ''
-    };
-  }, []);
+  // Shared parser from utils/regions.js (single source of truth).
+  const parseHierarchy = useCallback((path) => parseLocationHierarchy(path), []);
 
-  // Short, user-friendly name: kebele > woreda > zone > region.
-  const shortLocation = useCallback((path) => {
-    const h = parseHierarchy(path);
-    return h.kebele || h.woreda || h.zone || h.region || (path && typeof path === 'string' ? path.trim() : '') || 'Other';
-  }, [parseHierarchy]);
-
-  // Human readable description: "Kebele 01 · Merawi Woreda · West Gojjam · Amhara"
+  // Human readable description, always led by the REAL region name:
+  // "Amhara · West Gojjam · Merawi".
   const describeLocation = useCallback((path) => {
+    const region = regionOfPath(path, regions);
     const h = parseHierarchy(path);
-    const names = [h.kebele, h.woreda, h.zone, h.region].filter(Boolean);
+    const names = [region || h.region, h.zone, h.woreda].filter(Boolean);
     if (names.length === 0) {
       const raw = typeof path === 'string' ? path.trim() : '';
       return raw || 'N/A';
     }
     return names.join(' · ');
-  }, [parseHierarchy]);
+  }, [regions, parseHierarchy]);
 
   // Woreda-level bucket (woreda > zone > region) for the breakdown chart.
   const woredaLocation = useCallback((path) => {
@@ -96,38 +105,55 @@ function Dashboard({
   }, [users]);
 
   const resolveLocationPath = useCallback((employeeId, fallbackPath) => {
-    if (employeeId && employeeLocationMap[employeeId]) return employeeLocationMap[employeeId];
+    if (employeeId && employeeLocationMap[employeeId]) {
+      const assigned = employeeLocationMap[employeeId];
+      if (assigned && assigned !== 'All' && assigned !== 'all' && !OLD_REGION_NAMES.includes(assigned)) return assigned;
+    }
+    if (fallbackPath && typeof fallbackPath === 'object' && !Array.isArray(fallbackPath)) {
+      fallbackPath = buildRecordLocationPath(fallbackPath);
+    }
+    if (Array.isArray(fallbackPath)) {
+      return fallbackPath.map(l => (l && l.name) || l).filter(Boolean).join(' > ');
+    }
     if (fallbackPath && typeof fallbackPath === 'string') {
       const trimmed = fallbackPath.trim();
       if (trimmed && !OLD_REGION_NAMES.includes(trimmed)) return trimmed;
     }
     return 'Other';
-  }, [employeeLocationMap]);
+  }, [employeeLocationMap, buildRecordLocationPath]);
 
   const regionStatsData = useMemo(() => {
+    // Buckets are the REAL region names from the database `locations` table.
+    // Seed the list so every region is represented even when it has no data.
     const map = {};
+    (regions || []).forEach(r => {
+      map[r.name] = { name: r.name, fullPath: '', reports: 0, registrations: 0, woredas: new Set(), officers: new Set() };
+    });
     const ensure = (name) => {
       if (!map[name]) map[name] = { name, fullPath: '', reports: 0, registrations: 0, woredas: new Set(), officers: new Set() };
       return map[name];
     };
+    const regionOf = (path) => regionOfPath(path, regions);
 
     (reports || []).forEach(r => {
-      const path = resolveLocationPath(r.employeeId, r.region || r.locationPath);
+      const path = resolveLocationPath(r.employeeId, r.region || r.locationPath || r);
       if (path === 'Other') return;
-      const name = shortLocation(path);
-      const entry = ensure(name);
+      const region = regionOf(path);
+      if (!region) return;
+      const entry = ensure(region);
       if (!entry.fullPath) entry.fullPath = path;
       entry.reports += 1;
       entry.officers.add(r.employeeId);
       const w = woredaLocation(path);
-      if (w) entry.woredas.add(w);
+      if (w && w !== region) entry.woredas.add(w);
     });
 
     (citizens || []).forEach(c => {
-      const path = resolveLocationPath(c.registeredBy, c.region);
+      const path = resolveLocationPath(c.registeredBy, c.region || c.locationPath || c);
       if (path === 'Other') return;
-      const name = shortLocation(path);
-      const entry = ensure(name);
+      const region = regionOf(path);
+      if (!region) return;
+      const entry = ensure(region);
       if (!entry.fullPath) entry.fullPath = path;
       entry.registrations += 1;
     });
@@ -142,11 +168,13 @@ function Dashboard({
         officers: s.officers.size
       }))
       .sort((a, b) => b.reports - a.reports);
-  }, [reports, citizens, resolveLocationPath, shortLocation, woredaLocation]);
+  }, [reports, citizens, regions, resolveLocationPath, woredaLocation]);
 
   const regionHierarchyData = useMemo(() => {
-    // Location chart data – grouped by the short location name (kebele / woreda)
+    // Location chart data – only regions that actually have activity.
+    // Real region names come from the region database.
     return regionStatsData
+      .filter(s => s.reports > 0 || s.registrations > 0)
       .slice(0, 8)
       .map(s => ({
         name: s.name,
@@ -254,18 +282,25 @@ function Dashboard({
     return data;
   }, [reports, teamIds, isSupervisor, user]);
 
-  // ----- TEAM REPORT SHARE (pie chart – reports per team member) -----
+  // ----- TEAM REPORT SHARE (bar chart – reports per team member) -----
+  // Seeded from the full team roster so EVERY member is on the chart, even
+  // the ones who have not submitted a report yet (they simply show 0).
   const teamMemberShareData = useMemo(() => {
     if (!isSupervisor || !user) return [];
     const map = {};
+    (teamMembers || []).forEach(m => {
+      if (!m || !m.employeeId) return;
+      map[m.employeeId] = { name: m.name || m.employeeName || m.employeeId, value: 0 };
+    });
     (reports || []).forEach(r => {
-      if (teamIds.includes(r.employeeId)) {
-        if (!map[r.employeeId]) map[r.employeeId] = { name: r.employeeName || r.employeeId, value: 0 };
-        map[r.employeeId].value += 1;
+      if (!teamIds.includes(r.employeeId)) return;
+      if (!map[r.employeeId]) {
+        map[r.employeeId] = { name: r.employeeName || r.employeeId, value: 0 };
       }
+      map[r.employeeId].value += 1;
     });
     return Object.values(map).sort((a, b) => b.value - a.value);
-  }, [reports, teamIds, isSupervisor, user]);
+  }, [reports, teamIds, teamMembers, isSupervisor, user]);
 
   // ----- OFFICER PERFORMANCE (personal, real data) -----
   const officerPerformanceData = useMemo(() => {
@@ -287,8 +322,7 @@ function Dashboard({
       last7Days.push({
         date: dateStr,
         registrations,
-        reports: reportsCount,
-        efficiency: reportsCount > 0 ? Math.round((registrations / reportsCount) * 100) : 0
+        reports: reportsCount
       });
     }
     return last7Days;
@@ -358,11 +392,6 @@ function Dashboard({
     return leavesCount + permsCount;
   }, [leaves, permissions, isOfficer, user]);
 
-  const officerEfficiency = useMemo(() => {
-    if (!isOfficer || !user) return 0;
-    return officerReportsCount > 0 ? Math.round((officerTotalRegistrations / officerReportsCount) * 100) : 0;
-  }, [officerReportsCount, officerTotalRegistrations, isOfficer, user]);
-
   // ============================================================
   // TOP PERFORMERS – RANKED BY REGISTRATION COUNT (HIGHEST FIRST)
   // ============================================================
@@ -376,7 +405,6 @@ function Dashboard({
           location: describeLocation(resolveLocationPath(r.employeeId, r.region)),
           totalReports: 0,
           totalRegistrations: 0,
-          avgEfficiency: 0,
         };
       }
       map[r.employeeId].totalReports += 1;
@@ -386,12 +414,6 @@ function Dashboard({
       if (c.registeredBy && map[c.registeredBy]) {
         map[c.registeredBy].totalRegistrations += 1;
       }
-    });
-
-    Object.values(map).forEach(emp => {
-      emp.avgEfficiency = emp.totalReports > 0
-        ? Math.round((emp.totalRegistrations / emp.totalReports) * 100)
-        : 0;
     });
 
     // 🔥 RANKED BY REGISTRATION COUNT (HIGHEST FIRST)
@@ -415,7 +437,6 @@ function Dashboard({
           location: describeLocation(resolveLocationPath(r.employeeId, r.region)),
           totalReports: 0,
           totalRegistrations: 0,
-          avgEfficiency: 0,
         };
       }
       if (map[r.employeeId]) {
@@ -427,23 +448,11 @@ function Dashboard({
         map[c.registeredBy].totalRegistrations += 1;
       }
     });
-    Object.values(map).forEach(emp => {
-      emp.avgEfficiency = emp.totalReports > 0
-        ? Math.round((emp.totalRegistrations / emp.totalReports) * 100)
-        : 0;
-    });
     // 🔥 RANKED BY REGISTRATION COUNT (HIGHEST FIRST)
     return Object.values(map)
       .filter(emp => emp.totalRegistrations > 0)
       .sort((a, b) => b.totalRegistrations - a.totalRegistrations);
   }, [reports, citizens, teamIds, isSupervisor, user, resolveLocationPath, describeLocation]);
-
-  // ----- AVERAGE TEAM EFFICIENCY (real data) -----
-  const teamAvgEfficiency = useMemo(() => {
-    if (!isSupervisor || !user || !realTeamPerformance || realTeamPerformance.length === 0) return 0;
-    const total = realTeamPerformance.reduce((s, p) => s + (p.avgEfficiency || 0), 0);
-    return Math.round(total / realTeamPerformance.length);
-  }, [isSupervisor, user, realTeamPerformance]);
 
   // ============================================================
   // STYLING
@@ -491,7 +500,7 @@ function Dashboard({
     return null;
   }, []);
 
-  const LoadingBar = useCallback(({ label = 'Loading chart data...' }) => (
+  const LoadingBar = useCallback(({ label }) => (
     <div style={{ padding: '34px 20px', textAlign: 'center' }}>
       <div style={{
         width: '100%',
@@ -510,18 +519,18 @@ function Dashboard({
           animation: 'fieldsyncLoading 1.2s ease-in-out infinite'
         }} />
       </div>
-      <div style={{ fontSize: '12px', color: colors.textSecondary }}>{label}</div>
+      <div style={{ fontSize: '12px', color: colors.textSecondary }}>{label || t('dashboard.loading_chart')}</div>
     </div>
-  ), [colors.textSecondary]);
+  ), [colors.textSecondary, t]);
 
-  const renderChart = useCallback((type, data, chartColors = CHART_COLORS, xAxisKey = 'date') => {
+  const renderChart = useCallback((type, data, chartColors = CHART_COLORS, xAxisKey = 'date', seriesName) => {
     if (loading) {
       return <LoadingBar />;
     }
     if (!data || data.length === 0) {
       return (
         <div style={{ textAlign: 'center', padding: '40px', color: colors.textSecondary, fontSize: '14px' }}>
-          No data available
+          {t('dashboard.no_data_available')}
         </div>
       );
     }
@@ -533,69 +542,69 @@ function Dashboard({
     switch (type) {
       case 'bar':
         return (
-          <ResponsiveContainer width="100%" height={280}>
+          <ResponsiveContainer width="100%" height={isMobile ? 230 : 280}>
             <BarChart data={data} {...commonProps}>
               <CartesianGrid strokeDasharray="3 3" stroke={colors.chartGrid} />
               <XAxis dataKey={xAxisKey} tick={{ fontSize: 12, fill: colors.textSecondary }} />
               <YAxis tick={{ fontSize: 12, fill: colors.textSecondary }} />
               <Tooltip content={CustomTooltip} />
               <Legend wrapperStyle={{ fontSize: '12px', paddingTop: '10px', color: colors.textSecondary }} />
-              <Bar dataKey="value" fill={chartColors[0]} radius={[4, 4, 0, 0]} />
+              <Bar dataKey="value" name={seriesName || 'value'} fill={chartColors[0]} radius={[4, 4, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
         );
       case 'line':
         return (
-          <ResponsiveContainer width="100%" height={280}>
+          <ResponsiveContainer width="100%" height={isMobile ? 230 : 280}>
             <LineChart data={data} {...commonProps}>
               <CartesianGrid strokeDasharray="3 3" stroke={colors.chartGrid} />
               <XAxis dataKey={xAxisKey} tick={{ fontSize: 12, fill: colors.textSecondary }} />
               <YAxis tick={{ fontSize: 12, fill: colors.textSecondary }} />
               <Tooltip content={CustomTooltip} />
               <Legend wrapperStyle={{ fontSize: '12px', paddingTop: '10px', color: colors.textSecondary }} />
-              <Line type="monotone" dataKey="value" stroke={chartColors[0]} strokeWidth={2} dot={{ r: 4, fill: chartColors[0] }} />
+              <Line type="monotone" dataKey="value" name={seriesName || 'value'} stroke={chartColors[0]} strokeWidth={2} dot={{ r: 4, fill: chartColors[0] }} />
             </LineChart>
           </ResponsiveContainer>
         );
       case 'area':
         return (
-          <ResponsiveContainer width="100%" height={280}>
+          <ResponsiveContainer width="100%" height={isMobile ? 230 : 280}>
             <AreaChart data={data} {...commonProps}>
               <CartesianGrid strokeDasharray="3 3" stroke={colors.chartGrid} />
               <XAxis dataKey={xAxisKey} tick={{ fontSize: 12, fill: colors.textSecondary }} />
               <YAxis tick={{ fontSize: 12, fill: colors.textSecondary }} />
               <Tooltip content={CustomTooltip} />
               <Legend wrapperStyle={{ fontSize: '12px', paddingTop: '10px', color: colors.textSecondary }} />
-              <Area type="monotone" dataKey="value" stroke={chartColors[0]} fill={chartColors[0]} fillOpacity={0.2} />
+              <Area type="monotone" dataKey="value" name={seriesName || 'value'} stroke={chartColors[0]} fill={chartColors[0]} fillOpacity={0.2} />
             </AreaChart>
           </ResponsiveContainer>
         );
       default:
         return null;
     }
-  }, [loading, LoadingBar]);
+  }, [loading, LoadingBar, isMobile, t]);
 
   const ChartWrapper = useCallback(({ children, title, subtitle }) => (
     <div style={{
       background: colors.cardBg,
-      padding: '20px',
+      padding: isMobile ? '14px 12px' : '20px',
       borderRadius: '8px',
       boxShadow: colors.shadow,
       border: `1px solid ${colors.cardBorder}`,
       height: '100%'
     }}>
       <div style={{ marginBottom: '16px' }}>
-        <h3 style={{ fontSize: '15px', fontWeight: '600', margin: 0, color: colors.textPrimary }}>{title}</h3>
+        <h3 style={{ fontSize: isMobile ? '14px' : '15px', fontWeight: '600', margin: 0, color: colors.textPrimary }}>{title}</h3>
         {subtitle && <p style={{ fontSize: '13px', color: colors.textSecondary, margin: '4px 0 0 0' }}>{subtitle}</p>}
       </div>
       {loading ? <LoadingBar /> : children}
     </div>
-  ), [loading, LoadingBar]);
+  ), [loading, LoadingBar, isMobile]);
 
   const StatsCard = useCallback(({ label, value, color, icon, detail }) => (
     <div style={{
       background: `linear-gradient(135deg, ${color}, ${color}dd)`,
-      padding: '20px',
+      padding: isMobile ? '14px' : '20px',
       borderRadius: '8px',
       color: 'white',
       boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
@@ -611,11 +620,11 @@ function Dashboard({
         e.currentTarget.style.transform = 'translateY(0)';
         e.currentTarget.style.boxShadow = '0 2px 8px rgba(0,0,0,0.1)';
       }}>
-      <div style={{ fontSize: '26px', fontWeight: '700' }}>{value}</div>
-      <div style={{ fontSize: '13px', opacity: 0.85, marginTop: '4px' }}>{icon} {label}</div>
-      {detail && <div style={{ fontSize: '11px', opacity: 0.75, marginTop: '6px' }}>Click to view details ▸</div>}
+      <div style={{ fontSize: isMobile ? '20px' : '26px', fontWeight: '700' }}>{value}</div>
+      <div style={{ fontSize: isMobile ? '11px' : '13px', opacity: 0.85, marginTop: '4px' }}>{icon} {label}</div>
+      {detail && <div style={{ fontSize: '11px', opacity: 0.75, marginTop: '6px' }}>{t('dashboard.click_to_view_details')}</div>}
     </div>
-  ), [setActiveCard]);
+  ), [setActiveCard, isMobile, t]);
 
   // ============================================================
   // CARD DETAIL DATA (used inside the detail box)
@@ -675,15 +684,24 @@ function Dashboard({
     return Object.values(map).sort((a, b) => b.count - a.count);
   }, [reports]);
 
+  // Seeded from the full team roster so EVERY member is on the chart, even
+  // the ones who have not registered a citizen yet (they simply show 0).
   const teamRegistrationsByMember = useMemo(() => {
     if (!isSupervisor || !user) return [];
     const map = {};
+    (teamMembers || []).forEach(m => {
+      if (!m || !m.employeeId) return;
+      map[m.employeeId] = {
+        employeeId: m.employeeId,
+        employeeName: m.name || m.employeeName || m.employeeId,
+        count: 0
+      };
+    });
     (citizens || []).filter(c => teamIds.includes(c.registeredBy)).forEach(c => {
       if (!map[c.registeredBy]) {
-        const emp = (teamMembers || []).find(m => m.employeeId === c.registeredBy);
         map[c.registeredBy] = {
           employeeId: c.registeredBy,
-          employeeName: (emp && (emp.name || emp.employeeName)) || c.registeredBy,
+          employeeName: c.registeredByName || c.registeredBy,
           count: 0
         };
       }
@@ -727,16 +745,16 @@ function Dashboard({
     const items = [];
     (leaves || []).filter(l => l.employeeId === user.employeeId && l.status === 'pending').forEach(l => {
       items.push({
-        type: '🗓️ Leave',
+        type: `🗓️ ${t('dashboard.leave')}`,
         name: l.employeeName || l.employeeId,
-        detail: `${l.leaveType || 'Leave'} · ${l.startDate || ''} → ${l.endDate || ''}`
+        detail: `${l.leaveType || t('dashboard.leave')} · ${l.startDate || ''} → ${l.endDate || ''}`
       });
     });
     (permissions || []).filter(p => p.employeeId === user.employeeId && p.status === 'pending').forEach(p => {
       items.push({
-        type: '⏳ Permission',
+        type: `⏳ ${t('dashboard.permission')}`,
         name: p.employeeName || p.employeeId,
-        detail: `${p.permissionType || 'Permission'} · ${p.fromTime || ''}`
+        detail: `${p.permissionType || t('dashboard.permission')} · ${p.fromTime || ''}`
       });
     });
     return items;
@@ -826,10 +844,10 @@ function Dashboard({
     );
   };
 
-  const EmptyDetail = ({ msg = 'No data available', icon = '📭' }) => (
+  const EmptyDetail = ({ msg, icon = '📭' }) => (
     <div style={{ textAlign: 'center', padding: '36px 20px' }}>
       <div style={{ fontSize: '34px', marginBottom: '8px' }}>{icon}</div>
-      <div style={{ color: colors.textSecondary, fontSize: '14px' }}>{msg}</div>
+      <div style={{ color: colors.textSecondary, fontSize: '14px' }}>{msg || t('dashboard.no_data_available')}</div>
     </div>
   );
 
@@ -855,8 +873,8 @@ function Dashboard({
     const max = reportsByOfficer.length ? reportsByOfficer[0].count : 1;
     return (
       <>
-        <DetailSummary text={`${reportsByOfficer.length} submitter(s) · ${realTotalReports} total reports`} />
-        {reportsByOfficer.length === 0 ? <EmptyDetail msg="No reports yet" icon="📋" /> :
+        <DetailSummary text={t('dashboard.submitters_total_reports', { count: reportsByOfficer.length, total: realTotalReports })} />
+        {reportsByOfficer.length === 0 ? <EmptyDetail msg={t('dashboard.no_reports_yet')} icon="📋" /> :
           reportsByOfficer.map((e, i) => (
             <DetailRow key={e.employeeId || i} name={e.employeeName || e.employeeId} sub={e.location} value={`${e.count}`} icon="📋" color="#2563eb" progress={(e.count / max) * 100} />
           ))}
@@ -868,8 +886,8 @@ function Dashboard({
     const max = citizensByOfficer.length ? citizensByOfficer[0].count : 1;
     return (
       <>
-        <DetailSummary text={`${citizensByOfficer.length} officer(s) · ${realTotalCitizens} total registrations`} />
-        {citizensByOfficer.length === 0 ? <EmptyDetail msg="No citizens registered yet" icon="🆔" /> :
+        <DetailSummary text={t('dashboard.officers_total_registrations', { count: citizensByOfficer.length, total: realTotalCitizens })} />
+        {citizensByOfficer.length === 0 ? <EmptyDetail msg={t('dashboard.no_citizens_registered_yet')} icon="🆔" /> :
           citizensByOfficer.map((e, i) => (
             <DetailRow key={e.employeeId || i} name={e.employeeName} sub={e.location} value={`${e.count}`} icon="🆔" color="#0b7e4b" progress={(e.count / max) * 100} />
           ))}
@@ -881,10 +899,10 @@ function Dashboard({
     const list = (users || []).filter(u => u.role === 'field_officer');
     return (
       <>
-        <DetailSummary text={`${list.length} field officer(s)`} />
-        {list.length === 0 ? <EmptyDetail msg="No field officers yet" icon="👥" /> :
+        <DetailSummary text={t('dashboard.field_officers_count', { count: list.length })} />
+        {list.length === 0 ? <EmptyDetail msg={t('dashboard.no_field_officers_yet')} icon="👥" /> :
           list.map((u, i) => (
-            <DetailRow key={u.id || i} name={u.name || u.employeeId} sub={`${u.employeeId || ''} · ${u.region || 'No location'}`} value={u.status || 'active'} icon="👤" color={statusPillColor(u.status)} />
+            <DetailRow key={u.id || i} name={u.name || u.employeeId} sub={`${u.employeeId || ''} · ${u.region || t('dashboard.no_location')}`} value={u.status ? t(`dashboard.status.${u.status}`, { defaultValue: u.status }) : t('dashboard.status.active')} icon="👤" color={statusPillColor(u.status)} />
           ))}
       </>
     );
@@ -894,10 +912,10 @@ function Dashboard({
     const list = (users || []).filter(u => u.role === 'supervisor');
     return (
       <>
-        <DetailSummary text={`${list.length} supervisor(s)`} />
-        {list.length === 0 ? <EmptyDetail msg="No supervisors yet" icon="👤" /> :
+        <DetailSummary text={t('dashboard.supervisors_count', { count: list.length })} />
+        {list.length === 0 ? <EmptyDetail msg={t('dashboard.no_supervisors_yet')} icon="👤" /> :
           list.map((u, i) => (
-            <DetailRow key={u.id || i} name={u.name || u.employeeId} sub={`${u.employeeId || ''} · ${u.region || 'No location'}`} value={u.status || 'active'} icon="👨‍💼" color={statusPillColor(u.status)} />
+            <DetailRow key={u.id || i} name={u.name || u.employeeId} sub={`${u.employeeId || ''} · ${u.region || t('dashboard.no_location')}`} value={u.status ? t(`dashboard.status.${u.status}`, { defaultValue: u.status }) : t('dashboard.status.active')} icon="👨‍💼" color={statusPillColor(u.status)} />
           ))}
       </>
     );
@@ -907,8 +925,8 @@ function Dashboard({
     const max = activeOfficersTodayList.length ? activeOfficersTodayList[0].count : 1;
     return (
       <>
-        <DetailSummary text={`${activeOfficersTodayList.length} officer(s) active today (${getToday()})`} />
-        {activeOfficersTodayList.length === 0 ? <EmptyDetail msg="No officers active today" icon="⚡" /> :
+        <DetailSummary text={t('dashboard.officers_active_today', { count: activeOfficersTodayList.length, date: getToday() })} />
+        {activeOfficersTodayList.length === 0 ? <EmptyDetail msg={t('dashboard.no_officers_active_today')} icon="⚡" /> :
           activeOfficersTodayList.map((e, i) => (
             <DetailRow key={e.employeeId || i} name={e.employeeName || e.employeeId} sub={e.employeeId} value={`${e.count}`} icon="⚡" color="#0b7e4b" progress={(e.count / max) * 100} />
           ))}
@@ -920,21 +938,21 @@ function Dashboard({
     const list = (teamMembers || []).filter(Boolean);
     return (
       <>
-        <DetailSummary text={`${list.length} team member(s)`} />
-        {list.length === 0 ? <EmptyDetail msg="No team members yet" icon="👥" /> :
+        <DetailSummary text={t('dashboard.team_members_count', { count: list.length })} />
+        {list.length === 0 ? <EmptyDetail msg={t('dashboard.no_team_members_yet')} icon="👥" /> :
           list.map((m, i) => (
-            <DetailRow key={m.employeeId || i} name={m.name || m.employeeName || m.employeeId} sub={`${m.employeeId || ''} · ${m.region || 'No location'}`} value={m.status || 'active'} icon="👤" color={statusPillColor(m.status)} />
+            <DetailRow key={m.employeeId || i} name={m.name || m.employeeName || m.employeeId} sub={`${m.employeeId || ''} · ${m.region || t('dashboard.no_location')}`} value={m.status ? t(`dashboard.status.${m.status}`, { defaultValue: m.status }) : t('dashboard.status.active')} icon="👤" color={statusPillColor(m.status)} />
           ))}
       </>
     );
   };
 
   const teamReportsDetail = () => {
-    const max = teamMemberShareData.length ? teamMemberShareData[0].value : 1;
+    const max = teamMemberShareData.length ? (teamMemberShareData[0].value || 1) : 1;
     return (
       <>
-        <DetailSummary text={`${teamMemberShareData.length} member(s) · ${teamReportsCount} total team reports`} />
-        {teamMemberShareData.length === 0 ? <EmptyDetail msg="No team reports yet" icon="📋" /> :
+        <DetailSummary text={t('dashboard.members_total_team_reports', { count: teamMemberShareData.length, total: teamReportsCount })} />
+        {teamMemberShareData.length === 0 ? <EmptyDetail msg={t('dashboard.no_team_reports_yet')} icon="📋" /> :
           teamMemberShareData.map((e, i) => (
             <DetailRow key={i} name={e.name} value={`${e.value}`} icon="📋" color="#2563eb" progress={(e.value / max) * 100} />
           ))}
@@ -943,11 +961,11 @@ function Dashboard({
   };
 
   const teamRegistrationsDetail = () => {
-    const max = teamRegistrationsByMember.length ? teamRegistrationsByMember[0].count : 1;
+    const max = teamRegistrationsByMember.length ? (teamRegistrationsByMember[0].count || 1) : 1;
     return (
       <>
-        <DetailSummary text={`${teamRegistrationsByMember.length} member(s) · ${teamCitizenCount} total team registrations`} />
-        {teamRegistrationsByMember.length === 0 ? <EmptyDetail msg="No team registrations yet" icon="🆔" /> :
+        <DetailSummary text={t('dashboard.members_total_team_registrations', { count: teamRegistrationsByMember.length, total: teamCitizenCount })} />
+        {teamRegistrationsByMember.length === 0 ? <EmptyDetail msg={t('dashboard.no_team_registrations_yet')} icon="🆔" /> :
           teamRegistrationsByMember.map((e, i) => (
             <DetailRow key={e.employeeId || i} name={e.employeeName} value={`${e.count}`} icon="🆔" color="#0b7e4b" progress={(e.count / max) * 100} />
           ))}
@@ -975,8 +993,8 @@ function Dashboard({
     const max = list.length ? list[0].count : 1;
     return (
       <>
-        <DetailSummary text={`${list.length} team member(s) active today (${today})`} />
-        {list.length === 0 ? <EmptyDetail msg="No team members active today" icon="⚡" /> :
+        <DetailSummary text={t('dashboard.team_members_active_today', { count: list.length, date: today })} />
+        {list.length === 0 ? <EmptyDetail msg={t('dashboard.no_team_members_active_today')} icon="⚡" /> :
           list.map((e, i) => (
             <DetailRow key={e.employeeId || i} name={e.employeeName} sub={e.employeeId} value={`${e.count}`} icon="⚡" color="#d97706" progress={(e.count / max) * 100} />
           ))}
@@ -989,22 +1007,22 @@ function Dashboard({
     const items = [];
     (leaves || []).filter(l => ids.has(l.employeeId) && l.status === 'pending').forEach(l => {
       items.push({
-        type: '🗓️ Leave',
+        type: `🗓️ ${t('dashboard.leave')}`,
         name: l.employeeName || l.employeeId,
-        detail: `${l.leaveType || 'Leave'} · ${l.startDate || ''} → ${l.endDate || ''}`
+        detail: `${l.leaveType || t('dashboard.leave')} · ${l.startDate || ''} → ${l.endDate || ''}`
       });
     });
     (permissions || []).filter(p => ids.has(p.employeeId) && p.status === 'pending').forEach(p => {
       items.push({
-        type: '⏳ Permission',
+        type: `⏳ ${t('dashboard.permission')}`,
         name: p.employeeName || p.employeeId,
-        detail: `${p.permissionType || 'Permission'} · ${p.fromTime || ''}`
+        detail: `${p.permissionType || t('dashboard.permission')} · ${p.fromTime || ''}`
       });
     });
     return (
       <>
-        <DetailSummary text={`${items.length} pending request(s)`} />
-        {items.length === 0 ? <EmptyDetail msg="No pending requests" icon="🎉" /> :
+        <DetailSummary text={t('dashboard.pending_requests_count', { count: items.length })} />
+        {items.length === 0 ? <EmptyDetail msg={t('dashboard.no_pending_requests')} icon="🎉" /> :
           items.map((r, i) => (
             <DetailRow key={i} name={r.name} sub={r.detail} value={r.type} color="#dc2626" />
           ))}
@@ -1012,53 +1030,40 @@ function Dashboard({
     );
   };
 
-  const teamEfficiencyDetail = () => {
-    const max = realTeamPerformance.length ? Math.max(...realTeamPerformance.map(e => e.totalReports || 0), 1) : 1;
-    return (
-      <>
-        <DetailSummary text={`${realTeamPerformance.length} member(s) · ${teamAvgEfficiency}% average efficiency`} />
-        {realTeamPerformance.length === 0 ? <EmptyDetail msg="No team performance data yet" icon="📊" /> :
-          realTeamPerformance.map((e, i) => (
-            <DetailRow key={e.employeeId || i} name={e.employeeName || e.employeeId} sub={e.location} value={`${e.avgEfficiency || 0}%`} icon="📊" color="#1e3a5f" progress={((e.totalReports || 0) / max) * 100} />
-          ))}
-      </>
-    );
-  };
-
   const myReportsDetail = () => (
     <>
-      <DetailSummary text={`${myReportsList.length} report(s) submitted by you`} />
-      {myReportsList.length === 0 ? <EmptyDetail msg="You have not submitted any reports yet" icon="📋" /> :
+      <DetailSummary text={t('dashboard.reports_submitted_by_you', { count: myReportsList.length })} />
+      {myReportsList.length === 0 ? <EmptyDetail msg={t('dashboard.you_have_no_reports_yet')} icon="📋" /> :
         myReportsList.map((r, i) => (
-          <DetailRow key={r.id || i} name={r.reportDate || 'Unknown date'} sub={r.region || 'No location'} value="📋" icon="📄" color="#2563eb" />
+          <DetailRow key={r.id || i} name={r.reportDate || t('dashboard.unknown_date')} sub={r.region || t('dashboard.no_location')} value="📋" icon="📄" color="#2563eb" />
         ))}
     </>
   );
 
   const myCitizensDetail = () => (
     <>
-      <DetailSummary text={`${myCitizensList.length} citizen(s) registered by you`} />
-      {myCitizensList.length === 0 ? <EmptyDetail msg="You have not registered any citizens yet" icon="🆔" /> :
+      <DetailSummary text={t('dashboard.citizens_registered_by_you', { count: myCitizensList.length })} />
+      {myCitizensList.length === 0 ? <EmptyDetail msg={t('dashboard.you_have_registered_none_yet')} icon="🆔" /> :
         myCitizensList.map((c, i) => (
-          <DetailRow key={c.id || i} name={`${c.firstName || ''} ${c.lastName || ''} ${c.grandFatherName || ''}`.trim()} sub={c.nationalId || 'No national ID'} value={c.registrationDate || '—'} icon="🆔" color="#0b7e4b" />
+          <DetailRow key={c.id || i} name={`${c.firstName || ''} ${c.lastName || ''} ${c.grandFatherName || ''}`.trim()} sub={c.nationalId || t('dashboard.no_national_id')} value={c.registrationDate || '—'} icon="🆔" color="#0b7e4b" />
         ))}
     </>
   );
 
   const myTodayReportsDetail = () => (
     <>
-      <DetailSummary text={`${myTodayReportsList.length} report(s) submitted today (${getToday()})`} />
-      {myTodayReportsList.length === 0 ? <EmptyDetail msg="No reports submitted today" icon="📄" /> :
+      <DetailSummary text={t('dashboard.reports_submitted_today', { count: myTodayReportsList.length, date: getToday() })} />
+      {myTodayReportsList.length === 0 ? <EmptyDetail msg={t('dashboard.no_reports_submitted_today')} icon="📄" /> :
         myTodayReportsList.map((r, i) => (
-          <DetailRow key={r.id || i} name={r.reportDate || 'Unknown date'} sub={r.region || 'No location'} value="📋" icon="📄" color="#7c3aed" />
+          <DetailRow key={r.id || i} name={r.reportDate || t('dashboard.unknown_date')} sub={r.region || t('dashboard.no_location')} value="📋" icon="📄" color="#7c3aed" />
         ))}
     </>
   );
 
   const myTodayRegistrationsDetail = () => (
     <>
-      <DetailSummary text={`${myTodayCitizensList.length} citizen(s) registered today (${getToday()})`} />
-      {myTodayCitizensList.length === 0 ? <EmptyDetail msg="No citizens registered today" icon="✍️" /> :
+      <DetailSummary text={t('dashboard.citizens_registered_today', { count: myTodayCitizensList.length, date: getToday() })} />
+      {myTodayCitizensList.length === 0 ? <EmptyDetail msg={t('dashboard.no_citizens_registered_today')} icon="✍️" /> :
         myTodayCitizensList.map((c, i) => (
           <DetailRow key={c.id || i} name={`${c.firstName || ''} ${c.lastName || ''} ${c.grandFatherName || ''}`.trim()} sub={c.nationalId || 'No national ID'} value={c.registrationDate || '—'} icon="✍️" color="#d97706" />
         ))}
@@ -1067,28 +1072,10 @@ function Dashboard({
 
   const myPendingRequestsDetail = () => (
     <>
-      <DetailSummary text={`${myPendingRequestsList.length} pending request(s)`} />
-      {myPendingRequestsList.length === 0 ? <EmptyDetail msg="No pending requests for you" icon="🎉" /> :
+      <DetailSummary text={t('dashboard.pending_requests_count', { count: myPendingRequestsList.length })} />
+      {myPendingRequestsList.length === 0 ? <EmptyDetail msg={t('dashboard.no_pending_requests_for_you')} icon="🎉" /> :
         myPendingRequestsList.map((r, i) => (
           <DetailRow key={i} name={r.name} sub={r.detail} value={r.type} color="#dc2626" />
-        ))}
-    </>
-  );
-
-  const myEfficiencyDetail = () => (
-    <>
-      <DetailSummary text={`${officerEfficiency}% overall efficiency · ${officerTotalRegistrations} registrations in ${officerReportsCount} reports`} />
-      {officerPerformanceData.length === 0 ? <EmptyDetail msg="No performance data yet" icon="📊" /> :
-        officerPerformanceData.slice().reverse().map((d, i) => (
-          <DetailRow
-            key={i}
-            name={d.date}
-            sub={`${d.registrations} registration(s) · ${d.reports} report(s)`}
-            value={`${d.efficiency}%`}
-            icon="📊"
-            color="#1e3a5f"
-            progress={Math.min(100, d.reports > 0 ? (d.registrations / d.reports) * 100 : 0)}
-          />
         ))}
     </>
   );
@@ -1132,8 +1119,8 @@ function Dashboard({
           <div style={{
             background: 'linear-gradient(135deg, #0f2a4a 0%, #1e3a5f 55%, #2563eb 120%)',
             borderRadius: '16px',
-            padding: '28px 28px 26px',
-            margin: '0 16px 24px',
+            padding: isMobile ? '18px 14px' : '28px 28px 26px',
+            margin: isMobile ? '0 0 16px' : '0 16px 24px',
             color: 'white',
             boxShadow: '0 8px 24px rgba(15,42,74,0.25)',
             display: 'flex',
@@ -1143,9 +1130,9 @@ function Dashboard({
             gap: '16px'
           }}>
             <div>
-              <h2 style={{ fontSize: '24px', fontWeight: '700', margin: '0 0 6px 0' }}>📊 Manager Dashboard</h2>
+              <h2 style={{ fontSize: isMobile ? '18px' : '24px', fontWeight: '700', margin: '0 0 6px 0' }}>📊 {t('dashboard.manager_dashboard')}</h2>
               <p style={{ fontSize: '14px', opacity: 0.85, margin: 0, maxWidth: '520px' }}>
-                Live overview of all field operations — reports, registrations, regional coverage and officer performance.
+                {t('dashboard.manager_overview')}
               </p>
             </div>
             <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
@@ -1157,7 +1144,7 @@ function Dashboard({
                 fontSize: '13px',
                 fontWeight: '600'
               }}>
-                📅 {new Date().toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}
+                📅 {todayLabel}
               </span>
               <span style={{
                 background: 'rgba(16,185,129,0.2)',
@@ -1183,69 +1170,69 @@ function Dashboard({
           </div>
 
           {/* ===== KPI STATS (real data) ===== */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(165px, 1fr))', gap: '14px', marginBottom: '24px', padding: '0 16px' }}>
-            <StatsCard label="Total Reports" value={realTotalReports} color="#1e3a5f" icon="📋" detail={totalReportsDetail} />
-            <StatsCard label="Citizens Registered" value={realTotalCitizens} color="#2d6a4f" icon="🆔" detail={citizensDetail} />
-            <StatsCard label="Field Officers" value={realFieldOfficers} color="#d97706" icon="👥" detail={officersDetail} />
-            <StatsCard label="Supervisors" value={realSupervisors} color="#7c3aed" icon="👤" detail={supervisorsDetail} />
-            <StatsCard label="Active Officers Today" value={activeOfficersToday} color="#0b7e4b" icon="⚡" detail={activeTodayDetail} />
+          <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2, minmax(0, 1fr))' : 'repeat(auto-fit, minmax(165px, 1fr))', gap: isMobile ? '10px' : '14px', marginBottom: '24px', padding: isMobile ? '0 10px' : '0 16px' }}>
+            <StatsCard label={t('dashboard.total_reports')} value={realTotalReports} color="#1e3a5f" icon="📋" detail={totalReportsDetail} />
+            <StatsCard label={t('dashboard.citizens_registered')} value={realTotalCitizens} color="#2d6a4f" icon="🆔" detail={citizensDetail} />
+            <StatsCard label={t('dashboard.field_officers')} value={realFieldOfficers} color="#d97706" icon="👥" detail={officersDetail} />
+            <StatsCard label={t('dashboard.supervisors')} value={realSupervisors} color="#7c3aed" icon="👤" detail={supervisorsDetail} />
+            <StatsCard label={t('dashboard.active_officers_today')} value={activeOfficersToday} color="#0b7e4b" icon="⚡" detail={activeTodayDetail} />
           </div>
 
           {/* ===== TREND CHARTS (real data) ===== */}
           <div style={{
             display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))',
+            gridTemplateColumns: isMobile ? '1fr' : 'repeat(auto-fit, minmax(340px, 1fr))',
             gap: '20px',
             marginBottom: '24px',
-            padding: '0 16px'
+            padding: isMobile ? '0 10px' : '0 16px'
           }}>
-            <ChartWrapper title="📈 Report Submission Trend" subtitle="Daily reports submitted (Last 7 days)">
-              {renderChart('area', reportSubmissionTrendData, ['#2563eb'])}
+            <ChartWrapper title={`📈 ${t('dashboard.report_submission_trend')}`} subtitle={t('dashboard.daily_reports_subtitle')}>
+              {renderChart('area', reportSubmissionTrendData, ['#2563eb'], 'date', t('dashboard.reports'))}
             </ChartWrapper>
-            <ChartWrapper title="🆔 Registration Trend" subtitle="Daily citizen registrations (Last 7 days)">
-              {renderChart('area', registrationTrendData, ['#0b7e4b'])}
+            <ChartWrapper title={`🆔 ${t('dashboard.registration_trend')}`} subtitle={t('dashboard.daily_registrations_subtitle')}>
+              {renderChart('area', registrationTrendData, ['#0b7e4b'], 'date', t('dashboard.registrations'))}
             </ChartWrapper>
           </div>
 
           {/* ===== REGIONAL HIERARCHY CHARTS (real data) ===== */}
           <div style={{
             display: 'grid',
-            gridTemplateColumns: '1fr 1fr',
+            gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr',
             gap: '20px',
             marginBottom: '24px',
-            padding: '0 16px'
+            padding: isMobile ? '0 10px' : '0 16px'
           }}>
-            <ChartWrapper title="🌍 Reports by Location" subtitle="Grouped by Woreda / Kebele (short name)">
+            <ChartWrapper title={`🌍 ${t('dashboard.reports_by_location')}`} subtitle={t('dashboard.reports_by_location_subtitle')}>
               {loading ? <LoadingBar /> : regionHierarchyData.length === 0 ? (
-                <div style={{ textAlign: 'center', padding: '40px', color: colors.textSecondary, fontSize: '14px' }}>No location data available</div>
+                <div style={{ textAlign: 'center', padding: '40px', color: colors.textSecondary, fontSize: '14px' }}>{t('dashboard.no_location_data')}</div>
               ) : (
-                <ResponsiveContainer width="100%" height={300}>
+                <ResponsiveContainer width="100%" height={isMobile ? 220 : 300}>
                   <BarChart data={regionHierarchyData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke={colors.chartGrid} />
                     <XAxis dataKey="name" tick={{ fontSize: 11, fill: colors.textSecondary }} interval={0} angle={-20} textAnchor="end" height={60} />
                     <YAxis tick={{ fontSize: 12, fill: colors.textSecondary }} allowDecimals={false} />
                     <Tooltip content={CustomTooltip} />
                     <Legend wrapperStyle={{ fontSize: '12px', paddingTop: '10px', color: colors.textSecondary }} />
-                    <Bar dataKey="Reports" fill="#2563eb" radius={[4, 4, 0, 0]} />
-                    <Bar dataKey="Registrations" fill="#0b7e4b" radius={[4, 4, 0, 0]} />
+                    <Bar dataKey="Reports" name={t('dashboard.reports')} fill="#2563eb" radius={[4, 4, 0, 0]} />
+                    <Bar dataKey="Registrations" name={t('dashboard.registrations')} fill="#0b7e4b" radius={[4, 4, 0, 0]} />
                   </BarChart>
                 </ResponsiveContainer>
               )}
             </ChartWrapper>
 
-            <ChartWrapper title="🏙️ Woreda / Kebele Breakdown" subtitle="Lower hierarchy levels (Woreda / Zone)">
+            <ChartWrapper title={`🏙️ ${t('dashboard.woreda_kebele_breakdown')}`} subtitle={t('dashboard.lower_hierarchy_subtitle')}>
               {loading ? <LoadingBar /> : woredaBreakdownData.length === 0 ? (
-                <div style={{ textAlign: 'center', padding: '40px', color: colors.textSecondary, fontSize: '14px' }}>No woreda / kebele data available</div>
+                <div style={{ textAlign: 'center', padding: '40px', color: colors.textSecondary, fontSize: '14px' }}>{t('dashboard.no_woreda_kebele_data')}</div>
               ) : (
-                <ResponsiveContainer width="100%" height={300}>
+                <ResponsiveContainer width="100%" height={isMobile ? 220 : 300}>
                   <BarChart data={woredaBreakdownData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke={colors.chartGrid} />
                     <XAxis dataKey="name" tick={{ fontSize: 11, fill: colors.textSecondary }} interval={0} angle={-20} textAnchor="end" height={60} />
                     <YAxis tick={{ fontSize: 12, fill: colors.textSecondary }} allowDecimals={false} />
                     <Tooltip content={CustomTooltip} />
                     <Legend wrapperStyle={{ fontSize: '12px', paddingTop: '10px', color: colors.textSecondary }} />
-                    <Bar dataKey="Reports" fill="#7c3aed" radius={[4, 4, 0, 0]} />
-                    <Bar dataKey="Registrations" fill="#d97706" radius={[4, 4, 0, 0]} />
+                    <Bar dataKey="Reports" name={t('dashboard.reports')} fill="#7c3aed" radius={[4, 4, 0, 0]} />
+                    <Bar dataKey="Registrations" name={t('dashboard.registrations')} fill="#d97706" radius={[4, 4, 0, 0]} />
                   </BarChart>
                 </ResponsiveContainer>
               )}
@@ -1255,36 +1242,38 @@ function Dashboard({
           {/* ===== REGIONAL HIERARCHY SUMMARY TABLE ===== */}
           <div style={{
             background: colors.cardBg,
-            padding: '20px',
+            padding: isMobile ? '14px 12px' : '20px',
             borderRadius: '12px',
             boxShadow: colors.shadow,
             border: `1px solid ${colors.cardBorder}`,
-            margin: '0 16px 24px'
+            margin: isMobile ? '0 0 16px' : '0 16px 24px'
           }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', flexWrap: 'wrap', gap: '8px' }}>
-              <h3 style={{ fontSize: '15px', fontWeight: '600', margin: 0, color: colors.textPrimary }}>🗺️ Location Coverage</h3>
+              <h3 style={{ fontSize: '15px', fontWeight: '600', margin: 0, color: colors.textPrimary }}>🗺️ {t('dashboard.location_coverage')}</h3>
               <span style={{ fontSize: '12px', color: colors.textSecondary }}>
-                Described by Kebele / Woreda
+                {t('dashboard.described_by_region')}
               </span>
             </div>
             <div style={{ overflowX: 'auto' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
                 <thead>
                   <tr style={{ borderBottom: `2px solid ${colors.cardBorder}`, color: colors.textSecondary, textAlign: 'left' }}>
-                    <th style={{ padding: '8px 10px' }}>Location (Kebele / Woreda)</th>
-                    <th style={{ padding: '8px 10px' }}>Woredas</th>
-                    <th style={{ padding: '8px 10px' }}>Officers</th>
-                    <th style={{ padding: '8px 10px' }}>Reports</th>
-                    <th style={{ padding: '8px 10px' }}>Registrations</th>
+                    <th style={{ padding: '8px 10px' }}>{t('dashboard.table_region')}</th>
+                    <th style={{ padding: '8px 10px' }}>{t('dashboard.woredas')}</th>
+                    <th style={{ padding: '8px 10px' }}>{t('dashboard.officers')}</th>
+                    <th style={{ padding: '8px 10px' }}>{t('dashboard.reports')}</th>
+                    <th style={{ padding: '8px 10px' }}>{t('dashboard.registrations')}</th>
                   </tr>
                 </thead>
                 <tbody>
                   {regionStatsData.length === 0 ? (
-                    <tr><td colSpan={5} style={{ padding: '20px', textAlign: 'center', color: colors.textSecondary }}>No location data available</td></tr>
+                    <tr><td colSpan={5} style={{ padding: '20px', textAlign: 'center', color: colors.textSecondary }}>{t('dashboard.no_location_data')}</td></tr>
                   ) : (
-                    regionStatsData.filter(s => s.name !== 'Other').map((r, i) => (
+                    regionStatsData
+                      .filter(s => s.reports > 0 || s.registrations > 0)
+                      .map((r, i) => (
                       <tr key={i} style={{ borderBottom: `1px solid ${colors.cardBorder}` }}>
-                        <td style={{ padding: '9px 10px', fontWeight: '600' }}>{describeLocation(r.fullPath)}</td>
+                        <td style={{ padding: '9px 10px', fontWeight: '600' }}>{r.name}</td>
                         <td style={{ padding: '9px 10px' }}>{r.woredas}</td>
                         <td style={{ padding: '9px 10px' }}>{r.officers}</td>
                         <td style={{ padding: '9px 10px', color: '#2563eb', fontWeight: '600' }}>{r.reports}</td>
@@ -1300,16 +1289,16 @@ function Dashboard({
           {/* ===== TOP PERFORMERS ===== */}
           <div style={{
             background: colors.cardBg,
-            padding: '20px',
+            padding: isMobile ? '14px 12px' : '20px',
             borderRadius: '12px',
             boxShadow: colors.shadow,
             border: `1px solid ${colors.cardBorder}`,
-            margin: '0 16px 24px'
+            margin: isMobile ? '0 0 16px' : '0 16px 24px'
           }}>
-            <h3 style={{ fontSize: '15px', fontWeight: '600', marginBottom: '16px', color: colors.textPrimary }}>🏆 Top Performing Officers (by Registrations)</h3>
+            <h3 style={{ fontSize: '15px', fontWeight: '600', marginBottom: '16px', color: colors.textPrimary }}>🏆 {t('dashboard.top_performers_by_registrations')}</h3>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
               {(!realTopPerformers || realTopPerformers.length === 0) ? (
-                <div style={{ textAlign: 'center', padding: '20px', color: colors.textSecondary, fontSize: '14px' }}>No performance data available</div>
+                <div style={{ textAlign: 'center', padding: '20px', color: colors.textSecondary, fontSize: '14px' }}>{t('dashboard.no_performance_data')}</div>
               ) : (
                 realTopPerformers.map((emp, i) => (
                   <div
@@ -1333,8 +1322,7 @@ function Dashboard({
                     <span style={{ fontWeight: '600', flex: 1 }}>{emp.employeeName}</span>
                     <span style={{ color: colors.textSecondary, fontSize: '12px' }}>{emp.location}</span>
                     <span style={{ color: '#2563eb', fontWeight: '500' }}>🆔 {emp.totalRegistrations || 0}</span>
-                    <span style={{ color: '#0b7e4b', fontWeight: '600' }}>{emp.avgEfficiency || 0}%</span>
-                    <span style={{ color: '#7c3aed' }}>📊 {emp.totalReports || 0} reports</span>
+                    <span style={{ color: '#7c3aed' }}>📊 {t('dashboard.reports_count', { count: emp.totalReports || 0 })}</span>
                   </div>
                 ))
               )}
@@ -1350,8 +1338,8 @@ function Dashboard({
           <div style={{
             background: 'linear-gradient(135deg, #0f2a4a 0%, #1e3a5f 55%, #2563eb 120%)',
             borderRadius: '16px',
-            padding: '28px 28px 26px',
-            margin: '0 16px 24px',
+            padding: isMobile ? '18px 14px' : '28px 28px 26px',
+            margin: isMobile ? '0 0 16px' : '0 16px 24px',
             color: 'white',
             boxShadow: '0 8px 24px rgba(15,42,74,0.25)',
             display: 'flex',
@@ -1361,9 +1349,9 @@ function Dashboard({
             gap: '16px'
           }}>
             <div>
-              <h2 style={{ fontSize: '24px', fontWeight: '700', margin: '0 0 6px 0' }}>👨‍💼 Supervisor Dashboard</h2>
+              <h2 style={{ fontSize: isMobile ? '18px' : '24px', fontWeight: '700', margin: '0 0 6px 0' }}>👨‍💼 {t('dashboard.supervisor_dashboard')}</h2>
               <p style={{ fontSize: '14px', opacity: 0.85, margin: 0, maxWidth: '520px' }}>
-                Live overview of your team&#39;s field operations — reports, registrations and officer performance.
+                {t('dashboard.supervisor_overview')}
               </p>
             </div>
             <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
@@ -1375,7 +1363,7 @@ function Dashboard({
                 fontSize: '13px',
                 fontWeight: '600'
               }}>
-                📅 {new Date().toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}
+                📅 {todayLabel}
               </span>
               <span style={{
                 background: 'rgba(16,185,129,0.2)',
@@ -1385,7 +1373,7 @@ function Dashboard({
                 fontSize: '13px',
                 fontWeight: '600'
               }}>
-                📊 {teamReportsCount} Reports
+                📊 {t('dashboard.reports_badge', { count: teamReportsCount })}
               </span>
               <span style={{
                 background: 'rgba(96,165,250,0.2)',
@@ -1395,72 +1383,71 @@ function Dashboard({
                 fontSize: '13px',
                 fontWeight: '600'
               }}>
-                🆔 {teamCitizenCount} Registrations
+                🆔 {t('dashboard.registrations_badge', { count: teamCitizenCount })}
               </span>
             </div>
           </div>
 
           {/* ===== KPI STATS (real data) ===== */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(165px, 1fr))', gap: '14px', marginBottom: '24px', padding: '0 16px' }}>
-            <StatsCard label="Team Members" value={teamMembers?.length || 0} color="#7c3aed" icon="👥" detail={teamMembersDetail} />
-            <StatsCard label="Team Reports" value={teamReportsCount} color="#2563eb" icon="📋" detail={teamReportsDetail} />
-            <StatsCard label="Team Registrations" value={teamCitizenCount} color="#0b7e4b" icon="🆔" detail={teamRegistrationsDetail} />
-            <StatsCard label="Active Today" value={teamActiveToday} color="#d97706" icon="⚡" detail={teamActiveTodayDetail} />
-            <StatsCard label="Pending Requests" value={teamPendingRequests} color="#dc2626" icon="⏳" detail={teamPendingRequestsDetail} />
-            <StatsCard label="Team Efficiency" value={`${teamAvgEfficiency}%`} color="#1e3a5f" icon="📊" detail={teamEfficiencyDetail} />
+          <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2, minmax(0, 1fr))' : 'repeat(auto-fit, minmax(165px, 1fr))', gap: isMobile ? '10px' : '14px', marginBottom: '24px', padding: isMobile ? '0 10px' : '0 16px' }}>
+            <StatsCard label={t('dashboard.team_members')} value={teamMembers?.length || 0} color="#7c3aed" icon="👥" detail={teamMembersDetail} />
+            <StatsCard label={t('dashboard.team_reports')} value={teamReportsCount} color="#2563eb" icon="📋" detail={teamReportsDetail} />
+            <StatsCard label={t('dashboard.team_registrations')} value={teamCitizenCount} color="#0b7e4b" icon="🆔" detail={teamRegistrationsDetail} />
+            <StatsCard label={t('dashboard.active_today')} value={teamActiveToday} color="#d97706" icon="⚡" detail={teamActiveTodayDetail} />
+            <StatsCard label={t('dashboard.pending_requests')} value={teamPendingRequests} color="#dc2626" icon="⏳" detail={teamPendingRequestsDetail} />
           </div>
 
           {/* ===== TREND CHARTS (real data) ===== */}
           <div style={{
             display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))',
+            gridTemplateColumns: isMobile ? '1fr' : 'repeat(auto-fit, minmax(340px, 1fr))',
             gap: '20px',
             marginBottom: '24px',
-            padding: '0 16px'
+            padding: isMobile ? '0 10px' : '0 16px'
           }}>
-            <ChartWrapper title="📈 Team Report Submission Trend" subtitle="Daily team report submissions (Last 7 days)">
-              {renderChart('area', teamReportSubmissionTrendData, ['#2563eb'])}
+            <ChartWrapper title={`📈 ${t('dashboard.team_report_submission_trend')}`} subtitle={t('dashboard.team_report_subtitle')}>
+              {renderChart('area', teamReportSubmissionTrendData, ['#2563eb'], 'date', t('dashboard.reports'))}
             </ChartWrapper>
-            <ChartWrapper title="🆔 Team Registration Trend" subtitle="Daily team registrations (Last 7 days)">
-              {renderChart('area', teamRegistrationTrendData, ['#0b7e4b'])}
+            <ChartWrapper title={`🆔 ${t('dashboard.team_registration_trend')}`} subtitle={t('dashboard.team_registration_subtitle')}>
+              {renderChart('area', teamRegistrationTrendData, ['#0b7e4b'], 'date', t('dashboard.registrations'))}
             </ChartWrapper>
           </div>
 
           {/* ===== TEAM BREAKDOWN CHARTS (real data) ===== */}
           <div style={{
             display: 'grid',
-            gridTemplateColumns: '1fr 1fr',
+            gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr',
             gap: '20px',
             marginBottom: '24px',
-            padding: '0 16px'
+            padding: isMobile ? '0 10px' : '0 16px'
           }}>
-            <ChartWrapper title="📋 Team Reports by Member" subtitle="Reports submitted by each team member">
+            <ChartWrapper title={`📋 ${t('dashboard.team_reports_by_member')}`} subtitle={t('dashboard.team_reports_by_member_subtitle')}>
               {loading ? <LoadingBar /> : teamMemberShareData.length === 0 ? (
-                <div style={{ textAlign: 'center', padding: '40px', color: colors.textSecondary, fontSize: '14px' }}>No team report data available</div>
+                <div style={{ textAlign: 'center', padding: '40px', color: colors.textSecondary, fontSize: '14px' }}>{t('dashboard.no_team_report_data')}</div>
               ) : (
-                <ResponsiveContainer width="100%" height={300}>
+                <ResponsiveContainer width="100%" height={isMobile ? 220 : 300}>
                   <BarChart data={teamMemberShareData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke={colors.chartGrid} />
                     <XAxis dataKey="name" tick={{ fontSize: 11, fill: colors.textSecondary }} interval={0} angle={-20} textAnchor="end" height={60} />
                     <YAxis tick={{ fontSize: 12, fill: colors.textSecondary }} allowDecimals={false} />
                     <Tooltip content={CustomTooltip} />
-                    <Bar dataKey="value" name="Reports" fill="#2563eb" radius={[4, 4, 0, 0]} />
+                    <Bar dataKey="value" name={t('dashboard.reports')} fill="#2563eb" radius={[4, 4, 0, 0]} />
                   </BarChart>
                 </ResponsiveContainer>
               )}
             </ChartWrapper>
 
-            <ChartWrapper title="🆔 Team Registrations by Member" subtitle="Citizens registered by each team member">
+            <ChartWrapper title={`🆔 ${t('dashboard.team_registrations_by_member')}`} subtitle={t('dashboard.team_registrations_by_member_subtitle')}>
               {loading ? <LoadingBar /> : teamRegistrationsByMember.length === 0 ? (
-                <div style={{ textAlign: 'center', padding: '40px', color: colors.textSecondary, fontSize: '14px' }}>No team registration data available</div>
+                <div style={{ textAlign: 'center', padding: '40px', color: colors.textSecondary, fontSize: '14px' }}>{t('dashboard.no_team_registration_data')}</div>
               ) : (
-                <ResponsiveContainer width="100%" height={300}>
+                <ResponsiveContainer width="100%" height={isMobile ? 220 : 300}>
                   <BarChart data={teamRegistrationsByMember} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke={colors.chartGrid} />
                     <XAxis dataKey="employeeName" tick={{ fontSize: 11, fill: colors.textSecondary }} interval={0} angle={-20} textAnchor="end" height={60} />
                     <YAxis tick={{ fontSize: 12, fill: colors.textSecondary }} allowDecimals={false} />
                     <Tooltip content={CustomTooltip} />
-                    <Bar dataKey="count" name="Registrations" fill="#0b7e4b" radius={[4, 4, 0, 0]} />
+                    <Bar dataKey="count" name={t('dashboard.registrations')} fill="#0b7e4b" radius={[4, 4, 0, 0]} />
                   </BarChart>
                 </ResponsiveContainer>
               )}
@@ -1470,15 +1457,15 @@ function Dashboard({
           {/* ===== TEAM PERFORMANCE – RANKED BY REGISTRATIONS (HIGHEST FIRST) ===== */}
           <div style={{
             background: colors.cardBg,
-            padding: '20px',
+            padding: isMobile ? '14px 12px' : '20px',
             borderRadius: '12px',
             boxShadow: colors.shadow,
             border: `1px solid ${colors.cardBorder}`,
-            margin: '0 16px 24px'
+            margin: isMobile ? '0 0 16px' : '0 16px 24px'
           }}>
-            <h3 style={{ fontSize: '15px', fontWeight: '600', marginBottom: '16px', color: colors.textPrimary }}>🏆 Team Performance (by Registrations)</h3>
+            <h3 style={{ fontSize: '15px', fontWeight: '600', marginBottom: '16px', color: colors.textPrimary }}>🏆 {t('dashboard.team_performance')}</h3>
             {(!realTeamPerformance || realTeamPerformance.length === 0) ? (
-              <div style={{ textAlign: 'center', padding: '20px', color: colors.textSecondary, fontSize: '14px' }}>No team performance data yet</div>
+              <div style={{ textAlign: 'center', padding: '20px', color: colors.textSecondary, fontSize: '14px' }}>{t('dashboard.no_team_performance_yet')}</div>
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                 {realTeamPerformance.map((emp, i) => (
@@ -1503,8 +1490,7 @@ function Dashboard({
                     <span style={{ fontWeight: '600', flex: 1 }}>{emp.employeeName}</span>
                     <span style={{ color: colors.textSecondary, fontSize: '12px' }}>{emp.location}</span>
                     <span style={{ color: '#2563eb', fontWeight: '500' }}>🆔 {emp.totalRegistrations || 0}</span>
-                    <span style={{ color: '#0b7e4b', fontWeight: '600' }}>{emp.avgEfficiency || 0}%</span>
-                    <span style={{ color: '#7c3aed' }}>📊 {emp.totalReports || 0} reports</span>
+                    <span style={{ color: '#7c3aed' }}>📊 {t('dashboard.reports_count', { count: emp.totalReports || 0 })}</span>
                   </div>
                 ))}
               </div>
@@ -1520,8 +1506,8 @@ function Dashboard({
           <div style={{
             background: 'linear-gradient(135deg, #0f2a4a 0%, #1e3a5f 55%, #2563eb 120%)',
             borderRadius: '16px',
-            padding: '28px 28px 26px',
-            margin: '0 16px 24px',
+            padding: isMobile ? '18px 14px' : '28px 28px 26px',
+            margin: isMobile ? '0 0 16px' : '0 16px 24px',
             color: 'white',
             boxShadow: '0 8px 24px rgba(15,42,74,0.25)',
             display: 'flex',
@@ -1531,9 +1517,9 @@ function Dashboard({
             gap: '16px'
           }}>
             <div>
-              <h2 style={{ fontSize: '24px', fontWeight: '700', margin: '0 0 6px 0' }}>👤 Field Officer Dashboard</h2>
+              <h2 style={{ fontSize: isMobile ? '18px' : '24px', fontWeight: '700', margin: '0 0 6px 0' }}>👤 {t('dashboard.officer_dashboard')}</h2>
               <p style={{ fontSize: '14px', opacity: 0.85, margin: 0, maxWidth: '520px' }}>
-                Live overview of your personal field work — registrations, reports and performance.
+                {t('dashboard.officer_overview')}
               </p>
             </div>
             <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
@@ -1545,7 +1531,7 @@ function Dashboard({
                 fontSize: '13px',
                 fontWeight: '600'
               }}>
-                📅 {new Date().toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}
+                📅 {todayLabel}
               </span>
               <span style={{
                 background: 'rgba(16,185,129,0.2)',
@@ -1555,7 +1541,7 @@ function Dashboard({
                 fontSize: '13px',
                 fontWeight: '600'
               }}>
-                📊 {officerReportsCount} Reports
+                📊 {t('dashboard.reports_badge', { count: officerReportsCount })}
               </span>
               <span style={{
                 background: 'rgba(96,165,250,0.2)',
@@ -1565,46 +1551,45 @@ function Dashboard({
                 fontSize: '13px',
                 fontWeight: '600'
               }}>
-                🆔 {officerTotalRegistrations} Registrations
+                🆔 {t('dashboard.registrations_badge', { count: officerTotalRegistrations })}
               </span>
             </div>
           </div>
 
           {/* ===== KPI STATS (real data, clickable) ===== */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(165px, 1fr))', gap: '14px', marginBottom: '24px', padding: '0 16px' }}>
-            <StatsCard label="My Reports" value={officerReportsCount} color="#2563eb" icon="📋" detail={myReportsDetail} />
-            <StatsCard label="Citizens Registered" value={officerTotalRegistrations} color="#0b7e4b" icon="🆔" detail={myCitizensDetail} />
-            <StatsCard label="Today's Reports" value={officerTodayReports} color="#7c3aed" icon="📄" detail={myTodayReportsDetail} />
-            <StatsCard label="Today's Registrations" value={officerTodayRegistrations} color="#d97706" icon="✍️" detail={myTodayRegistrationsDetail} />
-            <StatsCard label="Pending Requests" value={officerPendingRequests} color="#dc2626" icon="⏳" detail={myPendingRequestsDetail} />
-            <StatsCard label="Efficiency" value={`${officerEfficiency}%`} color="#1e3a5f" icon="📊" detail={myEfficiencyDetail} />
+          <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2, minmax(0, 1fr))' : 'repeat(auto-fit, minmax(165px, 1fr))', gap: isMobile ? '10px' : '14px', marginBottom: '24px', padding: isMobile ? '0 10px' : '0 16px' }}>
+            <StatsCard label={t('dashboard.my_reports')} value={officerReportsCount} color="#2563eb" icon="📋" detail={myReportsDetail} />
+            <StatsCard label={t('dashboard.my_registrations')} value={officerTotalRegistrations} color="#0b7e4b" icon="🆔" detail={myCitizensDetail} />
+            <StatsCard label={t('dashboard.today_reports')} value={officerTodayReports} color="#7c3aed" icon="📄" detail={myTodayReportsDetail} />
+            <StatsCard label={t('dashboard.today_registrations')} value={officerTodayRegistrations} color="#d97706" icon="✍️" detail={myTodayRegistrationsDetail} />
+            <StatsCard label={t('dashboard.pending_requests')} value={officerPendingRequests} color="#dc2626" icon="⏳" detail={myPendingRequestsDetail} />
           </div>
 
           {/* ===== MY REGISTRATION TREND (real data) ===== */}
           <div style={{
             display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))',
+            gridTemplateColumns: isMobile ? '1fr' : 'repeat(auto-fit, minmax(340px, 1fr))',
             gap: '20px',
             marginBottom: '24px',
-            padding: '0 16px'
+            padding: isMobile ? '0 10px' : '0 16px'
           }}>
-            <ChartWrapper title="🆔 My Registration Trend" subtitle="Your daily citizen registrations (Last 7 days)">
-              {renderChart('area', officerPerformanceData.map(d => ({ date: d.date, value: d.registrations })), ['#0b7e4b'])}
+            <ChartWrapper title={`🆔 ${t('dashboard.my_registration_trend')}`} subtitle={t('dashboard.my_registration_trend_subtitle')}>
+              {renderChart('area', officerPerformanceData.map(d => ({ date: d.date, value: d.registrations })), ['#0b7e4b'], 'date', t('dashboard.registrations'))}
             </ChartWrapper>
           </div>
 
           {/* ===== MY WEEKLY PERFORMANCE (ranked, real data) ===== */}
           <div style={{
             background: colors.cardBg,
-            padding: '20px',
+            padding: isMobile ? '14px 12px' : '20px',
             borderRadius: '12px',
             boxShadow: colors.shadow,
             border: `1px solid ${colors.cardBorder}`,
-            margin: '0 16px 24px'
+            margin: isMobile ? '0 0 16px' : '0 16px 24px'
           }}>
-            <h3 style={{ fontSize: '15px', fontWeight: '600', marginBottom: '16px', color: colors.textPrimary }}>🏆 My Weekly Performance (Last 7 Days)</h3>
+            <h3 style={{ fontSize: '15px', fontWeight: '600', marginBottom: '16px', color: colors.textPrimary }}>🏆 {t('dashboard.my_weekly_performance')}</h3>
             {(!officerPerformanceData || officerPerformanceData.length === 0) ? (
-              <div style={{ textAlign: 'center', padding: '20px', color: colors.textSecondary, fontSize: '14px' }}>No performance data available</div>
+              <div style={{ textAlign: 'center', padding: '20px', color: colors.textSecondary, fontSize: '14px' }}>{t('dashboard.no_performance_data')}</div>
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                 {officerPerformanceData.slice().reverse().map((d, i) => (
@@ -1626,10 +1611,9 @@ function Dashboard({
                     <span style={{ fontWeight: '700', color: i === 0 ? '#d97706' : colors.textSecondary, minWidth: '96px' }}>
                       {d.date}
                     </span>
-                    <span style={{ fontWeight: '600', flex: 1 }}>{d.date === getToday() ? 'Today' : ''}</span>
-                    <span style={{ color: '#0b7e4b', fontWeight: '600' }}>✍️ {d.registrations || 0} registrations</span>
-                    <span style={{ color: '#2563eb', fontWeight: '500' }}>📋 {d.reports || 0} reports</span>
-                    <span style={{ color: '#7c3aed' }}>📊 {d.efficiency || 0}%</span>
+                    <span style={{ fontWeight: '600', flex: 1 }}>{d.date === getToday() ? t('dashboard.today') : ''}</span>
+                    <span style={{ color: '#0b7e4b', fontWeight: '600' }}>✍️ {t('dashboard.registrations_count', { count: d.registrations || 0 })}</span>
+                    <span style={{ color: '#2563eb', fontWeight: '500' }}>📋 {t('dashboard.reports_count', { count: d.reports || 0 })}</span>
                   </div>
                 ))}
               </div>
@@ -1693,7 +1677,7 @@ function Dashboard({
               </div>
               <button
                 onClick={() => setActiveCard(null)}
-                title="Close"
+                title={t('dashboard.close')}
                 style={{
                   width: '32px',
                   height: '32px',
@@ -1738,7 +1722,7 @@ function Dashboard({
                   fontWeight: '600',
                   cursor: 'pointer'
                 }}
-              >Close</button>
+              >{t('dashboard.close')}</button>
             </div>
           </div>
         </div>

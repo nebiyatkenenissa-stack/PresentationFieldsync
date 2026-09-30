@@ -1,8 +1,15 @@
 import React, { useState, useMemo, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
   ResponsiveContainer
 } from 'recharts';
+import { OLD_REGION_NAMES } from '../../services/database';
+import useRegions from '../../hooks/useRegions';
+import useIsMobile from '../../hooks/useIsMobile';
+import {
+  buildRecordLocationPath, parseLocationHierarchy, regionOfPath
+} from '../../utils/regions';
 
 function Analytics({ 
   reports: allReports, 
@@ -12,7 +19,11 @@ function Analytics({
   citizens: allCitizens,
   renderBarChart 
 }) {
+  const { t } = useTranslation();
+  const isMobile = useIsMobile();
   const [activeCard, setActiveCard] = useState(null);
+  // The REAL region list (Amhara, Oromia, ...) drives every label and bar.
+  const regions = useRegions();
 
   // ============================================================
   // FILTER ONLY SYNCED DATA
@@ -47,68 +58,114 @@ function Analytics({
   const daysWithReports = new Set(reports.map(r => r.reportDate)).size || 1;
   const dailyAvg = Math.round(totalRegistrations / daysWithReports);
 
-  // Region stats — only the locations listed in the users list
-  const validRegions = useMemo(() => {
-    return [...new Set((users || [])
-      .map(u => u.region)
-      .filter(r => r && r !== 'All'))];
-  }, [users]);
+  // ============================================================
+  // REGION BUCKETS — always the REAL region name from the region list.
+  // Every chart, card and description below is labelled with a region
+  // (Amhara, Oromia, Addis Ababa, ...). Kebele / woreda / zone names are
+  // never used as a region label.
+  // ============================================================
+  const parseHierarchy = useCallback((path) => parseLocationHierarchy(path), []);
 
-  const employeeRegionMap = useMemo(() => {
+  const shortLocation = useCallback((path) => {
+    const region = regionOfPath(path, regions);
+    if (region) return region;
+    const h = parseLocationHierarchy(path);
+    return h.region || h.zone || h.woreda || (path && typeof path === 'string' ? path.trim() : '') || 'Other';
+  }, [regions]);
+
+  // Build the best full path for a record. The structured location_path array
+  // is most accurate; fall back to the flat strings (region / district / village).
+  const buildLocationPath = useCallback((record) => buildRecordLocationPath(record), []);
+
+  // Real region for a location path — '' when the path holds no real region.
+  const regionName = useCallback((path) => regionOfPath(path, regions), [regions]);
+
+  // Map each employee to their assigned location as listed in the users list.
+  const employeeLocationMap = useMemo(() => {
     const map = {};
     (users || []).forEach(u => {
-      if (u.employeeId && u.region && u.region !== 'All') map[u.employeeId] = u.region;
+      if (u.employeeId && u.region && u.region !== 'All' && u.region !== 'all' && !OLD_REGION_NAMES.includes(u.region)) {
+        map[u.employeeId] = u.region;
+      }
     });
     return map;
   }, [users]);
 
-  const resolveRegion = useCallback((employeeId, fallbackRegion) => {
-    if (employeeId && employeeRegionMap[employeeId]) return employeeRegionMap[employeeId];
-    return validRegions.includes(fallbackRegion) ? fallbackRegion : 'Other';
-  }, [employeeRegionMap, validRegions]);
+  // Resolve the location for a report/citizen, preferring the record's own
+  // location data over the registering officer's assigned area.
+  const resolveLocation = useCallback((record) => {
+    if (!record) return 'Other';
+    const own = buildLocationPath(record);
+    if (own && own !== 'All' && own !== 'all' && !OLD_REGION_NAMES.includes(own)) return own;
+    if (record.registeredBy && employeeLocationMap[record.registeredBy]) {
+      const assigned = employeeLocationMap[record.registeredBy];
+      if (assigned && assigned !== 'All' && assigned !== 'all' && !OLD_REGION_NAMES.includes(assigned)) return assigned;
+    }
+    return 'Other';
+  }, [buildLocationPath, employeeLocationMap]);
 
+  // One entry per REAL region (the whole region list, so inactive regions are
+  // visible too), counted by reports and registrations.
   const regionStats = useMemo(() => {
     const map = {};
+    // Seed with the real region list so every region is represented.
+    regions.forEach(r => {
+      map[r.name] = { region: r.name, fullPath: '', reports: 0, registrations: 0, employees: new Set() };
+    });
     const ensure = (region) => {
-      if (!map[region]) map[region] = { reports: 0, registrations: 0, employees: new Set() };
+      if (!map[region]) map[region] = { region, fullPath: '', reports: 0, registrations: 0, employees: new Set() };
       return map[region];
     };
-    validRegions.forEach(r => ensure(r));
-    reports.forEach(r => {
-      const region = resolveRegion(r.employeeId, r.region);
-      if (region === 'Other') return;
-      const entry = ensure(region);
-      entry.reports += 1;
-      entry.employees.add(r.employeeId);
-    });
-    citizens.forEach(c => {
-      const region = resolveRegion(c.registeredBy, c.region);
-      if (region === 'Other') return;
-      const entry = ensure(region);
-      entry.registrations += 1;
-      if (c.registeredBy) entry.employees.add(c.registeredBy);
-    });
-    return Object.entries(map).map(([region, data]) => ({
-      region,
-      ...data,
-      employees: data.employees.size
-    }));
-  }, [reports, citizens, validRegions, resolveRegion]);
+    const add = (path, key, employeeId) => {
+      const bucket = regionName(path);
+      if (!bucket) return;
+      const entry = ensure(bucket);
+      if (!entry.fullPath) entry.fullPath = path;
+      entry[key] += 1;
+      if (employeeId) entry.employees.add(employeeId);
+    };
+    // Reports are tied to the officer's operational area.
+    reports.forEach(r => add(resolveLocation(r), 'reports', r.employeeId));
+    // Citizens are tied to the location they were actually registered in.
+    citizens.forEach(c => add(resolveLocation(c), 'registrations', c.registeredBy));
+    return Object.values(map)
+      .map(data => ({
+        ...data,
+        employees: data.employees.size
+      }))
+      .sort((a, b) =>
+        (b.registrations - a.registrations) ||
+        (b.reports - a.reports) ||
+        a.region.localeCompare(b.region)
+      );
+  }, [reports, citizens, resolveLocation, regionName, regions]);
 
-  // ===== CHART DATA (short names on the bars) =====
-  const shortRegion = useCallback((name) => {
-    if (!name) return 'N/A';
-    return name.length <= 9 ? name : `${name.slice(0, 8)}…`;
-  }, []);
-
+  // ===== CHART DATA (real region names on the bars) =====
+  // Only regions that actually have activity are plotted, so the chart stays
+  // readable; the full region list is used everywhere else.
   const regionBarData = useMemo(() =>
-    regionStats.map(r => ({
-      name: shortRegion(r.region),
-      fullName: r.region,
-      registrations: r.registrations,
-      reports: r.reports
-    })),
-    [regionStats, shortRegion]
+    regionStats
+      .filter(r => r.registrations > 0 || r.reports > 0)
+      .map(r => ({
+        name: r.region,
+        fullName: r.region,
+        registrations: r.registrations,
+        reports: r.reports
+      })),
+    [regionStats]
+  );
+
+  // Highest ranked region that really has registrations.
+  const topRegionName = useMemo(() => {
+    const active = regionStats.find(r => r.registrations > 0);
+    return active ? active.region : 'N/A';
+  }, [regionStats]);
+
+  // Regions with real activity (registrations or reports). Only these are
+  // listed — a region with 0 registrations is not shown.
+  const activeRegions = useMemo(() =>
+    regionStats.filter(r => r.registrations > 0 || r.reports > 0),
+    [regionStats]
   );
 
   // Employee performance (from filtered data)
@@ -119,10 +176,9 @@ function Analytics({
         map[r.employeeId] = {
           employeeId: r.employeeId,
           employeeName: r.employeeName,
-          region: resolveRegion(r.employeeId, r.region),
+          region: shortLocation(resolveLocation(r)),
           totalReports: 0,
           totalRegistrations: 0,
-          avgEfficiency: 0,
           trustScore: 0,
           productivityScore: 0,
           tasksCompleted: 0,
@@ -155,15 +211,8 @@ function Analytics({
       }
     });
 
-    // Calculate avg efficiency (registrations per report, normalized)
-    Object.values(map).forEach(emp => {
-      emp.avgEfficiency = emp.totalReports > 0 
-        ? Math.round((emp.totalRegistrations / (emp.totalReports * 100)) * 100) 
-        : 0;
-    });
-
     return Object.values(map);
-  }, [reports, citizens, screenTime, liveStatus, resolveRegion]);
+  }, [reports, citizens, screenTime, liveStatus, resolveLocation, shortLocation]);
 
   // ============================================================
   // DERIVED METRICS
@@ -225,7 +274,7 @@ function Analytics({
   const renderFieldOfficerList = () => (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
       {fieldOfficerList.length === 0 ? (
-        <div style={{ textAlign: 'center', padding: '24px', color: '#64748b' }}>No field officers found</div>
+        <div style={{ textAlign: 'center', padding: '24px', color: '#64748b' }}>{t('analytics.no_field_officers_found')}</div>
       ) : (
         fieldOfficerList.map((o) => (
           <div key={o.employeeId || o.name || o.id} style={{
@@ -239,7 +288,7 @@ function Analytics({
             flexWrap: 'wrap'
           }}>
             <span style={{ fontSize: '18px' }}>👥</span>
-            <span style={{ flex: 1, fontWeight: '600', fontSize: '13px' }}>{o.name || o.employeeId || 'Unnamed Officer'}</span>
+            <span style={{ flex: 1, fontWeight: '600', fontSize: '13px' }}>{o.name || o.employeeId || t('analytics.unnamed_officer')}</span>
             <span style={{ fontSize: '12px', color: '#64748b' }}>{o.region && o.region !== 'All' ? o.region : ''}</span>
             <span style={{ color: '#2563eb', fontWeight: '600', fontSize: '13px' }}>🆔 {registrationsByEmployee[o.employeeId] || 0}</span>
           </div>
@@ -251,7 +300,7 @@ function Analytics({
   const renderSupervisorList = () => (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
       {supervisorList.length === 0 ? (
-        <div style={{ textAlign: 'center', padding: '24px', color: '#64748b' }}>No supervisors found</div>
+        <div style={{ textAlign: 'center', padding: '24px', color: '#64748b' }}>{t('analytics.no_supervisors_found')}</div>
       ) : (
         supervisorList.map((s) => (
           <div key={s.employeeId || s.name || s.id} style={{
@@ -265,7 +314,7 @@ function Analytics({
             flexWrap: 'wrap'
           }}>
             <span style={{ fontSize: '18px' }}>👤</span>
-            <span style={{ flex: 1, fontWeight: '600', fontSize: '13px' }}>{s.name || s.employeeId || 'Unnamed Supervisor'}</span>
+            <span style={{ flex: 1, fontWeight: '600', fontSize: '13px' }}>{s.name || s.employeeId || t('analytics.unnamed_supervisor')}</span>
             <span style={{ fontSize: '12px', color: '#64748b' }}>{s.region && s.region !== 'All' ? s.region : ''}</span>
             <span style={{ color: '#7c3aed', fontWeight: '600', fontSize: '13px' }}>📋 {registrationsByEmployee[s.employeeId] || 0}</span>
           </div>
@@ -277,7 +326,7 @@ function Analytics({
   const renderDailyAvgDetail = () => (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
       {dailyRegistrationTrend.length === 0 ? (
-        <div style={{ textAlign: 'center', padding: '24px', color: '#64748b' }}>No registration data available</div>
+        <div style={{ textAlign: 'center', padding: '24px', color: '#64748b' }}>{t('analytics.no_registration_data')}</div>
       ) : (
         (() => {
           const maxVal = Math.max(...dailyRegistrationTrend.map(d => d.value), 1);
@@ -318,7 +367,7 @@ function Analytics({
       <div style={{
         background: 'linear-gradient(135deg, #0f2a4a 0%, #1e3a5f 55%, #2563eb 120%)',
         borderRadius: '16px',
-        padding: '28px 28px 26px',
+        padding: isMobile ? '18px 14px' : '28px 28px 26px',
         margin: '0 0 24px',
         color: 'white',
         boxShadow: '0 8px 24px rgba(15,42,74,0.25)',
@@ -329,9 +378,9 @@ function Analytics({
         gap: '16px'
       }}>
         <div>
-          <h2 style={{ fontSize: '24px', fontWeight: '700', margin: '0 0 6px 0' }}>📊 Statistics &amp; Analytics</h2>
+          <h2 style={{ fontSize: isMobile ? '18px' : '24px', fontWeight: '700', margin: '0 0 6px 0' }}>📊 {t('analytics.statistics_analytics')}</h2>
           <p style={{ fontSize: '14px', opacity: 0.85, margin: 0, maxWidth: '540px' }}>
-            Data-driven insights and performance metrics
+            {t('analytics.analytics_subtitle')}
           </p>
         </div>
         <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
@@ -353,7 +402,7 @@ function Analytics({
             fontSize: '13px',
             fontWeight: '600'
           }}>
-            📊 {totalReports} Reports
+            📊 {t('analytics.reports_badge', { count: totalReports })}
           </span>
           <span style={{
             background: 'rgba(96,165,250,0.2)',
@@ -363,7 +412,7 @@ function Analytics({
             fontSize: '13px',
             fontWeight: '600'
           }}>
-            🆔 {totalRegistrations} Registrations
+            🆔 {t('analytics.registrations_badge', { count: totalRegistrations })}
           </span>
         </div>
       </div>
@@ -385,7 +434,7 @@ function Analytics({
           cursor: 'pointer'
         }}
         onClick={() => setActiveCard({
-          label: 'Field Officers',
+          labelKey: 'analytics.field_officers',
           value: totalOfficers,
           icon: '👥',
           color: '#2563eb',
@@ -400,8 +449,8 @@ function Analytics({
           e.currentTarget.style.boxShadow = '0 4px 12px rgba(37, 99, 235, 0.25)';
         }}>
           <div style={{ fontSize: '32px', fontWeight: '700' }}>{totalOfficers}</div>
-          <div style={{ fontSize: '14px', opacity: 0.85 }}>👥 Field Officers</div>
-          <div style={{ fontSize: '11px', opacity: 0.75, marginTop: '6px' }}>Click to view team ▸</div>
+          <div style={{ fontSize: '14px', opacity: 0.85 }}>👥 {t('analytics.field_officers')}</div>
+          <div style={{ fontSize: '11px', opacity: 0.75, marginTop: '6px' }}>{t('analytics.click_view_team')}</div>
         </div>
         <div style={{
           background: 'linear-gradient(135deg, #7c3aed, #6d28d9)',
@@ -413,7 +462,7 @@ function Analytics({
           cursor: 'pointer'
         }}
         onClick={() => setActiveCard({
-          label: 'Supervisors',
+          labelKey: 'analytics.supervisors',
           value: totalSupervisors,
           icon: '👤',
           color: '#7c3aed',
@@ -428,8 +477,8 @@ function Analytics({
           e.currentTarget.style.boxShadow = '0 4px 12px rgba(124, 58, 237, 0.25)';
         }}>
           <div style={{ fontSize: '32px', fontWeight: '700' }}>{totalSupervisors}</div>
-          <div style={{ fontSize: '14px', opacity: 0.85 }}>👤 Supervisors</div>
-          <div style={{ fontSize: '11px', opacity: 0.75, marginTop: '6px' }}>Click to view team ▸</div>
+          <div style={{ fontSize: '14px', opacity: 0.85 }}>👤 {t('analytics.supervisors')}</div>
+          <div style={{ fontSize: '11px', opacity: 0.75, marginTop: '6px' }}>{t('analytics.click_view_team')}</div>
         </div>
         <div style={{
           background: 'linear-gradient(135deg, #0b7e4b, #065f37)',
@@ -441,7 +490,7 @@ function Analytics({
           cursor: 'pointer'
         }}
         onClick={() => setActiveCard({
-          label: 'Daily Avg Registrations',
+          labelKey: 'analytics.daily_avg_registrations',
           value: dailyAvg,
           icon: '📈',
           color: '#0b7e4b',
@@ -456,15 +505,15 @@ function Analytics({
           e.currentTarget.style.boxShadow = '0 4px 12px rgba(11, 126, 75, 0.25)';
         }}>
           <div style={{ fontSize: '32px', fontWeight: '700' }}>{dailyAvg}</div>
-          <div style={{ fontSize: '14px', opacity: 0.85 }}>📈 Daily Avg Registrations</div>
-          <div style={{ fontSize: '11px', opacity: 0.75, marginTop: '6px' }}>Click to view trend ▸</div>
+          <div style={{ fontSize: '14px', opacity: 0.85 }}>📈 {t('analytics.daily_avg_registrations')}</div>
+          <div style={{ fontSize: '11px', opacity: 0.75, marginTop: '6px' }}>{t('analytics.click_view_trend')}</div>
         </div>
       </div>
 
       {/* Two Column Layout - With Hover Effects */}
       <div style={{
         display: 'grid',
-        gridTemplateColumns: '1fr 1fr',
+        gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr',
         gap: '20px',
         marginBottom: '24px'
       }}>
@@ -487,21 +536,31 @@ function Analytics({
           e.currentTarget.style.boxShadow = '0 1px 3px rgba(0,0,0,0.1)';
         }}>
           <div style={{marginBottom: '16px'}}>
-            <h3 style={{fontSize: '16px', fontWeight: '600', margin: 0, color: '#1a202c'}}>🌍 Regional Performance</h3>
-            <p style={{fontSize: '13px', color: '#64748b', margin: '4px 0 0 0'}}>Citizens registered by region</p>
+            <h3 style={{fontSize: '16px', fontWeight: '600', margin: 0, color: '#1a202c'}}>🌍 {t('analytics.regional_performance')}</h3>
+            <p style={{fontSize: '13px', color: '#64748b', margin: '4px 0 0 0'}}>{t('analytics.regional_performance_subtitle')}</p>
           </div>
-          <div className="chart-container" style={{ width: '100%', height: 280 }}>
+          <div className="chart-container" style={{ width: '100%', height: isMobile ? 230 : 280 }}>
             {regionBarData.length === 0 ? (
-              <div style={{textAlign: 'center', padding: '40px', color: '#64748b'}}>No data available</div>
+              <div style={{textAlign: 'center', padding: '40px', color: '#64748b'}}>{t('analytics.no_data_available')}</div>
             ) : (
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={regionBarData}>
+                <BarChart data={regionBarData} margin={{ top: 20, right: 30, left: 10, bottom: 60 }}>
                   <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="name" tick={{ fontSize: 12 }} />
+                  <XAxis
+                    dataKey="name"
+                    interval={0}
+                    angle={-30}
+                    textAnchor="end"
+                    height={80}
+                    tick={{ fontSize: 11 }}
+                  />
                   <YAxis tick={{ fontSize: 12 }} allowDecimals={false} />
-                  <Tooltip formatter={(value, _name, item) => [value, item?.payload?.fullName]} />
+                  <Tooltip
+                    labelFormatter={(label) => t('analytics.region_label', { name: label, defaultValue: label })}
+                    formatter={(value, _name, item) => [value, item?.payload?.fullName]}
+                  />
                   <Legend />
-                  <Bar dataKey="registrations" name="Registrations" fill="#1e3a5f" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="registrations" name={t('analytics.registrations')} fill="#1e3a5f" radius={[4, 4, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             )}
@@ -515,8 +574,9 @@ function Analytics({
             fontSize: '13px',
             color: '#64748b'
           }}>
-            <span>🏆 Top Region: {regionStats?.length > 0 ? regionStats.sort((a, b) => b.registrations - a.registrations)[0]?.region || 'N/A' : 'N/A'}</span>
-            <span>📊 Total Regions: {regionStats?.length || 0}</span>
+            <span>🏆 {t('analytics.top_region', { name: topRegionName })}</span>
+            <span>📊 {t('analytics.total_regions', { count: regions.length })}</span>
+            <span>🗺️ {t('analytics.regions_with_activity', { count: regionBarData.length, total: regions.length })}</span>
           </div>
         </div>
 
@@ -539,14 +599,14 @@ function Analytics({
           e.currentTarget.style.boxShadow = '0 1px 3px rgba(0,0,0,0.1)';
         }}>
           <div style={{marginBottom: '16px'}}>
-            <h3 style={{fontSize: '16px', fontWeight: '600', margin: 0, color: '#1a202c'}}>📋 Registration Breakdown</h3>
-            <p style={{fontSize: '13px', color: '#64748b', margin: '4px 0 0 0'}}>Citizens registered per region</p>
+            <h3 style={{fontSize: '16px', fontWeight: '600', margin: 0, color: '#1a202c'}}>📋 {t('analytics.registration_breakdown')}</h3>
+            <p style={{fontSize: '13px', color: '#64748b', margin: '4px 0 0 0'}}>{t('analytics.registration_breakdown_subtitle')}</p>
           </div>
-          {regionStats.length === 0 ? (
-            <div style={{textAlign: 'center', padding: '40px', color: '#64748b'}}>No data available</div>
+          {activeRegions.length === 0 ? (
+            <div style={{textAlign: 'center', padding: '40px', color: '#64748b'}}>{t('analytics.no_data_available')}</div>
           ) : (
             <div style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '12px'}}>
-              {regionStats.map((region, idx) => (
+              {activeRegions.map((region, idx) => (
                 <div key={region.region} style={{
                   background: idx % 2 === 0 ? '#f0f4f8' : '#f8fafc',
                   padding: '16px',
@@ -578,7 +638,7 @@ function Analytics({
             color: '#64748b',
             textAlign: 'center'
           }}>
-            🏆 Top Region: {regionStats?.length > 0 ? regionStats.sort((a, b) => b.registrations - a.registrations)[0]?.region || 'N/A' : 'N/A'}
+            🏆 {t('analytics.top_region', { name: topRegionName })}
           </div>
         </div>
 
@@ -600,9 +660,9 @@ function Analytics({
           e.currentTarget.style.transform = 'translateY(0)';
           e.currentTarget.style.boxShadow = '0 1px 3px rgba(0,0,0,0.1)';
         }}>
-          <h3 style={{fontSize: '16px', fontWeight: '600', margin: '0 0 16px 0', color: '#1a202c'}}>🏆 Top Performers</h3>
+          <h3 style={{fontSize: '16px', fontWeight: '600', margin: '0 0 16px 0', color: '#1a202c'}}>🏆 {t('analytics.top_performers')}</h3>
           {topOfficers.length === 0 ? (
-            <div style={{textAlign: 'center', padding: '20px', color: '#64748b'}}>No data available</div>
+            <div style={{textAlign: 'center', padding: '20px', color: '#64748b'}}>{t('analytics.no_data_available')}</div>
           ) : (
             <div style={{display: 'flex', flexDirection: 'column', gap: '10px'}}>
               {topOfficers.map((emp, i) => (
@@ -638,7 +698,7 @@ function Analytics({
                   </span>
                   <span style={{fontWeight: '600', flex: 1, fontSize: '14px'}}>{emp.employeeName}</span>
                   <span style={{color: '#64748b', fontSize: '12px'}}>{emp.region}</span>
-                  <span style={{color: '#2563eb', fontWeight: '500', fontSize: '13px'}}>🆔 {emp.totalRegistrations} Registered</span>
+                  <span style={{color: '#2563eb', fontWeight: '500', fontSize: '13px'}}>🆔 {emp.totalRegistrations} {t('analytics.registered')}</span>
                 </div>
               ))}
             </div>
@@ -651,7 +711,7 @@ function Analytics({
             color: '#64748b',
             textAlign: 'center'
           }}>
-            🎯 Top performer registered {topOfficers[0]?.totalRegistrations || 0} citizens
+            🎯 {t('analytics.top_performer_registered', { count: topOfficers[0]?.totalRegistrations || 0 })}
           </div>
         </div>
       </div>
@@ -676,19 +736,19 @@ function Analytics({
       }}>
         <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px'}}>
           <div>
-            <h3 style={{fontSize: '16px', fontWeight: '600', margin: 0, color: '#1a202c'}}>📊 Region Statistics</h3>
-            <p style={{fontSize: '13px', color: '#64748b', margin: '4px 0 0 0'}}>Detailed breakdown by region</p>
+            <h3 style={{fontSize: '16px', fontWeight: '600', margin: 0, color: '#1a202c'}}>📊 {t('analytics.region_statistics')}</h3>
+            <p style={{fontSize: '13px', color: '#64748b', margin: '4px 0 0 0'}}>{t('analytics.region_statistics_subtitle')}</p>
           </div>
           <span style={{fontSize: '12px', color: '#64748b'}}>
-            Total: {regionStats?.reduce((sum, r) => sum + r.registrations, 0) || 0} citizens
+            Total: {t('analytics.total_citizens', { count: activeRegions?.reduce((sum, r) => sum + r.registrations, 0) || 0 })}
           </span>
         </div>
-        {!regionStats || regionStats.length === 0 ? (
-          <div style={{textAlign: 'center', padding: '20px', color: '#64748b'}}>No data available</div>
+        {!activeRegions || activeRegions.length === 0 ? (
+          <div style={{textAlign: 'center', padding: '20px', color: '#64748b'}}>{t('analytics.no_data_available')}</div>
         ) : (
           <div style={{display: 'flex', flexDirection: 'column', gap: '12px'}}>
-            {regionStats.map((region, idx) => {
-              const maxVal = Math.max(...regionStats.map(r => r.registrations)) || 1;
+            {activeRegions.map((region, idx) => {
+              const maxVal = Math.max(...activeRegions.map(r => r.registrations)) || 1;
               const colors = ['#1e3a5f', '#2b4c7a', '#4a7a9c', '#6b9ec4', '#2d6a4f', '#1a3a5f'];
               const percentage = Math.round((region.registrations / maxVal) * 100);
               return (
@@ -746,10 +806,10 @@ function Analytics({
                   </div>
                   <div style={{display: 'flex', gap: '12px', minWidth: '120px'}}>
                     <span style={{fontSize: '12px', color: '#64748b'}}>
-                      👥 {region.employees || 0} Staff
+                      👥 {region.employees || 0} {t('analytics.staff')}
                     </span>
                     <span style={{fontSize: '12px', color: '#2563eb'}}>
-                      🆔 {region.registrations} Citizens
+                      🆔 {region.registrations} {t('analytics.citizens')}
                     </span>
                   </div>
                 </div>
@@ -779,9 +839,9 @@ function Analytics({
           e.currentTarget.style.background = 'transparent';
           e.currentTarget.style.padding = '0';
         }}>
-          <span>🏆 Best Region: {regionStats?.length > 0 ? regionStats.sort((a, b) => b.registrations - a.registrations)[0]?.region || 'N/A' : 'N/A'}</span>
-          <span>📈 Total Reports: {totalReports}</span>
-          <span>🆔 Total Citizens: {totalRegistrations}</span>
+          <span>🏆 {t('analytics.best_region', { name: topRegionName })}</span>
+          <span>📈 {t('analytics.total_reports_link')}: {totalReports}</span>
+          <span>🆔 {t('analytics.total_citizens_link')}: {totalRegistrations}</span>
         </div>
       </div>
 
@@ -833,12 +893,12 @@ function Analytics({
                 {activeCard.icon}
               </div>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: '13px', opacity: 0.85, fontWeight: '500' }}>{activeCard.label}</div>
+                <div style={{ fontSize: '13px', opacity: 0.85, fontWeight: '500' }}>{t(activeCard.labelKey)}</div>
                 <div style={{ fontSize: '34px', fontWeight: '800', lineHeight: 1.1, marginTop: '2px' }}>{activeCard.value}</div>
               </div>
               <button
                 onClick={() => setActiveCard(null)}
-                title="Close"
+                title={t('analytics.close')}
                 style={{
                   width: '32px',
                   height: '32px',
@@ -881,7 +941,7 @@ function Analytics({
                   fontWeight: '600',
                   cursor: 'pointer'
                 }}
-              >Close</button>
+              >{t('analytics.close')}</button>
             </div>
           </div>
         </div>

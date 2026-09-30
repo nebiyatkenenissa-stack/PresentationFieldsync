@@ -1,9 +1,11 @@
 // components/register/CitizenRegistration.js – FULLY VALIDATED (18+, grandfather name required, duplicate check on first+last+grandfather)
 
 import React, { useState, useEffect } from 'react';
+import toast from 'react-hot-toast';
 import { useTranslation } from 'react-i18next';
 import { db, syncQueue, checkRealInternet, getApiBase, clearStuckCitizens } from '../../services/database';
 import { uid, generateNationalId } from '../../utils/helpers';
+import { confirmToast } from '../../utils/confirmToast';
 import LocationCascade from '../common/LocationCascade';
 import GpsCapture from '../common/GpsCapture';
 import { getCurrentGps } from '../../utils/gps';
@@ -91,7 +93,17 @@ const translations = {
     clearStuckQueue: 'queue items',
     clearStuckNone: 'No stuck citizens found',
     photo: 'Photo',
-    photoPlaceholder: 'Upload citizen photo'
+    photoPlaceholder: 'Upload citizen photo',
+    fatherName: "Father's Full Name *",
+    fatherNamePlaceholder: "Enter father's full name",
+    fatherNameError: "Father's name must contain only letters and spaces",
+    motherName: "Mother's Full Name *",
+    motherNamePlaceholder: "Enter mother's full name",
+    motherNameError: "Mother's name must contain only letters and spaces",
+    birthPlace: 'Place of Birth',
+    birthPlacePlaceholder: 'Enter place of birth (e.g. region, zone, woreda)',
+    birthCertificateNo: 'Birth Certificate No.',
+    birthCertificateNoPlaceholder: 'Enter birth certificate / civil registration number'
   },
   am: {
     title: '🆔 ለብሔራዊ መታወቂያ ዜጋ ይመዝገቡ',
@@ -172,7 +184,17 @@ const translations = {
     clearStuckQueue: 'የወረፋ እቃዎች',
     clearStuckNone: 'ምንም የተጣበቁ ዜጎች አልተገኙም',
     photo: 'ፎቶ',
-    photoPlaceholder: 'የዜጋ ፎቶ ይጫኑ'
+    photoPlaceholder: 'የዜጋ ፎቶ ይጫኑ',
+    fatherName: 'የአባት ሙሉ ስም *',
+    fatherNamePlaceholder: 'የአባትን ሙሉ ስም ያስገቡ',
+    fatherNameError: 'የአባት ስም ፊደላት እና ክፍተቶችን ብቻ መያዝ አለበት',
+    motherName: 'የእናት ሙሉ ስም *',
+    motherNamePlaceholder: 'የእናትን ሙሉ ስም ያስገቡ',
+    motherNameError: 'የእናት ስም ፊደላት እና ክፍተቶችን ብቻ መያዝ አለበት',
+    birthPlace: 'የትውልድ ቦታ',
+    birthPlacePlaceholder: 'የትውልድ ቦታ ያስገቡ (ለምሳሌ፡ ክልል፣ ዞን፣ ወረዳ)',
+    birthCertificateNo: 'የትውልድ የምስክር ወረቀት ቁጥር',
+    birthCertificateNoPlaceholder: 'የትውልድ የምስክር ወረቀት / የሲቪል ምዝገባ ቁጥር ያስገቡ'
   },
   om: {
     title: '🆔 Firoota Magaalaa Sabaa Qabaachuuf Galmeessaa',
@@ -253,7 +275,17 @@ const translations = {
     clearStuckQueue: 'wantoota queue',
     clearStuckNone: 'Firoon hirkate hin argamne',
     photo: 'Fakkii',
-    photoPlaceholder: 'Fakkii firoota olkaa\'i'
+    photoPlaceholder: 'Fakkii firoota olkaa\'i',
+    fatherName: 'Maqaa Guutuu Abbootii *',
+    fatherNamePlaceholder: 'Maqaa guutuu abbootii galchi',
+    fatherNameError: 'Maqaan abbootii qubee fi bakka duwwaa qofa qabaachuu qaba',
+    motherName: 'Maqaa Guutuu Haadhaa *',
+    motherNamePlaceholder: 'Maqaa guutuu haadhaa galchi',
+    motherNameError: 'Maqaan haadhaa qubee fi bakka duwwaa qofa qabaachuu qaba',
+    birthPlace: 'Iddoo Dhalootaa',
+    birthPlacePlaceholder: 'Iddoo dhalootaa galchi (fakkeenya: naannoo, zona, aanaa)',
+    birthCertificateNo: 'Lakkoobsa Ragaa Dhalootaa',
+    birthCertificateNoPlaceholder: 'Lakkoobsa ragaa dhalootaa / galmee siiivilaa galchi'
   },
   ti: {
     title: '🆔 ንብሔራዊ መታወቂያ ዜጋ ተመዝገብ',
@@ -334,7 +366,17 @@ const translations = {
     clearStuckQueue: 'ናይ ወረፋ ኣቕሑ',
     clearStuckNone: 'ዝተዓቕሙ ዜጋታት ኣይተረኸቡን',
     photo: 'ስእሊ',
-    photoPlaceholder: 'ስእሊ ዜጋ ጽዓኑ'
+    photoPlaceholder: 'ስእሊ ዜጋ ጽዓኑ',
+    fatherName: 'ምሉእ ስም ኣቦ *',
+    fatherNamePlaceholder: 'ምሉእ ስም ኣቦ አእትዉ',
+    fatherNameError: 'ስም ኣቦ ፊደላትን ክፍተትን ጥራይ ክህዝ ኣለዎ',
+    motherName: 'ምሉእ ስም ኣደ *',
+    motherNamePlaceholder: 'ምሉእ ስም ኣደ አእትዉ',
+    motherNameError: 'ስም ኣደ ፊደላትን ክፍተትን ጥራይ ክህዝ ኣለዎ',
+    birthPlace: 'ቦታ ትውልድ',
+    birthPlacePlaceholder: 'ቦታ ትውልድ አእትዉ (ኣብነት፡ ክልል፣ ዞን፣ ወረዳ)',
+    birthCertificateNo: 'ቁጽሪ ምስክር ትውልድ',
+    birthCertificateNoPlaceholder: 'ቁጽሪ ምስክር ትውልድ / ምዝገባ ሲቪል አእትዉ'
   }
 };
 
@@ -378,7 +420,11 @@ function CitizenRegistration({ user, citizens, setCitizens, addNotification }) {
     village: '',
     occupation: '',
     maritalStatus: '',
-    photo: ''
+    photo: '',
+    fatherName: '',
+    motherName: '',
+    birthPlace: '',
+    birthCertificateNo: ''
   });
   const [errors, setErrors] = useState({
     firstName: '',
@@ -387,7 +433,9 @@ function CitizenRegistration({ user, citizens, setCitizens, addNotification }) {
     gender: '',
     phone: '',
     email: '',
-    region: ''
+    region: '',
+    fatherName: '',
+    motherName: ''
   });
   const [touched, setTouched] = useState({});
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -426,27 +474,52 @@ function CitizenRegistration({ user, citizens, setCitizens, addNotification }) {
     return '';
   };
 
+  const validateParentName = (value, field) => {
+    if (!value.trim()) return 'This field is required';
+    if (!/^[a-zA-Z\s\-']+$/.test(value)) {
+      return field === 'fatherName'
+        ? (t.fatherNameError || "Father's name must contain only letters and spaces")
+        : (t.motherNameError || "Mother's name must contain only letters and spaces");
+    }
+    return '';
+  };
+
+  // No minimum age — minors can be registered. Only future dates are rejected.
   const validateDateOfBirth = (value) => {
     if (!value) return 'Date of birth is required';
     const birthDate = new Date(value);
+    if (Number.isNaN(birthDate.getTime())) {
+      return t.dateOfBirthError || 'Date of birth cannot be in the future';
+    }
     const today = new Date();
     if (birthDate > today) return t.dateOfBirthError || 'Date of birth cannot be in the future';
-
-    let age = today.getFullYear() - birthDate.getFullYear();
-    const monthDiff = today.getMonth() - birthDate.getMonth();
-    if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
-      age--;
-    }
-    if (age < 18) {
-      return t.ageError || 'Citizen must be 18 years or older';
-    }
     return '';
+  };
+
+  // Reduce any accepted phone format to a comparable 9-digit national number so
+  // 0912345678 and +251912345678 are recognised as the same line.
+  const normalizePhone = (value) => {
+    let digits = String(value || '').replace(/\D/g, '');
+    if (digits.startsWith('251')) digits = digits.slice(3);
+    else if (digits.startsWith('0')) digits = digits.slice(1);
+    return digits;
+  };
+
+  const isPhoneTaken = (value, ignoreId) => {
+    const target = normalizePhone(value);
+    if (!target) return false;
+    return (citizens || []).some(c =>
+      c.id !== ignoreId && normalizePhone(c.phone) === target
+    );
   };
 
   const validatePhone = (value) => {
     if (!value.trim()) return 'Phone number is required';
     if (!/^(\+251|0)9\d{8}$/.test(value.trim())) {
       return t.phoneError || 'Phone must start with +2519 or 09 followed by 8 digits (e.g., +251912345678)';
+    }
+    if (isPhoneTaken(value)) {
+      return t.duplicatePhone || 'This phone number is already registered';
     }
     return '';
   };
@@ -514,12 +587,9 @@ function CitizenRegistration({ user, citizens, setCitizens, addNotification }) {
       }
     }
 
-    // Check duplicate phone
-    if (form.phone.trim()) {
-      const phoneExists = existing.some(c => c.phone && c.phone.replace(/\D/g, '') === form.phone.replace(/\D/g, ''));
-      if (phoneExists) {
-        dupErrors.phone = t.duplicatePhone || 'This phone number is already registered';
-      }
+    // Check duplicate phone (format-insensitive: 09... matches +2519...)
+    if (form.phone.trim() && isPhoneTaken(form.phone)) {
+      dupErrors.phone = t.duplicatePhone || 'This phone number is already registered';
     }
 
     return dupErrors;
@@ -537,7 +607,9 @@ function CitizenRegistration({ user, citizens, setCitizens, addNotification }) {
       gender: validateGender(form.gender),
       phone: validatePhone(form.phone),
       email: validateEmail(form.email),
-      region: validateRegion(location.region?.id ? location.region.name || location.region.id : form.region)
+      region: validateRegion(location.region?.id ? location.region.name || location.region.id : form.region),
+      fatherName: validateParentName(form.fatherName, 'fatherName'),
+      motherName: validateParentName(form.motherName, 'motherName')
     };
     // Override with duplicate errors if any
     const dupErrors = checkDuplicates();
@@ -568,6 +640,10 @@ function CitizenRegistration({ user, citizens, setCitizens, addNotification }) {
         break;
       case 'grandfatherName':
         error = newValue.trim() ? validateName(newValue) : (t.grandfatherNameRequired || 'Grandfather name is required');
+        break;
+      case 'fatherName':
+      case 'motherName':
+        error = validateParentName(newValue, name);
         break;
       case 'dateOfBirth':
         error = validateDateOfBirth(newValue);
@@ -612,6 +688,10 @@ function CitizenRegistration({ user, citizens, setCitizens, addNotification }) {
         break;
       case 'grandfatherName':
         error = form[name]?.trim() ? validateName(form[name]) : (t.grandfatherNameRequired || 'Grandfather name is required');
+        break;
+      case 'fatherName':
+      case 'motherName':
+        error = validateParentName(form[name], name);
         break;
       case 'dateOfBirth':
         error = validateDateOfBirth(form[name]);
@@ -677,11 +757,11 @@ function CitizenRegistration({ user, citizens, setCitizens, addNotification }) {
     const file = e.target.files && e.target.files[0];
     if (!file) return;
     if (!file.type.startsWith('image/')) {
-      alert('Please select a valid image file');
+      toast('Please select a valid image file');
       return;
     }
     if (file.size > 5 * 1024 * 1024) {
-      alert('Photo must be smaller than 5MB');
+      toast('Photo must be smaller than 5MB');
       return;
     }
     resizeImage(file, 400, (dataUrl) => {
@@ -725,7 +805,7 @@ function CitizenRegistration({ user, citizens, setCitizens, addNotification }) {
   // CLEAR STUCK CITIZENS (manual button)
   // ============================================================
   const handleClearStuck = async () => {
-    if (!window.confirm(t.clearStuckConfirm)) return;
+    if (!await confirmToast(t.clearStuckConfirm)) return;
     try {
       const result = await clearStuckCitizens();
       setPendingCount(syncQueue.count());
@@ -763,12 +843,14 @@ function CitizenRegistration({ user, citizens, setCitizens, addNotification }) {
             gender: 'Gender',
             phone: 'Phone',
             email: 'Email',
-            region: 'Region'
+            region: 'Region',
+            fatherName: "Father's Full Name",
+            motherName: "Mother's Full Name"
           };
           return `• ${fieldNames[field] || field}: ${msg}`;
         })
         .join('\n');
-      alert(`${t.fixErrors}\n\n${errorMessages}`);
+      toast(`${t.fixErrors}\n\n${errorMessages}`);
       return;
     }
 
@@ -791,7 +873,7 @@ function CitizenRegistration({ user, citizens, setCitizens, addNotification }) {
         }
       });
       if (mismatchLevels.length > 0) {
-        alert(`❌ You can only work in your assigned area. ${mismatchLevels.join(', ')} cannot be changed.`);
+        toast(`❌ You can only work in your assigned area. ${mismatchLevels.join(', ')} cannot be changed.`);
         return;
       }
     }
@@ -808,7 +890,10 @@ function CitizenRegistration({ user, citizens, setCitizens, addNotification }) {
         gpsData = await getCurrentGps(6000);
       }
 
-      const nationalId = generateNationalId();
+      const nationalId = generateNationalId({
+        region: location.region?.name || form.region || '',
+        dateOfBirth: form.dateOfBirth
+      });
 
       const newCitizen = {
         id: uid(),
@@ -835,6 +920,10 @@ function CitizenRegistration({ user, citizens, setCitizens, addNotification }) {
           .map(lvl => ({ level: lvl, id: location[lvl].id, name: location[lvl].name || null })),
         occupation: form.occupation.trim() || '',
         maritalStatus: form.maritalStatus || '',
+        fatherName: form.fatherName.trim() || '',
+        motherName: form.motherName.trim() || '',
+        birthPlace: form.birthPlace.trim() || '',
+        birthCertificateNo: form.birthCertificateNo.trim() || '',
         idType: 'National ID',
         photo: form.photo || '',
         registrationDate: new Date().toISOString(),
@@ -843,6 +932,8 @@ function CitizenRegistration({ user, citizens, setCitizens, addNotification }) {
         latitude: gpsData?.success ? gpsData.latitude : null,
         longitude: gpsData?.success ? gpsData.longitude : null,
         gpsAccuracy: gpsData?.success ? gpsData.accuracy : null,
+        gpsLowAccuracy: gpsData?.success ? !!gpsData.lowAccuracy : null,
+        gpsNetworkEstimate: gpsData?.success ? !!gpsData.networkEstimate : null,
         gpsCapturedAt: gpsData?.success ? gpsData.timestamp : null,
         status: 'active',
         createdAt: new Date().toISOString(),
@@ -901,7 +992,8 @@ function CitizenRegistration({ user, citizens, setCitizens, addNotification }) {
               user?.id,
               '💾 Citizen Saved Locally',
               `Citizen ${newCitizen.firstName} ${newCitizen.lastName} saved offline. Will sync when online.`,
-              'warning'
+              'warning',
+              '/register'
             );
           }
         }
@@ -923,7 +1015,8 @@ function CitizenRegistration({ user, citizens, setCitizens, addNotification }) {
             user?.id,
             '💾 Citizen Saved Offline',
             `Citizen ${newCitizen.firstName} ${newCitizen.lastName} saved offline. Will sync automatically when online.`,
-            'warning'
+            'warning',
+            '/register'
           );
         }
       }
@@ -946,9 +1039,13 @@ function CitizenRegistration({ user, citizens, setCitizens, addNotification }) {
           village: '',
           occupation: '',
           maritalStatus: '',
-          photo: ''
+          photo: '',
+          fatherName: '',
+          motherName: '',
+          birthPlace: '',
+          birthCertificateNo: ''
         });
-        setErrors({ firstName: '', lastName: '', dateOfBirth: '', gender: '', phone: '', email: '', region: '' });
+        setErrors({ firstName: '', lastName: '', dateOfBirth: '', gender: '', phone: '', email: '', region: '', fatherName: '', motherName: '' });
         setTouched({});
         setLocation(seedLocationFromUser(user));
         setShowSuccess(false);
@@ -956,7 +1053,7 @@ function CitizenRegistration({ user, citizens, setCitizens, addNotification }) {
       
     } catch (error) {
       console.error('Error:', error);
-      alert(t.error + error.message);
+      toast(t.error + error.message);
     } finally {
       setIsSubmitting(false);
     }
@@ -965,29 +1062,32 @@ function CitizenRegistration({ user, citizens, setCitizens, addNotification }) {
   // ============================================================
   // CLEAR FORM
   // ============================================================
-  const handleClear = () => {
-    if (window.confirm(t.clearConfirm)) {
-      setForm({
-        firstName: '',
-        lastName: '',
-        grandfatherName: '',
-        dateOfBirth: '',
-        gender: '',
-        phone: '',
-        email: '',
-        address: '',
-        region: user?.region || '',
-        district: '',
-        village: '',
-        occupation: '',
-        maritalStatus: '',
-        photo: ''
-      });
-      setErrors({ firstName: '', lastName: '', dateOfBirth: '', gender: '', phone: '', email: '', region: '' });
-      setTouched({});
-      setLocation(seedLocationFromUser(user));
-      setShowSuccess(false);
-    }
+  const handleClear = async () => {
+    if (!await confirmToast(t.clearConfirm)) return;
+    setForm({
+      firstName: '',
+      lastName: '',
+      grandfatherName: '',
+      dateOfBirth: '',
+      gender: '',
+      phone: '',
+      email: '',
+      address: '',
+      region: user?.region || '',
+      district: '',
+      village: '',
+      occupation: '',
+      maritalStatus: '',
+      photo: '',
+      fatherName: '',
+      motherName: '',
+      birthPlace: '',
+      birthCertificateNo: ''
+    });
+    setErrors({ firstName: '', lastName: '', dateOfBirth: '', gender: '', phone: '', email: '', region: '', fatherName: '', motherName: '' });
+    setTouched({});
+    setLocation(seedLocationFromUser(user));
+    setShowSuccess(false);
   };
 
   // ============================================================
@@ -1324,6 +1424,7 @@ function CitizenRegistration({ user, citizens, setCitizens, addNotification }) {
                   type="date"
                   name="dateOfBirth"
                   value={form.dateOfBirth}
+                  max={new Date().toISOString().slice(0, 10)}
                   onChange={handleChange}
                   style={{
                     width: '100%',
@@ -1382,6 +1483,121 @@ function CitizenRegistration({ user, citizens, setCitizens, addNotification }) {
                     {errors.gender}
                   </span>
                 )}
+              </div>
+            </div>
+
+            {/* Row: Parents' Full Names */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '14px', marginBottom: '14px' }}>
+              <div className="form-group">
+                <label style={{ display: 'block', fontWeight: '500', marginBottom: '4px', fontSize: '13px', color: '#374151' }}>
+                  {t.fatherName}
+                </label>
+                <input
+                  type="text"
+                  name="fatherName"
+                  value={form.fatherName}
+                  onChange={handleChange}
+                  placeholder={t.fatherNamePlaceholder}
+                  style={{
+                    width: '100%',
+                    padding: '8px 12px',
+                    border: `1px solid ${touched.fatherName && errors.fatherName ? '#dc2626' : '#d1d5db'}`,
+                    borderRadius: '8px',
+                    fontSize: '14px',
+                    outline: 'none',
+                    transition: 'border-color 0.15s ease'
+                  }}
+                  onFocus={(e) => e.target.style.borderColor = touched.fatherName && errors.fatherName ? '#dc2626' : '#3b82f6'}
+                  onBlur={(e) => {
+                    handleBlur(e);
+                    e.target.style.borderColor = touched.fatherName && errors.fatherName ? '#dc2626' : '#d1d5db';
+                  }}
+                  required
+                />
+                {touched.fatherName && errors.fatherName && (
+                  <span style={{ color: '#dc2626', fontSize: '13px', marginTop: '4px', display: 'block' }}>
+                    {errors.fatherName}
+                  </span>
+                )}
+              </div>
+              <div className="form-group">
+                <label style={{ display: 'block', fontWeight: '500', marginBottom: '4px', fontSize: '13px', color: '#374151' }}>
+                  {t.motherName}
+                </label>
+                <input
+                  type="text"
+                  name="motherName"
+                  value={form.motherName}
+                  onChange={handleChange}
+                  onBlur={handleBlur}
+                  placeholder={t.motherNamePlaceholder}
+                  style={{
+                    width: '100%',
+                    padding: '8px 12px',
+                    border: `1px solid ${touched.motherName && errors.motherName ? '#dc2626' : '#d1d5db'}`,
+                    borderRadius: '8px',
+                    fontSize: '14px',
+                    outline: 'none',
+                    transition: 'border-color 0.15s ease'
+                  }}
+                  onFocus={(e) => e.target.style.borderColor = touched.motherName && errors.motherName ? '#dc2626' : '#3b82f6'}
+                  required
+                />
+                {touched.motherName && errors.motherName && (
+                  <span style={{ color: '#dc2626', fontSize: '13px', marginTop: '4px', display: 'block' }}>
+                    {errors.motherName}
+                  </span>
+                )}
+              </div>
+            </div>
+
+            {/* Row: Birth Place & Birth Certificate */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '14px', marginBottom: '14px' }}>
+              <div className="form-group">
+                <label style={{ display: 'block', fontWeight: '500', marginBottom: '4px', fontSize: '13px', color: '#374151' }}>
+                  {t.birthPlace}
+                </label>
+                <input
+                  type="text"
+                  name="birthPlace"
+                  value={form.birthPlace}
+                  onChange={handleChange}
+                  placeholder={t.birthPlacePlaceholder}
+                  style={{
+                    width: '100%',
+                    padding: '8px 12px',
+                    border: '1px solid #d1d5db',
+                    borderRadius: '8px',
+                    fontSize: '14px',
+                    outline: 'none',
+                    transition: 'border-color 0.15s ease'
+                  }}
+                  onFocus={(e) => e.target.style.borderColor = '#3b82f6'}
+                  onBlur={(e) => e.target.style.borderColor = '#d1d5db'}
+                />
+              </div>
+              <div className="form-group">
+                <label style={{ display: 'block', fontWeight: '500', marginBottom: '4px', fontSize: '13px', color: '#374151' }}>
+                  {t.birthCertificateNo}
+                </label>
+                <input
+                  type="text"
+                  name="birthCertificateNo"
+                  value={form.birthCertificateNo}
+                  onChange={handleChange}
+                  placeholder={t.birthCertificateNoPlaceholder}
+                  style={{
+                    width: '100%',
+                    padding: '8px 12px',
+                    border: '1px solid #d1d5db',
+                    borderRadius: '8px',
+                    fontSize: '14px',
+                    outline: 'none',
+                    transition: 'border-color 0.15s ease'
+                  }}
+                  onFocus={(e) => e.target.style.borderColor = '#3b82f6'}
+                  onBlur={(e) => e.target.style.borderColor = '#d1d5db'}
+                />
               </div>
             </div>
 
@@ -1612,6 +1828,8 @@ function CitizenRegistration({ user, citizens, setCitizens, addNotification }) {
                   {errors.firstName && <li>First Name: {errors.firstName}</li>}
                   {errors.lastName && <li>Last Name: {errors.lastName}</li>}
                   {errors.grandfatherName && <li>Grandfather Name: {errors.grandfatherName}</li>}
+                  {errors.fatherName && <li>Father&apos;s Full Name: {errors.fatherName}</li>}
+                  {errors.motherName && <li>Mother&apos;s Full Name: {errors.motherName}</li>}
                   {errors.dateOfBirth && <li>Date of Birth: {errors.dateOfBirth}</li>}
                   {errors.gender && <li>Gender: {errors.gender}</li>}
                   {errors.phone && <li>Phone: {errors.phone}</li>}

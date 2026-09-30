@@ -22,7 +22,7 @@ router.get('/', async (req, res) => {
     }
 });
 
-// POST a new alert
+// POST a new alert (idempotent by id – retries update instead of duplicating)
 router.post('/', async (req, res) => {
     try {
         const data = req.body;
@@ -31,6 +31,17 @@ router.post('/', async (req, res) => {
                 id, title, message, priority, type, timestamp, read,
                 target_all, target_employee_id, sent_by, sent_by_name
             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+            ON CONFLICT (id) DO UPDATE SET
+                title = EXCLUDED.title,
+                message = EXCLUDED.message,
+                priority = EXCLUDED.priority,
+                type = EXCLUDED.type,
+                timestamp = EXCLUDED.timestamp,
+                read = EXCLUDED.read,
+                target_all = EXCLUDED.target_all,
+                target_employee_id = EXCLUDED.target_employee_id,
+                sent_by = EXCLUDED.sent_by,
+                sent_by_name = EXCLUDED.sent_by_name
             RETURNING *`,
             [
                 data.id,

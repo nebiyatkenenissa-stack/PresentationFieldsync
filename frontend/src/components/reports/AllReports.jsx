@@ -3,28 +3,42 @@
 // per-row download (JSON) and delete, clear all.
 
 import React, { useState, useMemo, useEffect } from 'react';
+import { confirmToast } from '../../utils/confirmToast';
 import { exportCSV, exportJSON } from '../../utils/helpers';
 import { db, markReportsDeleted } from '../../services/database';
 import { getRegionOptions, getEmployeeRegionMap, getServerBase } from '../../utils/helpers';
+import useRegions from '../../hooks/useRegions';
+import { regionOfPath } from '../../utils/regions';
 import UserAvatar from '../common/UserAvatar';
+import { useTranslation } from 'react-i18next';
 
 function AllReports({ reports, users, supervisorReports, setReports, setSupervisorReports }) {
+  const { t } = useTranslation();
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedRegion, setSelectedRegion] = useState('All');
   const [submitterFilter, setSubmitterFilter] = useState('All');
   const [dateRange, setDateRange] = useState({ start: '', end: '' });
   const [viewingAttachments, setViewingAttachments] = useState(null);
 
-  const regionOptions = useMemo(() => getRegionOptions(users), [users]);
+  const regions = useRegions();
+  const regionOptions = useMemo(() => getRegionOptions(users, regions), [users, regions]);
   const employeeRegionMap = useMemo(() => getEmployeeRegionMap(users), [users]);
   const userByEmpId = useMemo(() => {
     const map = {};
-    (users || []).forEach(u => { if (u && u.employeeId) map[u.employeeId] = u; });
+    (users || []).forEach(u => {
+      if (!u || !u.employeeId) return;
+      const prev = map[u.employeeId];
+      if (!prev || (u.source === 'server' && prev.source !== 'server')) map[u.employeeId] = u;
+    });
     return map;
   }, [users]);
   const userById = useMemo(() => {
     const map = {};
-    (users || []).forEach(u => { if (u && u.id) map[u.id] = u; });
+    (users || []).forEach(u => {
+      if (!u || !u.id) return;
+      const prev = map[u.id];
+      if (!prev || (u.source === 'server' && prev.source !== 'server')) map[u.id] = u;
+    });
     return map;
   }, [users]);
 
@@ -40,16 +54,27 @@ function AllReports({ reports, users, supervisorReports, setReports, setSupervis
     }
   }, [reports, setReports]);
 
+  // Real region name for a report — from its own location, else the officer's
+  // assigned region, else its region field. Never a kebele/woreda/zone name.
   const resolveRegion = (r) => {
-    if (r && r.employeeId && employeeRegionMap[r.employeeId]) return employeeRegionMap[r.employeeId];
-    return r?.region || r?.officerRegion || '';
+    const own = regionOfPath(r?.region, regions);
+    if (own) return own;
+    if (r?.officerRegion) {
+      const officer = regionOfPath(r.officerRegion, regions);
+      if (officer) return officer;
+    }
+    if (r && r.employeeId && employeeRegionMap[r.employeeId]) {
+      const assigned = regionOfPath(employeeRegionMap[r.employeeId], regions);
+      if (assigned) return assigned;
+    }
+    return '';
   };
 
   // Helper: format date/time (mm/dd/yyyy)
   const formatDateTime = (dateStr) => {
-    if (!dateStr) return 'N/A';
+    if (!dateStr) return t('allReports.na');
     const date = new Date(dateStr);
-    if (isNaN(date.getTime())) return 'N/A';
+    if (isNaN(date.getTime())) return t('allReports.na');
     return date.toLocaleString('en-US', {
       month: '2-digit',
       day: '2-digit',
@@ -142,28 +167,28 @@ function AllReports({ reports, users, supervisorReports, setReports, setSupervis
   // ===== DELETE / CLEAR HANDLERS =====
   // Deleted ids are remembered so server pulls don't bring them back.
   const deleteReport = async (id, r) => {
-    if (!window.confirm('Delete this report?')) return;
+    if (!await confirmToast('Delete this report?')) return;
     markReportsDeleted([r.reportId || r.id], false);
     await db.reports.delete(id);
     setReports(prev => prev.filter(x => x.id !== id));
   };
 
   const deleteSupervisorReport = async (id) => {
-    if (!window.confirm('Delete this supervisor report?')) return;
+    if (!await confirmToast('Delete this supervisor report?')) return;
     markReportsDeleted([id], true);
     await db.supervisor_reports.delete(id);
     setSupervisorReports(prev => prev.filter(x => x.id !== id));
   };
 
   const clearAllReports = async () => {
-    if (!window.confirm('Delete ALL reports? This cannot be undone.')) return;
+    if (!await confirmToast('Delete ALL reports? This cannot be undone.')) return;
     markReportsDeleted(reports.map(r => r.reportId || r.id), false);
     await db.reports.clear();
     setReports([]);
   };
 
   const clearSupervisorReports = async () => {
-    if (!window.confirm('Delete ALL supervisor report data? This cannot be undone.')) return;
+    if (!await confirmToast('Delete ALL supervisor report data? This cannot be undone.')) return;
     markReportsDeleted((supervisorReports || []).map(r => r.id), true);
     await db.supervisor_reports.clear();
     setSupervisorReports([]);
@@ -230,9 +255,9 @@ function AllReports({ reports, users, supervisorReports, setReports, setSupervis
         gap: '16px'
       }}>
         <div>
-          <h2 style={{ fontSize: '24px', fontWeight: '700', margin: '0 0 6px 0' }}>📋 All Reports</h2>
+          <h2 style={{ fontSize: '24px', fontWeight: '700', margin: '0 0 6px 0' }}>📋 {t('nav.all_reports')}</h2>
           <p style={{ fontSize: '14px', opacity: 0.85, margin: 0, maxWidth: '540px' }}>
-            Complete overview of all reports from all officers and supervisors
+            {t('allReports.subtitle')}
           </p>
         </div>
         <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'center' }}>
@@ -244,7 +269,7 @@ function AllReports({ reports, users, supervisorReports, setReports, setSupervis
             fontSize: '13px',
             fontWeight: '600'
           }}>
-            📊 {filteredReports.length} Field Reports
+            📊 {t('allReports.field_reports', { count: filteredReports.length })}
           </span>
           <span style={{
             background: 'rgba(16,185,129,0.2)',
@@ -254,7 +279,7 @@ function AllReports({ reports, users, supervisorReports, setReports, setSupervis
             fontSize: '13px',
             fontWeight: '600'
           }}>
-            👤 {filteredSupervisorReports.length} Supervisor Reports
+            👤 {t('allReports.supervisor_reports', { count: filteredSupervisorReports.length })}
           </span>
           <button
             onClick={clearAllReports}
@@ -269,7 +294,7 @@ function AllReports({ reports, users, supervisorReports, setReports, setSupervis
               fontWeight: '600'
             }}
           >
-            🗑️ Clear All Reports
+            🗑️ {t('allReports.clear_all')}
           </button>
         </div>
       </div>
@@ -278,13 +303,13 @@ function AllReports({ reports, users, supervisorReports, setReports, setSupervis
       <div className="table-card">
         <div className="table-header">
           <div>
-            <h3>📊 Daily Field Reports</h3>
-            <p>{filteredReports.length} synced reports found</p>
+            <h3>📊 {t('allReports.daily_field_reports')}</h3>
+            <p>{t('allReports.synced_reports_found', { count: filteredReports.length })}</p>
           </div>
           <div className="table-actions" style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
             <input
               type="text"
-              placeholder="🔍 Search reports..."
+              placeholder={`🔍 ${t('allReports.search_placeholder')}`}
               value={searchTerm}
               onChange={e => setSearchTerm(e.target.value)}
               className="search-input"
@@ -294,7 +319,7 @@ function AllReports({ reports, users, supervisorReports, setReports, setSupervis
               onChange={e => setSubmitterFilter(e.target.value)}
               className="filter-select"
             >
-              <option value="All">All Submitters</option>
+              <option value="All">{t('allReports.all_submitters')}</option>
               {submitters.map(name => (
                 <option key={name} value={name}>{name}</option>
               ))}
@@ -304,7 +329,7 @@ function AllReports({ reports, users, supervisorReports, setReports, setSupervis
               onChange={e => setSelectedRegion(e.target.value)}
               className="filter-select"
             >
-              <option value="All">All Regions</option>
+              <option value="All">{t('allReports.all_regions')}</option>
               {regionOptions.filter(r => r !== 'All').map(r => (
                 <option key={r} value={r}>{r}</option>
               ))}
@@ -314,14 +339,14 @@ function AllReports({ reports, users, supervisorReports, setReports, setSupervis
               value={dateRange.start}
               onChange={e => setDateRange({...dateRange, start: e.target.value})}
               className="date-input"
-              placeholder="Start"
+              placeholder={t('allReports.start')}
             />
             <input
               type="date"
               value={dateRange.end}
               onChange={e => setDateRange({...dateRange, end: e.target.value})}
               className="date-input"
-              placeholder="End"
+              placeholder={t('allReports.end')}
             />
             <button className="btn-export" onClick={() => exportCSV(filteredReports, 'all_reports')}>📥 CSV</button>
             <button className="btn-export" onClick={() => exportJSON(filteredReports, 'all_reports')}>📥 JSON</button>
@@ -332,15 +357,15 @@ function AllReports({ reports, users, supervisorReports, setReports, setSupervis
           <table>
             <thead>
               <tr>
-                <th>Submitted</th>
-                <th>Submitted By</th>
-                <th>Region</th>
-                <th>Citizens</th>
-                <th>Files</th>
-                <th>Status</th>
-                <th>Sync</th>
-                <th>New</th>
-                <th>Action</th>
+                <th>{t('allReports.submitted')}</th>
+                <th>{t('allReports.submitted_by')}</th>
+                <th>{t('common.region')}</th>
+                <th>{t('nav.citizens')}</th>
+                <th>{t('allReports.files')}</th>
+                <th>{t('common.status')}</th>
+                <th>{t('nav.sync')}</th>
+                <th>{t('allReports.new')}</th>
+                <th>{t('common.actions')}</th>
               </tr>
             </thead>
             <tbody>
@@ -348,8 +373,8 @@ function AllReports({ reports, users, supervisorReports, setReports, setSupervis
                 <tr>
                   <td colSpan="10" className="empty-state">
                     <div className="empty-icon">📋</div>
-                    <div>No reports found</div>
-                    <small>Try adjusting your filters</small>
+                    <div>{t('allReports.no_reports')}</div>
+                    <small>{t('allReports.try_adjusting_filters')}</small>
                   </td>
                 </tr>
               )}
@@ -373,11 +398,11 @@ function AllReports({ reports, users, supervisorReports, setReports, setSupervis
                         </span>
                       )}
                     </td>
-                    <td><span className="status-tag">{r.operationalStatus}</span></td>
+                    <td><span className="status-tag">{t(`allReports.status.${r.operationalStatus}`)}</span></td>
                     <td>
                       {r.synced ?
-                        <span className="sync-tag synced">✅ Synced</span> :
-                        <span className="sync-tag pending">⏳ Pending</span>
+                        <span className="sync-tag synced">✅ {t('allReports.synced')}</span> :
+                        <span className="sync-tag pending">⏳ {t('allReports.pending')}</span>
                       }
                     </td>
                     <td>
@@ -391,14 +416,14 @@ function AllReports({ reports, users, supervisorReports, setReports, setSupervis
                           fontWeight: '700',
                           textTransform: 'uppercase'
                         }}>
-                          NEW
+                          {t('allReports.new')}
                         </span>
                       )}
                     </td>
                     <td>
                       <div style={{ display: 'flex', gap: '6px' }}>
                         {r.attachments && r.attachments.length > 0 && (
-                          <button onClick={() => setViewingAttachments(r.attachments)} style={openBtnStyle}>📂 Open</button>
+                          <button onClick={() => setViewingAttachments(r.attachments)} style={openBtnStyle}>📂 {t('allReports.open')}</button>
                         )}
                         <button onClick={() => downloadOne(r, 'report')} style={downloadBtnStyle}>⬇️</button>
                         <button onClick={() => deleteReport(r.id, r)} style={deleteBtnStyle}>🗑️</button>
@@ -416,8 +441,8 @@ function AllReports({ reports, users, supervisorReports, setReports, setSupervis
       <div className="table-card" style={{marginTop: '24px'}}>
         <div className="table-header">
           <div>
-            <h3>👤 Supervisor Reports</h3>
-            <p>{filteredSupervisorReports.length} supervisor reports found</p>
+            <h3>👤 {t('allReports.supervisor_reports_title')}</h3>
+            <p>{t('allReports.supervisor_reports_found', { count: filteredSupervisorReports.length })}</p>
           </div>
           <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
             <button className="btn-export" onClick={() => exportCSV(filteredSupervisorReports, 'supervisor_reports_all')}>📥 CSV</button>
@@ -434,7 +459,7 @@ function AllReports({ reports, users, supervisorReports, setReports, setSupervis
                 fontSize: '12px'
               }}
             >
-              🗑️ Clear Data
+              🗑️ {t('allReports.clear_data')}
             </button>
           </div>
         </div>
@@ -443,16 +468,16 @@ function AllReports({ reports, users, supervisorReports, setReports, setSupervis
           <table>
             <thead>
               <tr>
-                <th>Submitted</th>
-                <th>Type</th>
-                <th>Submitted By</th>
-                <th>Officer / Self</th>
-                <th>Performance</th>
-                <th>Rating</th>
-                <th>Files</th>
-                <th>Status</th>
-                <th>New</th>
-                <th>Action</th>
+                <th>{t('allReports.submitted')}</th>
+                <th>{t('allReports.type')}</th>
+                <th>{t('allReports.submitted_by')}</th>
+                <th>{t('allReports.officer_self')}</th>
+                <th>{t('allReports.performance')}</th>
+                <th>{t('allReports.rating')}</th>
+                <th>{t('allReports.files')}</th>
+                <th>{t('common.status')}</th>
+                <th>{t('allReports.new')}</th>
+                <th>{t('common.actions')}</th>
               </tr>
             </thead>
             <tbody>
@@ -460,7 +485,7 @@ function AllReports({ reports, users, supervisorReports, setReports, setSupervis
                 <tr>
                   <td colSpan="11" className="empty-state">
                     <div className="empty-icon">👤</div>
-                    <div>No supervisor reports found</div>
+                    <div>{t('allReports.no_supervisor_reports')}</div>
                   </td>
                 </tr>
               )}
@@ -481,7 +506,7 @@ function AllReports({ reports, users, supervisorReports, setReports, setSupervis
                           fontSize: '11px',
                           fontWeight: '500'
                         }}>
-                          📋 Self Report
+                          📋 {t('allReports.self_report')}
                         </span>
                       ) : (
                         <span style={{
@@ -492,7 +517,7 @@ function AllReports({ reports, users, supervisorReports, setReports, setSupervis
                           fontSize: '11px',
                           fontWeight: '500'
                         }}>
-                          👤 Officer Report
+                          👤 {t('allReports.officer_report')}
                         </span>
                       )}
                     </td>
@@ -523,10 +548,10 @@ function AllReports({ reports, users, supervisorReports, setReports, setSupervis
                               r.overallStatus === 'average' || r.performance === 'average' ? '#92400e' :
                               '#991b1b'
                       }}>
-                        {r.overallStatus || r.performance}
+                        {t(`allReports.status.${r.overallStatus || r.performance}`)}
                       </span>
                     </td>
-                    <td>{isSelfReport ? 'N/A' : `${r.overallRating}/5 ⭐`}</td>
+                    <td>{isSelfReport ? t('allReports.na') : `${r.overallRating}/5 ⭐`}</td>
                     <td>
                       {r.attachments && r.attachments.length > 0 && (
                         <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', background: '#eff6ff', color: '#1e40af', padding: '2px 8px', borderRadius: '12px', fontSize: '11px', fontWeight: '500' }}>
@@ -543,7 +568,7 @@ function AllReports({ reports, users, supervisorReports, setReports, setSupervis
                         background: r.synced ? '#d1fae5' : '#fef3c7',
                         color: r.synced ? '#065f37' : '#92400e'
                       }}>
-                        {r.synced ? '✅ Synced' : '📡 Offline'}
+                        {r.synced ? `✅ ${t('allReports.synced')}` : `📡 ${t('header.offline')}`}
                       </span>
                     </td>
                     <td>
@@ -557,14 +582,14 @@ function AllReports({ reports, users, supervisorReports, setReports, setSupervis
                           fontWeight: '700',
                           textTransform: 'uppercase'
                         }}>
-                          NEW
+                          {t('allReports.new')}
                         </span>
                       )}
                     </td>
                     <td>
                       <div style={{ display: 'flex', gap: '6px' }}>
                         {r.attachments && r.attachments.length > 0 && (
-                          <button onClick={() => setViewingAttachments(r.attachments)} style={openBtnStyle}>📂 Open</button>
+                          <button onClick={() => setViewingAttachments(r.attachments)} style={openBtnStyle}>📂 {t('allReports.open')}</button>
                         )}
                         <button onClick={() => downloadOne(r, 'supervisor_report')} style={downloadBtnStyle}>⬇️</button>
                         <button onClick={() => deleteSupervisorReport(r.id)} style={deleteBtnStyle}>🗑️</button>
@@ -591,12 +616,12 @@ function AllReports({ reports, users, supervisorReports, setReports, setSupervis
             overflow: 'auto', boxShadow: '0 20px 60px rgba(0,0,0,0.3)'
           }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-              <h3 style={{ margin: 0, fontSize: '18px', fontWeight: '700' }}>📎 Attachments ({viewingAttachments.length})</h3>
+              <h3 style={{ margin: 0, fontSize: '18px', fontWeight: '700' }}>📎 {t('allReports.attachments_modal', { count: viewingAttachments.length })}</h3>
               <button onClick={() => setViewingAttachments(null)} style={{
                 background: '#fee2e2', color: '#991b1b', border: 'none',
                 padding: '6px 14px', borderRadius: '8px', cursor: 'pointer',
                 fontWeight: '600', fontSize: '13px'
-              }}>✕ Close</button>
+              }}>✕ {t('allReports.close')}</button>
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
               {viewingAttachments.map((att, i) => {
@@ -632,7 +657,7 @@ function AllReports({ reports, users, supervisorReports, setReports, setSupervis
                           background: '#dbeafe', color: '#1e40af', padding: '6px 14px',
                           borderRadius: '8px', textDecoration: 'none', fontWeight: '600',
                           fontSize: '12px'
-                        }}>⬇️ Download</a>
+                        }}>⬇️ {t('allReports.download')}</a>
                       )}
                     </div>
                   </div>

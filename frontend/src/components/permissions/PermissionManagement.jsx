@@ -1,6 +1,8 @@
 // components/permissions/PermissionManagement.js – FINAL: offline-safe creation + approval
 
 import React, { useState, useEffect } from 'react';
+import toast from 'react-hot-toast';
+import { useTranslation } from 'react-i18next';
 import { db } from '../../services/database';
 import { uid } from '../../utils/helpers';
 import { syncQueue, checkRealInternet } from '../../services/database';
@@ -23,6 +25,7 @@ function PermissionManagement({
   renderPermissions,
   renderPermissionRequestModal
 }) {
+  const { t } = useTranslation();
   const [showModal, setShowModal] = useState(false);
   const [selectedTab, setSelectedTab] = useState('requests');
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -89,7 +92,7 @@ function PermissionManagement({
     const checkNetwork = async () => {
       const online = await checkRealInternet();
       setIsOnline(online);
-      const count = syncQueue.count();
+      const count = syncQueue.countByTypes(['permission', 'permission_update']);
       setPendingCount(count);
       if (online && count > 0) {
         console.log(`🔄 Back online! Auto-syncing ${count} permission requests...`);
@@ -103,13 +106,13 @@ function PermissionManagement({
     const handleSyncComplete = async () => {
       console.log('🔄 Sync complete - refreshing permissions...');
       await refreshDataFromIndexedDB();
-      const count = syncQueue.count();
+      const count = syncQueue.countByTypes(['permission', 'permission_update']);
       setPendingCount(count);
       updateDisplayPermissions();
     };
 
     const handleQueueUpdate = () => {
-      const count = syncQueue.count();
+      const count = syncQueue.countByTypes(['permission', 'permission_update']);
       setPendingCount(count);
       updateDisplayPermissions();
     };
@@ -136,22 +139,22 @@ function PermissionManagement({
   const validatePermission = () => {
     const newErrors = {};
     if (!newPermission.permissionType) {
-      newErrors.permissionType = 'Permission type is required';
+      newErrors.permissionType = t('permission.error_permission_type_required');
     }
     if (!newPermission.startDate) {
-      newErrors.startDate = 'Start date is required';
+      newErrors.startDate = t('permission.error_start_date_required');
     }
     if (!newPermission.endDate) {
-      newErrors.endDate = 'End date is required';
+      newErrors.endDate = t('permission.error_end_date_required');
     } else if (newPermission.startDate && newPermission.endDate < newPermission.startDate) {
-      newErrors.endDate = 'End date must be after start date';
+      newErrors.endDate = t('permission.error_end_date_after_start');
     }
     if (newPermission.startDate && newPermission.endDate) {
       const start = new Date(newPermission.startDate);
       const end = new Date(newPermission.endDate);
       const diffDays = Math.ceil((end - start) / (1000 * 60 * 60 * 24));
       if (diffDays > 7) {
-        newErrors.endDate = 'Permission cannot exceed 7 days';
+        newErrors.endDate = t('permission.error_max_7_days');
       }
     }
     if (newPermission.startDate) {
@@ -159,16 +162,16 @@ function PermissionManagement({
       today.setHours(0, 0, 0, 0);
       const start = new Date(newPermission.startDate);
       if (start < today) {
-        newErrors.startDate = 'Start date cannot be in the past';
+        newErrors.startDate = t('permission.error_start_date_past');
       }
     }
     if (!newPermission.reason || newPermission.reason.trim().length < 3) {
-      newErrors.reason = 'Reason must be at least 3 characters';
+      newErrors.reason = t('permission.error_reason_min');
     } else if (newPermission.reason.trim().length > 200) {
-      newErrors.reason = 'Reason cannot exceed 200 characters';
+      newErrors.reason = t('permission.error_reason_max');
     }
     if (isManager && !newPermission.employeeId) {
-      newErrors.employeeId = 'Please select an employee';
+      newErrors.employeeId = t('permission.error_select_employee');
     }
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
@@ -221,34 +224,35 @@ function PermissionManagement({
             if (setPermissions) {
               setPermissions(prev => prev.map(p => p.id === permission.id ? { ...p, synced: true } : p));
             }
-            alert('✅ Permission request submitted successfully!');
+            toast(t('permission.toast_submit_success'));
           } else {
             throw new Error('Server error');
           }
         } catch (err) {
           console.warn('Server unreachable, queueing permission:', err.message);
           syncQueue.add({ type: 'permission', id: permission.id, data: permission });
-          setPendingCount(syncQueue.count());
-          alert('⚠️ Server unreachable. Request saved and will sync later.');
+          setPendingCount(syncQueue.countByTypes(['permission', 'permission_update']));
+          toast(t('permission.toast_server_unreachable'));
         }
       } else {
         console.warn('Offline, queueing permission...');
         syncQueue.add({ type: 'permission', id: permission.id, data: permission });
-        setPendingCount(syncQueue.count());
-        alert('📋 Permission request saved offline! Will sync when online.');
+        setPendingCount(syncQueue.countByTypes(['permission', 'permission_update']));
+        toast(t('permission.toast_saved_offline'));
       }
 
       if (addNotification) {
         addNotification(
           user.id,
-          '📋 Permission Request',
-          `Permission request for ${newPermission.permissionType} submitted`,
-          'info'
+          t('permission.notification_request_title'),
+          t('permission.notification_request_body', { type: newPermission.permissionType }),
+          'info',
+          '/permissions'
         );
       }
     } catch (error) {
       console.error('Error submitting permission:', error);
-      alert('❌ Error submitting permission request: ' + error.message);
+      toast(t('permission.toast_submit_error', { error: error.message }));
     } finally {
       setIsSubmitting(false);
       setShowModal(false);
@@ -262,33 +266,34 @@ function PermissionManagement({
     try {
       const permission = permissions.find(p => p.id === permissionId);
       if (!permission) {
-        alert('Permission request not found');
+        toast(t('permission.toast_not_found'));
         return;
       }
 
       if (isSupervisor) {
         if (permission.employeeId === user.employeeId) {
-          alert('❌ You cannot approve your own permission request.');
+          toast(t('permission.toast_cannot_approve_own'));
           return;
         }
         const teamIds = teamMembers.map(m => m.employeeId);
         if (!teamIds.includes(permission.employeeId)) {
-          alert('❌ You can only approve team members.');
+          toast(t('permission.toast_only_team'));
           return;
         }
       }
 
       if (isOfficer) {
-        alert('❌ You cannot approve permission requests.');
+        toast(t('permission.toast_officer_cannot_approve'));
         return;
       }
 
       if (!approve && (!rejectionReason || rejectionReason.trim().length < 3)) {
-        alert('⚠️ Please provide a reason for rejection (min 3 characters).');
+        toast(t('permission.toast_reject_reason_required'));
         return;
       }
 
       const status = approve ? 'approved' : 'rejected';
+      const statusLabel = approve ? t('permission.status.approved') : t('permission.status.rejected');
       const updatedPermission = {
         ...permission,
         status,
@@ -317,21 +322,21 @@ function PermissionManagement({
             if (setPermissions) {
               setPermissions(prev => prev.map(p => p.id === permissionId ? { ...p, synced: true } : p));
             }
-            alert(`✅ Permission ${approve ? 'approved' : 'rejected'}!`);
+            toast(t('permission.toast_status_change', { status: statusLabel }));
           } else {
             throw new Error('Server error');
           }
         } catch (err) {
           console.warn('Failed to sync approval, queueing:', err.message);
           syncQueue.add({ type: 'permission_update', id: permissionId, data: updatedPermission });
-          setPendingCount(syncQueue.count());
-          alert(`⚠️ Permission ${approve ? 'approved' : 'rejected'} locally, but not yet synced. Will sync when online.`);
+          setPendingCount(syncQueue.countByTypes(['permission', 'permission_update']));
+          toast(t('permission.toast_status_local_queued', { status: statusLabel }));
         }
       } else {
         console.warn('Offline, queueing permission approval...');
         syncQueue.add({ type: 'permission_update', id: permissionId, data: updatedPermission });
-        setPendingCount(syncQueue.count());
-        alert(`📋 Permission ${approve ? 'approved' : 'rejected'} locally! Will sync when online.`);
+        setPendingCount(syncQueue.countByTypes(['permission', 'permission_update']));
+        toast(t('permission.toast_status_offline', { status: statusLabel }));
       }
 
       if (addNotification) {
@@ -339,15 +344,16 @@ function PermissionManagement({
         if (officer) {
           addNotification(
             officer.id,
-            'Permission Request Update',
-            `Your permission request has been ${approve ? 'approved ✅' : 'rejected ❌'} by ${user.name}`,
-            approve ? 'success' : 'error'
+            t('permission.notification_update_title'),
+            t('permission.notification_update_body', { status: statusLabel, name: user.name }),
+            approve ? 'success' : 'error',
+            '/permissions'
           );
         }
       }
     } catch (error) {
       console.error('Error updating permission:', error);
-      alert('❌ Error updating permission: ' + error.message);
+      toast(t('permission.toast_update_error', { error: error.message }));
     }
   };
 
@@ -364,7 +370,7 @@ function PermissionManagement({
 
   const submitRejection = async () => {
     if (!rejectReason || rejectReason.trim().length < 3) {
-      alert('⚠️ A rejection reason is required (min 3 characters).');
+      toast(t('permission.toast_reject_reason_missing'));
       return;
     }
     const id = rejectModalId;
@@ -385,7 +391,7 @@ function PermissionManagement({
           width: '95%'
         }}>
           <div className="modal-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-            <h3 style={{ fontSize: '18px', fontWeight: '600', color: '#991b1b' }}>❌ Reject Permission Request</h3>
+            <h3 style={{ fontSize: '18px', fontWeight: '600', color: '#991b1b' }}>{t('permission.reject_modal_title')}</h3>
             <button
               className="modal-close"
               onClick={closeRejectModal}
@@ -410,12 +416,12 @@ function PermissionManagement({
 
           <div className="form-group" style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
             <label style={{ fontSize: '13px', fontWeight: '500', color: '#374151' }}>
-              Reason for Rejection *
+              {t('permission.reject_reason_label')} *
             </label>
             <textarea
               value={rejectReason}
               onChange={e => setRejectReason(e.target.value)}
-              placeholder="You must provide a reason for rejecting this request..."
+              placeholder={t('permission.reject_reason_placeholder')}
               rows="3"
               maxLength="200"
               autoFocus
@@ -430,7 +436,7 @@ function PermissionManagement({
               }}
             />
             <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', color: '#6b7280', marginTop: '4px' }}>
-              <span>Required</span>
+              <span>{t('permission.required')}</span>
               <span>{rejectReason.length}/200</span>
             </div>
           </div>
@@ -446,7 +452,7 @@ function PermissionManagement({
               fontSize: '14px',
               fontWeight: '500'
             }}>
-              ❌ Confirm Rejection
+              {t('permission.confirm_rejection')}
             </button>
             <button onClick={closeRejectModal} style={{
               background: '#e5e7eb',
@@ -458,7 +464,7 @@ function PermissionManagement({
               fontSize: '14px',
               fontWeight: '500'
             }}>
-              Cancel
+              {t('common.cancel')}
             </button>
           </div>
         </div>
@@ -491,8 +497,8 @@ function PermissionManagement({
         }}>
           <div className="modal-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
             <h3 style={{ fontSize: '20px', fontWeight: '600' }}>
-              Request Permission
-              {!isOnline && <span style={{ fontSize: '12px', color: '#f59e0b', marginLeft: '8px' }}>📡 Offline</span>}
+              {t('permission.request_permission')}
+              {!isOnline && <span style={{ fontSize: '12px', color: '#f59e0b', marginLeft: '8px' }}>📡 {t('header.offline')}</span>}
             </h3>
             <button className="modal-close" onClick={() => setShowModal(false)} style={{
               background: 'transparent',
@@ -511,9 +517,9 @@ function PermissionManagement({
               borderRadius: '8px',
               marginBottom: '16px'
             }}>
-              <strong>📡 Offline Mode:</strong> Your request will be saved and appear when online.
+              <strong>📡 {t('permission.offline_mode')}:</strong> {t('permission.offline_banner_saved')}
               {pendingCount > 0 && (
-                <span style={{ marginLeft: '8px' }}>({pendingCount} pending sync)</span>
+                <span style={{ marginLeft: '8px' }}>({t('permission.pending_sync', { count: pendingCount })})</span>
               )}
             </div>
           )}
@@ -521,7 +527,7 @@ function PermissionManagement({
           <form onSubmit={handleRequestPermission} className="modal-form" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
             {isManager && (
               <div className="form-group" style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                <label style={{ fontSize: '13px', fontWeight: '500', color: '#374151' }}>Employee *</label>
+                <label style={{ fontSize: '13px', fontWeight: '500', color: '#374151' }}>{t('permission.employee_label')} *</label>
                 <select
                   value={newPermission.employeeId}
                   onChange={e => setNewPermission({ ...newPermission, employeeId: e.target.value })}
@@ -535,21 +541,21 @@ function PermissionManagement({
                     background: 'white'
                   }}
                 >
-                  <option value="">Select Employee</option>
+                  <option value="">{t('permission.select_employee')}</option>
                   {users?.map(u => (
                     <option key={u.id} value={u.employeeId}>{u.name}</option>
                   ))}
                 </select>
                 {errors.employeeId && (
                   <div className="form-error" style={{ color: '#dc2626', fontSize: '12px', marginTop: '4px' }}>
-                    ⚠️ {errors.employeeId}
+                    {errors.employeeId}
                   </div>
                 )}
               </div>
             )}
             {(isSupervisor || isOfficer) && (
               <div className="form-group" style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                <label style={{ fontSize: '13px', fontWeight: '500', color: '#374151' }}>Employee</label>
+                <label style={{ fontSize: '13px', fontWeight: '500', color: '#374151' }}>{t('permission.employee')}</label>
                 <input
                   type="text"
                   value={user?.name || ''}
@@ -559,7 +565,7 @@ function PermissionManagement({
               </div>
             )}
             <div className="form-group" style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-              <label style={{ fontSize: '13px', fontWeight: '500', color: '#374151' }}>Permission Type *</label>
+              <label style={{ fontSize: '13px', fontWeight: '500', color: '#374151' }}>{t('permission.permission_type_label')} *</label>
               <select
                 value={newPermission.permissionType}
                 onChange={e => setNewPermission({ ...newPermission, permissionType: e.target.value })}
@@ -573,21 +579,21 @@ function PermissionManagement({
                   background: 'white'
                 }}
               >
-                <option value="">Select Type</option>
-                <option value="Work Permission">Work Permission</option>
-                <option value="Personal Permission">Personal Permission</option>
-                <option value="Medical Permission">Medical Permission</option>
-                <option value="Other">Other</option>
+                <option value="">{t('permission.select_type')}</option>
+                <option value="Work Permission">{t('permission.type_work')}</option>
+                <option value="Personal Permission">{t('permission.type_personal')}</option>
+                <option value="Medical Permission">{t('permission.type_medical')}</option>
+                <option value="Other">{t('permission.type_other')}</option>
               </select>
               {errors.permissionType && (
                 <div className="form-error" style={{ color: '#dc2626', fontSize: '12px', marginTop: '4px' }}>
-                  ⚠️ {errors.permissionType}
+                  {errors.permissionType}
                 </div>
               )}
             </div>
             <div className="form-row" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
               <div className="form-group" style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                <label style={{ fontSize: '13px', fontWeight: '500', color: '#374151' }}>Start Date *</label>
+                <label style={{ fontSize: '13px', fontWeight: '500', color: '#374151' }}>{t('permission.start_date_label')} *</label>
                 <input
                   type="date"
                   value={newPermission.startDate}
@@ -604,12 +610,12 @@ function PermissionManagement({
                 />
                 {errors.startDate && (
                   <div className="form-error" style={{ color: '#dc2626', fontSize: '12px', marginTop: '4px' }}>
-                    ⚠️ {errors.startDate}
+                    {errors.startDate}
                   </div>
                 )}
               </div>
               <div className="form-group" style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                <label style={{ fontSize: '13px', fontWeight: '500', color: '#374151' }}>End Date *</label>
+                <label style={{ fontSize: '13px', fontWeight: '500', color: '#374151' }}>{t('permission.end_date_label')} *</label>
                 <input
                   type="date"
                   value={newPermission.endDate}
@@ -626,17 +632,17 @@ function PermissionManagement({
                 />
                 {errors.endDate && (
                   <div className="form-error" style={{ color: '#dc2626', fontSize: '12px', marginTop: '4px' }}>
-                    ⚠️ {errors.endDate}
+                    {errors.endDate}
                   </div>
                 )}
               </div>
             </div>
             <div className="form-group" style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-              <label style={{ fontSize: '13px', fontWeight: '500', color: '#374151' }}>Reason *</label>
+              <label style={{ fontSize: '13px', fontWeight: '500', color: '#374151' }}>{t('permission.reason_label')} *</label>
               <textarea
                 value={newPermission.reason}
                 onChange={e => setNewPermission({ ...newPermission, reason: e.target.value })}
-                placeholder="Enter reason for permission (min 3 characters)"
+                placeholder={t('permission.reason_placeholder')}
                 rows="3"
                 required
                 maxLength="200"
@@ -651,7 +657,7 @@ function PermissionManagement({
                 }}
               />
               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', color: '#6b7280', marginTop: '4px' }}>
-                <span>{errors.reason && <span style={{ color: '#dc2626' }}>⚠️ {errors.reason}</span>}</span>
+                <span>{errors.reason && <span style={{ color: '#dc2626' }}>{errors.reason}</span>}</span>
                 <span>{newPermission.reason.length}/200</span>
               </div>
             </div>
@@ -662,8 +668,8 @@ function PermissionManagement({
               fontSize: '13px',
               color: !isOnline ? '#92400e' : '#1e40af'
             }}>
-              <strong>ℹ️ {isOnline ? 'Online' : 'Offline'}:</strong>
-              {isOnline ? ' Your request will be sent immediately.' : ' Your request will be saved and appear when online.'}
+              <strong>ℹ️ {isOnline ? t('header.online') : t('header.offline')}:</strong>
+              {isOnline ? t('permission.online_notice') : t('permission.offline_notice')}
             </div>
             <div className="modal-actions" style={{ display: 'flex', gap: '12px', marginTop: '8px' }}>
               <button type="submit" className="btn-submit" disabled={isSubmitting} style={{
@@ -679,7 +685,7 @@ function PermissionManagement({
                 visibility: 'visible',
                 display: 'inline-flex'
               }}>
-                {isSubmitting ? 'Submitting...' : isOnline ? 'Submit Request' : '💾 Save Offline'}
+                {isSubmitting ? t('permission.submitting') : isOnline ? t('permission.submit_request') : t('permission.save_offline')}
               </button>
               <button type="button" className="btn-cancel" onClick={() => {
                 setShowModal(false);
@@ -697,7 +703,7 @@ function PermissionManagement({
                 visibility: 'visible',
                 display: 'inline-flex'
               }}>
-                Cancel
+                {t('common.cancel')}
               </button>
             </div>
           </form>
@@ -726,8 +732,8 @@ function PermissionManagement({
             alignItems: 'center',
             flexWrap: 'wrap'
           }}>
-            <span>📡 Offline: {pendingCount} request(s) saved. Will appear when online.</span>
-            <span style={{ fontSize: '12px', color: '#92400e' }}>⏳ Waiting for connection...</span>
+            <span>📡 {t('permission.offline_banner', { count: pendingCount })}</span>
+            <span style={{ fontSize: '12px', color: '#92400e' }}>⏳ {t('permission.waiting_connection')}</span>
           </div>
         )}
 
@@ -743,8 +749,8 @@ function PermissionManagement({
             alignItems: 'center',
             flexWrap: 'wrap'
           }}>
-            <span>🔄 Syncing: {pendingCount} request(s) being synced...</span>
-            <span style={{ fontSize: '12px', color: '#1e40af' }}>⏳ Please wait...</span>
+            <span>🔄 {t('permission.syncing_banner', { count: pendingCount })}</span>
+            <span style={{ fontSize: '12px', color: '#1e40af' }}>⏳ {t('permission.please_wait')}</span>
           </div>
         )}
 
@@ -763,9 +769,9 @@ function PermissionManagement({
           gap: '16px'
         }}>
           <div>
-            <h2 style={{ fontSize: '24px', fontWeight: '700', margin: '0 0 6px 0' }}>📋 Permission Management</h2>
+            <h2 style={{ fontSize: '24px', fontWeight: '700', margin: '0 0 6px 0' }}>{t('permission.title')}</h2>
             <p style={{ fontSize: '14px', opacity: 0.85, margin: 0, maxWidth: '540px' }}>
-              Your permissions + Team permissions (approve team members)
+              {t('permission.subtitle_supervisor')}
             </p>
           </div>
           <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'center' }}>
@@ -777,7 +783,7 @@ function PermissionManagement({
               fontSize: '13px',
               fontWeight: '600'
             }}>
-              ⏳ {pendingPermissions.length} Pending
+              ⏳ {pendingPermissions.length} {t('permission.pending_count')}
             </span>
             <button
               onClick={() => setShowModal(true)}
@@ -795,7 +801,7 @@ function PermissionManagement({
                 gap: '6px'
               }}
             >
-              📋 Request Permission
+              📋 {t('permission.request_permission')}
             </button>
           </div>
         </div>
@@ -811,23 +817,23 @@ function PermissionManagement({
             gap: '16px',
             flexWrap: 'wrap'
           }}>
-            <span>👤 <strong>Your pending:</strong> {ownPendingPermissions.length}</span>
-            <span>👥 <strong>Team pending:</strong> {teamPendingPermissions.length}</span>
-            <span style={{ color: '#0369a1', fontSize: '13px' }}>ℹ️ You can approve team members&#39; permissions, but not your own</span>
+            <span>👤 <strong>{t('permission.your_pending')}:</strong> {ownPendingPermissions.length}</span>
+            <span>👥 <strong>{t('permission.team_pending')}:</strong> {teamPendingPermissions.length}</span>
+            <span style={{ color: '#0369a1', fontSize: '13px' }}>ℹ️ {t('permission.team_approval_note')}</span>
           </div>
 
           <div style={{ display: 'flex', gap: '10px', marginBottom: '16px', borderBottom: '1px solid #e5e7eb', paddingBottom: '10px', flexWrap: 'wrap' }}>
-            <button onClick={() => setSelectedTab('requests')} style={{ padding: '8px 16px', border: 'none', background: selectedTab === 'requests' ? '#1e3a5f' : '#f3f4f6', color: selectedTab === 'requests' ? 'white' : '#374151', borderRadius: '6px', cursor: 'pointer', fontWeight: selectedTab === 'requests' ? '600' : '400', opacity: 1, visibility: 'visible', display: 'inline-flex' }}>All ({displayPermissions.length})</button>
-            <button onClick={() => setSelectedTab('pending')} style={{ padding: '8px 16px', border: 'none', background: selectedTab === 'pending' ? '#d97706' : '#f3f4f6', color: selectedTab === 'pending' ? 'white' : '#374151', borderRadius: '6px', cursor: 'pointer', fontWeight: selectedTab === 'pending' ? '600' : '400', opacity: 1, visibility: 'visible', display: 'inline-flex' }}>⏳ Pending ({pendingPermissions.length})</button>
-            <button onClick={() => setSelectedTab('approved')} style={{ padding: '8px 16px', border: 'none', background: selectedTab === 'approved' ? '#0b7e4b' : '#f3f4f6', color: selectedTab === 'approved' ? 'white' : '#374151', borderRadius: '6px', cursor: 'pointer', fontWeight: selectedTab === 'approved' ? '600' : '400', opacity: 1, visibility: 'visible', display: 'inline-flex' }}>✅ Approved ({approvedPermissions.length})</button>
-            <button onClick={() => setSelectedTab('rejected')} style={{ padding: '8px 16px', border: 'none', background: selectedTab === 'rejected' ? '#dc2626' : '#f3f4f6', color: selectedTab === 'rejected' ? 'white' : '#374151', borderRadius: '6px', cursor: 'pointer', fontWeight: selectedTab === 'rejected' ? '600' : '400', opacity: 1, visibility: 'visible', display: 'inline-flex' }}>❌ Rejected ({rejectedPermissions.length})</button>
+            <button onClick={() => setSelectedTab('requests')} style={{ padding: '8px 16px', border: 'none', background: selectedTab === 'requests' ? '#1e3a5f' : '#f3f4f6', color: selectedTab === 'requests' ? 'white' : '#374151', borderRadius: '6px', cursor: 'pointer', fontWeight: selectedTab === 'requests' ? '600' : '400', opacity: 1, visibility: 'visible', display: 'inline-flex' }}>{t('permission.tab_all')} ({displayPermissions.length})</button>
+            <button onClick={() => setSelectedTab('pending')} style={{ padding: '8px 16px', border: 'none', background: selectedTab === 'pending' ? '#d97706' : '#f3f4f6', color: selectedTab === 'pending' ? 'white' : '#374151', borderRadius: '6px', cursor: 'pointer', fontWeight: selectedTab === 'pending' ? '600' : '400', opacity: 1, visibility: 'visible', display: 'inline-flex' }}>⏳ {t('permission.tab_pending')} ({pendingPermissions.length})</button>
+            <button onClick={() => setSelectedTab('approved')} style={{ padding: '8px 16px', border: 'none', background: selectedTab === 'approved' ? '#0b7e4b' : '#f3f4f6', color: selectedTab === 'approved' ? 'white' : '#374151', borderRadius: '6px', cursor: 'pointer', fontWeight: selectedTab === 'approved' ? '600' : '400', opacity: 1, visibility: 'visible', display: 'inline-flex' }}>✅ {t('permission.tab_approved')} ({approvedPermissions.length})</button>
+            <button onClick={() => setSelectedTab('rejected')} style={{ padding: '8px 16px', border: 'none', background: selectedTab === 'rejected' ? '#dc2626' : '#f3f4f6', color: selectedTab === 'rejected' ? 'white' : '#374151', borderRadius: '6px', cursor: 'pointer', fontWeight: selectedTab === 'rejected' ? '600' : '400', opacity: 1, visibility: 'visible', display: 'inline-flex' }}>❌ {t('permission.tab_rejected')} ({rejectedPermissions.length})</button>
           </div>
 
           <div className="table-wrapper">
             <table>
-              <thead><tr><th>Employee</th><th>Permission Type</th><th>Start</th><th>End</th><th>Reason</th><th>Status</th><th>Action</th></tr></thead>
+              <thead><tr><th>{t('permission.employee')}</th><th>{t('permission.permission_type')}</th><th>{t('permission.start')}</th><th>{t('permission.end')}</th><th>{t('permission.reason')}</th><th>{t('common.status')}</th><th>{t('permission.action')}</th></tr></thead>
               <tbody>
-                {getDisplayPermissions().length === 0 && (<tr><td colSpan="7" className="empty-state"><div className="empty-icon">📋</div><div>No permission requests found</div></td></tr>)}
+                {getDisplayPermissions().length === 0 && (<tr><td colSpan="7" className="empty-state"><div className="empty-icon">📋</div><div>{t('permission.no_requests')}</div></td></tr>)}
                 {getDisplayPermissions().map(p => {
                   const isOwnPermission = p.employeeId === user.employeeId;
                   const isTeamMember = teamIds.includes(p.employeeId);
@@ -840,7 +846,7 @@ function PermissionManagement({
                         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                           <UserAvatar photo={getSenderUser(p)?.profilePhoto} name={p.employeeName} size={32} />
                           <div>
-                            <strong>{p.employeeName}</strong>{isOwnPermission && <span style={{ fontSize: '11px', color: '#6b7f94', marginLeft: '6px' }}>(You)</span>}{isTeamMember && !isOwnPermission && <span style={{ fontSize: '11px', color: '#0369a1', marginLeft: '6px' }}>(Team)</span>}
+                            <strong>{p.employeeName}</strong>{isOwnPermission && <span style={{ fontSize: '11px', color: '#6b7f94', marginLeft: '6px' }}>({t('permission.you_badge')})</span>}{isTeamMember && !isOwnPermission && <span style={{ fontSize: '11px', color: '#0369a1', marginLeft: '6px' }}>({t('permission.team_badge')})</span>}
                           </div>
                         </div>
                       </td>
@@ -854,7 +860,7 @@ function PermissionManagement({
                       </td>
                       <td>
                         <span style={{ padding: '4px 12px', borderRadius: '20px', fontSize: '12px', fontWeight: '500', background: p.status === 'pending' ? '#fef3c7' : p.status === 'approved' ? '#d1fae5' : '#fee2e2', color: p.status === 'pending' ? '#92400e' : p.status === 'approved' ? '#065f37' : '#991b1b' }}>
-                          {p.status}
+                          {t(`permission.status.${p.status}`, { defaultValue: p.status })}
                         </span>
                       </td>
                       <td>
@@ -877,7 +883,7 @@ function PermissionManagement({
                                   display: 'inline-flex'
                                 }}
                               >
-                                ✅ Approve
+                                {t('common.approve')}
                               </button>
                               <button
                                 onClick={() => openRejectModal(p.id)}
@@ -894,11 +900,11 @@ function PermissionManagement({
                                   display: 'inline-flex'
                                 }}
                               >
-                                ❌ Reject
+                                {t('common.reject')}
                               </button>
                             </>
                           ) : isOwnPermission ? (
-                            <span style={{ fontSize: '12px', color: '#6b7f94' }}>⏳ Wait for Manager</span>
+                            <span style={{ fontSize: '12px', color: '#6b7f94' }}>⏳ {t('permission.wait_for_manager')}</span>
                           ) : (
                             <span style={{ fontSize: '12px', color: '#6b7f94' }}>—</span>
                           )
@@ -935,8 +941,8 @@ function PermissionManagement({
             alignItems: 'center',
             flexWrap: 'wrap'
           }}>
-            <span>📡 Offline: {pendingCount} request(s) saved. Will appear when online.</span>
-            <span style={{ fontSize: '12px', color: '#92400e' }}>⏳ Waiting for connection...</span>
+            <span>📡 {t('permission.offline_banner', { count: pendingCount })}</span>
+            <span style={{ fontSize: '12px', color: '#92400e' }}>⏳ {t('permission.waiting_connection')}</span>
           </div>
         )}
 
@@ -952,8 +958,8 @@ function PermissionManagement({
             alignItems: 'center',
             flexWrap: 'wrap'
           }}>
-            <span>🔄 Syncing: {pendingCount} request(s) being synced...</span>
-            <span style={{ fontSize: '12px', color: '#1e40af' }}>⏳ Please wait...</span>
+            <span>🔄 {t('permission.syncing_banner', { count: pendingCount })}</span>
+            <span style={{ fontSize: '12px', color: '#1e40af' }}>⏳ {t('permission.please_wait')}</span>
           </div>
         )}
 
@@ -972,9 +978,9 @@ function PermissionManagement({
           gap: '16px'
         }}>
           <div>
-            <h2 style={{ fontSize: '24px', fontWeight: '700', margin: '0 0 6px 0' }}>📋 My Permission Requests</h2>
+            <h2 style={{ fontSize: '24px', fontWeight: '700', margin: '0 0 6px 0' }}>{t('permission.title_my_requests')}</h2>
             <p style={{ fontSize: '14px', opacity: 0.85, margin: 0, maxWidth: '540px' }}>
-              View and manage your own permission requests
+              {t('permission.subtitle_officer')}
             </p>
           </div>
           <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'center' }}>
@@ -986,7 +992,7 @@ function PermissionManagement({
               fontSize: '13px',
               fontWeight: '600'
             }}>
-              ⏳ {pendingPermissions.length} Pending
+              ⏳ {pendingPermissions.length} {t('permission.pending_count')}
             </span>
             <button
               onClick={() => setShowModal(true)}
@@ -1004,7 +1010,7 @@ function PermissionManagement({
                 gap: '6px'
               }}
             >
-              📋 Request Permission
+              📋 {t('permission.request_permission')}
             </button>
           </div>
         </div>
@@ -1012,17 +1018,17 @@ function PermissionManagement({
         <div className="form-card">
 
           <div style={{ display: 'flex', gap: '10px', marginBottom: '16px', borderBottom: '1px solid #e5e7eb', paddingBottom: '10px', flexWrap: 'wrap' }}>
-            <button onClick={() => setSelectedTab('requests')} style={{ padding: '8px 16px', border: 'none', background: selectedTab === 'requests' ? '#1e3a5f' : '#f3f4f6', color: selectedTab === 'requests' ? 'white' : '#374151', borderRadius: '6px', cursor: 'pointer', fontWeight: selectedTab === 'requests' ? '600' : '400', opacity: 1, visibility: 'visible', display: 'inline-flex' }}>All ({displayPermissions.length})</button>
-            <button onClick={() => setSelectedTab('pending')} style={{ padding: '8px 16px', border: 'none', background: selectedTab === 'pending' ? '#d97706' : '#f3f4f6', color: selectedTab === 'pending' ? 'white' : '#374151', borderRadius: '6px', cursor: 'pointer', fontWeight: selectedTab === 'pending' ? '600' : '400', opacity: 1, visibility: 'visible', display: 'inline-flex' }}>⏳ Pending ({pendingPermissions.length})</button>
-            <button onClick={() => setSelectedTab('approved')} style={{ padding: '8px 16px', border: 'none', background: selectedTab === 'approved' ? '#0b7e4b' : '#f3f4f6', color: selectedTab === 'approved' ? 'white' : '#374151', borderRadius: '6px', cursor: 'pointer', fontWeight: selectedTab === 'approved' ? '600' : '400', opacity: 1, visibility: 'visible', display: 'inline-flex' }}>✅ Approved ({approvedPermissions.length})</button>
-            <button onClick={() => setSelectedTab('rejected')} style={{ padding: '8px 16px', border: 'none', background: selectedTab === 'rejected' ? '#dc2626' : '#f3f4f6', color: selectedTab === 'rejected' ? 'white' : '#374151', borderRadius: '6px', cursor: 'pointer', fontWeight: selectedTab === 'rejected' ? '600' : '400', opacity: 1, visibility: 'visible', display: 'inline-flex' }}>❌ Rejected ({rejectedPermissions.length})</button>
+            <button onClick={() => setSelectedTab('requests')} style={{ padding: '8px 16px', border: 'none', background: selectedTab === 'requests' ? '#1e3a5f' : '#f3f4f6', color: selectedTab === 'requests' ? 'white' : '#374151', borderRadius: '6px', cursor: 'pointer', fontWeight: selectedTab === 'requests' ? '600' : '400', opacity: 1, visibility: 'visible', display: 'inline-flex' }}>{t('permission.tab_all')} ({displayPermissions.length})</button>
+            <button onClick={() => setSelectedTab('pending')} style={{ padding: '8px 16px', border: 'none', background: selectedTab === 'pending' ? '#d97706' : '#f3f4f6', color: selectedTab === 'pending' ? 'white' : '#374151', borderRadius: '6px', cursor: 'pointer', fontWeight: selectedTab === 'pending' ? '600' : '400', opacity: 1, visibility: 'visible', display: 'inline-flex' }}>⏳ {t('permission.tab_pending')} ({pendingPermissions.length})</button>
+            <button onClick={() => setSelectedTab('approved')} style={{ padding: '8px 16px', border: 'none', background: selectedTab === 'approved' ? '#0b7e4b' : '#f3f4f6', color: selectedTab === 'approved' ? 'white' : '#374151', borderRadius: '6px', cursor: 'pointer', fontWeight: selectedTab === 'approved' ? '600' : '400', opacity: 1, visibility: 'visible', display: 'inline-flex' }}>✅ {t('permission.tab_approved')} ({approvedPermissions.length})</button>
+            <button onClick={() => setSelectedTab('rejected')} style={{ padding: '8px 16px', border: 'none', background: selectedTab === 'rejected' ? '#dc2626' : '#f3f4f6', color: selectedTab === 'rejected' ? 'white' : '#374151', borderRadius: '6px', cursor: 'pointer', fontWeight: selectedTab === 'rejected' ? '600' : '400', opacity: 1, visibility: 'visible', display: 'inline-flex' }}>❌ {t('permission.tab_rejected')} ({rejectedPermissions.length})</button>
           </div>
 
           <div className="table-wrapper">
             <table>
-              <thead><tr><th>Employee</th><th>Permission Type</th><th>Start</th><th>End</th><th>Reason</th><th>Status</th></tr></thead>
+              <thead><tr><th>{t('permission.employee')}</th><th>{t('permission.permission_type')}</th><th>{t('permission.start')}</th><th>{t('permission.end')}</th><th>{t('permission.reason')}</th><th>{t('common.status')}</th></tr></thead>
               <tbody>
-                {getDisplayPermissions().length === 0 && (<tr><td colSpan="6" className="empty-state"><div className="empty-icon">📋</div><div>No permission requests found</div></td></tr>)}
+                {getDisplayPermissions().length === 0 && (<tr><td colSpan="6" className="empty-state"><div className="empty-icon">📋</div><div>{t('permission.no_requests')}</div></td></tr>)}
                 {getDisplayPermissions().map(p => (
                   <tr key={p.id}>
                     <td>
@@ -1041,7 +1047,7 @@ function PermissionManagement({
                     </td>
                     <td>
                       <span style={{ padding: '4px 12px', borderRadius: '20px', fontSize: '12px', fontWeight: '500', background: p.status === 'pending' ? '#fef3c7' : p.status === 'approved' ? '#d1fae5' : '#fee2e2', color: p.status === 'pending' ? '#92400e' : p.status === 'approved' ? '#065f37' : '#991b1b' }}>
-                        {p.status}
+                        {t(`permission.status.${p.status}`, { defaultValue: p.status })}
                       </span>
                     </td>
                   </tr>
@@ -1071,8 +1077,8 @@ function PermissionManagement({
             alignItems: 'center',
             flexWrap: 'wrap'
           }}>
-            <span>📡 Offline: {pendingCount} request(s) saved. Will appear when online.</span>
-            <span style={{ fontSize: '12px', color: '#92400e' }}>⏳ Waiting for connection...</span>
+            <span>📡 {t('permission.offline_banner', { count: pendingCount })}</span>
+            <span style={{ fontSize: '12px', color: '#92400e' }}>⏳ {t('permission.waiting_connection')}</span>
           </div>
         )}
 
@@ -1088,8 +1094,8 @@ function PermissionManagement({
             alignItems: 'center',
             flexWrap: 'wrap'
           }}>
-            <span>🔄 Syncing: {pendingCount} request(s) being synced...</span>
-            <span style={{ fontSize: '12px', color: '#1e40af' }}>⏳ Please wait...</span>
+            <span>🔄 {t('permission.syncing_banner', { count: pendingCount })}</span>
+            <span style={{ fontSize: '12px', color: '#1e40af' }}>⏳ {t('permission.please_wait')}</span>
           </div>
         )}
 
@@ -1108,9 +1114,9 @@ function PermissionManagement({
           gap: '16px'
         }}>
           <div>
-            <h2 style={{ fontSize: '24px', fontWeight: '700', margin: '0 0 6px 0' }}>📋 Permission Management</h2>
+            <h2 style={{ fontSize: '24px', fontWeight: '700', margin: '0 0 6px 0' }}>{t('permission.title')}</h2>
             <p style={{ fontSize: '14px', opacity: 0.85, margin: 0, maxWidth: '540px' }}>
-              Supervisor permission requests (approve / reject with reason)
+              {t('permission.subtitle_manager')}
             </p>
           </div>
           <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'center' }}>
@@ -1122,7 +1128,7 @@ function PermissionManagement({
               fontSize: '13px',
               fontWeight: '600'
             }}>
-              ⏳ {pendingPermissions.length} Pending
+              ⏳ {pendingPermissions.length} {t('permission.pending_count')}
             </span>
           </div>
         </div>
@@ -1130,17 +1136,17 @@ function PermissionManagement({
         <div className="form-card">
 
           <div style={{ display: 'flex', gap: '10px', marginBottom: '16px', borderBottom: '1px solid #e5e7eb', paddingBottom: '10px', flexWrap: 'wrap' }}>
-            <button onClick={() => setSelectedTab('requests')} style={{ padding: '8px 16px', border: 'none', background: selectedTab === 'requests' ? '#1e3a5f' : '#f3f4f6', color: selectedTab === 'requests' ? 'white' : '#374151', borderRadius: '6px', cursor: 'pointer', fontWeight: selectedTab === 'requests' ? '600' : '400', opacity: 1, visibility: 'visible', display: 'inline-flex' }}>All ({displayPermissions.length})</button>
-            <button onClick={() => setSelectedTab('pending')} style={{ padding: '8px 16px', border: 'none', background: selectedTab === 'pending' ? '#d97706' : '#f3f4f6', color: selectedTab === 'pending' ? 'white' : '#374151', borderRadius: '6px', cursor: 'pointer', fontWeight: selectedTab === 'pending' ? '600' : '400', opacity: 1, visibility: 'visible', display: 'inline-flex' }}>⏳ Pending ({pendingPermissions.length})</button>
-            <button onClick={() => setSelectedTab('approved')} style={{ padding: '8px 16px', border: 'none', background: selectedTab === 'approved' ? '#0b7e4b' : '#f3f4f6', color: selectedTab === 'approved' ? 'white' : '#374151', borderRadius: '6px', cursor: 'pointer', fontWeight: selectedTab === 'approved' ? '600' : '400', opacity: 1, visibility: 'visible', display: 'inline-flex' }}>✅ Approved ({approvedPermissions.length})</button>
-            <button onClick={() => setSelectedTab('rejected')} style={{ padding: '8px 16px', border: 'none', background: selectedTab === 'rejected' ? '#dc2626' : '#f3f4f6', color: selectedTab === 'rejected' ? 'white' : '#374151', borderRadius: '6px', cursor: 'pointer', fontWeight: selectedTab === 'rejected' ? '600' : '400', opacity: 1, visibility: 'visible', display: 'inline-flex' }}>❌ Rejected ({rejectedPermissions.length})</button>
+            <button onClick={() => setSelectedTab('requests')} style={{ padding: '8px 16px', border: 'none', background: selectedTab === 'requests' ? '#1e3a5f' : '#f3f4f6', color: selectedTab === 'requests' ? 'white' : '#374151', borderRadius: '6px', cursor: 'pointer', fontWeight: selectedTab === 'requests' ? '600' : '400', opacity: 1, visibility: 'visible', display: 'inline-flex' }}>{t('permission.tab_all')} ({displayPermissions.length})</button>
+            <button onClick={() => setSelectedTab('pending')} style={{ padding: '8px 16px', border: 'none', background: selectedTab === 'pending' ? '#d97706' : '#f3f4f6', color: selectedTab === 'pending' ? 'white' : '#374151', borderRadius: '6px', cursor: 'pointer', fontWeight: selectedTab === 'pending' ? '600' : '400', opacity: 1, visibility: 'visible', display: 'inline-flex' }}>⏳ {t('permission.tab_pending')} ({pendingPermissions.length})</button>
+            <button onClick={() => setSelectedTab('approved')} style={{ padding: '8px 16px', border: 'none', background: selectedTab === 'approved' ? '#0b7e4b' : '#f3f4f6', color: selectedTab === 'approved' ? 'white' : '#374151', borderRadius: '6px', cursor: 'pointer', fontWeight: selectedTab === 'approved' ? '600' : '400', opacity: 1, visibility: 'visible', display: 'inline-flex' }}>✅ {t('permission.tab_approved')} ({approvedPermissions.length})</button>
+            <button onClick={() => setSelectedTab('rejected')} style={{ padding: '8px 16px', border: 'none', background: selectedTab === 'rejected' ? '#dc2626' : '#f3f4f6', color: selectedTab === 'rejected' ? 'white' : '#374151', borderRadius: '6px', cursor: 'pointer', fontWeight: selectedTab === 'rejected' ? '600' : '400', opacity: 1, visibility: 'visible', display: 'inline-flex' }}>❌ {t('permission.tab_rejected')} ({rejectedPermissions.length})</button>
           </div>
 
           <div className="table-wrapper">
             <table>
-              <thead><tr><th>Employee</th><th>Permission Type</th><th>Start</th><th>End</th><th>Reason</th><th>Status</th><th>Action</th></tr></thead>
+              <thead><tr><th>{t('permission.employee')}</th><th>{t('permission.permission_type')}</th><th>{t('permission.start')}</th><th>{t('permission.end')}</th><th>{t('permission.reason')}</th><th>{t('common.status')}</th><th>{t('permission.action')}</th></tr></thead>
               <tbody>
-                {getDisplayPermissions().length === 0 && (<tr><td colSpan="7" className="empty-state"><div className="empty-icon">📋</div><div>No permission requests found</div></td></tr>)}
+                {getDisplayPermissions().length === 0 && (<tr><td colSpan="7" className="empty-state"><div className="empty-icon">📋</div><div>{t('permission.no_requests')}</div></td></tr>)}
                 {getDisplayPermissions().map(p => (
                   <tr key={p.id}>
                     <td>
@@ -1159,7 +1165,7 @@ function PermissionManagement({
                     </td>
                     <td>
                       <span style={{ padding: '4px 12px', borderRadius: '20px', fontSize: '12px', fontWeight: '500', background: p.status === 'pending' ? '#fef3c7' : p.status === 'approved' ? '#d1fae5' : '#fee2e2', color: p.status === 'pending' ? '#92400e' : p.status === 'approved' ? '#065f37' : '#991b1b' }}>
-                        {p.status}
+                        {t(`permission.status.${p.status}`, { defaultValue: p.status })}
                       </span>
                     </td>
                     <td>
@@ -1181,7 +1187,7 @@ function PermissionManagement({
                               display: 'inline-flex'
                             }}
                           >
-                            ✅ Approve
+                            {t('common.approve')}
                           </button>
                           <button
                             onClick={() => openRejectModal(p.id)}
@@ -1198,7 +1204,7 @@ function PermissionManagement({
                               display: 'inline-flex'
                             }}
                           >
-                            ❌ Reject
+                            {t('common.reject')}
                           </button>
                         </>
                       )}
@@ -1218,7 +1224,7 @@ function PermissionManagement({
   if (isSupervisor) return renderSupervisorView();
   if (isOfficer) return renderOfficerView();
   if (isManager) return renderManagerView();
-  return <div className="permissions-view"><div className="form-card"><p>Loading...</p></div></div>;
+  return <div className="permissions-view"><div className="form-card"><p>{t('common.loading')}</p></div></div>;
 }
 
 export default PermissionManagement;

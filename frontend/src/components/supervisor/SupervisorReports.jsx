@@ -1,8 +1,10 @@
 // components/supervisor/SupervisorReports.js – FULLY FIXED (auto-display newest reports, refresh works)
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import toast from 'react-hot-toast';
 import { getToday, uid, getServerBase } from '../../utils/helpers';
 import { db, syncQueue, checkRealInternet, pullSupervisorReportsFromServer, getApiBase } from '../../services/database';
+import { useTranslation } from 'react-i18next';
 import UserAvatar from '../common/UserAvatar';
 
 function SupervisorReports({ 
@@ -12,6 +14,7 @@ function SupervisorReports({
   teamMembers,
   setSupervisorReports   // passed from parent to update global state
 }) {
+  const { t } = useTranslation();
   const [showOfficerReport, setShowOfficerReport] = useState(false);
   const [showSelfReport, setShowSelfReport] = useState(false);
   const [isOnline, setIsOnline] = useState(navigator.onLine);
@@ -60,14 +63,14 @@ function SupervisorReports({
     const checkNetwork = async () => {
       const online = await checkRealInternet();
       setIsOnline(online);
-      setPendingCount(syncQueue.count());
+      setPendingCount(syncQueue.countByTypes(['supervisor_report']));
     };
 
     checkNetwork();
     const interval = setInterval(checkNetwork, 5000);
 
     const handleQueueUpdate = () => {
-      setPendingCount(syncQueue.count());
+      setPendingCount(syncQueue.countByTypes(['supervisor_report']));
     };
 
     window.addEventListener('sync-queue-updated', handleQueueUpdate);
@@ -173,17 +176,17 @@ function SupervisorReports({
     if (!files.length) return;
     const remaining = MAX_FILES - currentCount;
     if (remaining <= 0) {
-      alert(`Maximum ${MAX_FILES} files allowed.`);
+      toast(`Maximum ${MAX_FILES} files allowed.`);
       return;
     }
     const validFiles = [];
     for (const file of files.slice(0, remaining)) {
       if (!ALLOWED_TYPES.includes(file.type)) {
-        alert(`"${file.name}" is not an allowed file type.`);
+        toast(`"${file.name}" is not an allowed file type.`);
         continue;
       }
       if (file.size > MAX_FILE_SIZE) {
-        alert(`"${file.name}" exceeds the 10 MB size limit.`);
+        toast(`"${file.name}" exceeds the 10 MB size limit.`);
         continue;
       }
       const base64 = await fileToBase64(file);
@@ -206,7 +209,7 @@ function SupervisorReports({
 
   const renderAttachmentUpload = (attachments, setAttachments, inputId) => (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-      <label style={{ fontSize: '13px', fontWeight: '500', color: '#374151' }}>📎 Attachments (Images &amp; Files)</label>
+      <label style={{ fontSize: '13px', fontWeight: '500', color: '#374151' }}>{t('supervisor.attachments_label')}</label>
       <div
         style={{
           border: '2px dashed #d1d5db', borderRadius: '8px', padding: '16px',
@@ -221,12 +224,12 @@ function SupervisorReports({
           handleFileSelect({ target: { files: e.dataTransfer.files } }, setAttachments, attachments.length);
         }}
       >
-        <div style={{ fontSize: '24px', marginBottom: '4px' }}>📤</div>
+        <div style={{ fontSize: '24px', marginBottom: '4px' }}>📎</div>
         <p style={{ margin: '0 0 2px', fontSize: '13px', color: '#374151', fontWeight: '500' }}>
-          Click or drag to upload
+          {t('supervisor.upload_hint')}
         </p>
         <p style={{ margin: 0, fontSize: '11px', color: '#6b7280' }}>
-          Images, PDF, Word, Excel, TXT — Max 10 MB, up to 5 files
+          {t('supervisor.upload_limits')}
         </p>
         <input
           id={inputId}
@@ -271,7 +274,7 @@ function SupervisorReports({
 
   // ===== HELPER: Format date/time =====
   const formatDateTime = (dateStr) => {
-    if (!dateStr) return 'N/A';
+    if (!dateStr) return t('supervisor.na');
     const date = new Date(dateStr);
     return date.toLocaleString('en-US', {
       month: 'short',
@@ -287,7 +290,7 @@ function SupervisorReports({
     e.preventDefault();
     const officer = users.find(u => u.id === form.officerId);
     if (!officer) { 
-      alert('Please select an officer'); 
+      toast('Please select an officer'); 
       return; 
     }
 
@@ -358,22 +361,22 @@ function SupervisorReports({
             if (setSupervisorReports) {
               setSupervisorReports(prev => prev.map(r => r.id === report.id ? { ...r, synced: true } : r));
             }
-            alert('✅ Supervisor report submitted successfully!');
+            toast('✅ Supervisor report submitted successfully!');
           } else {
             throw new Error('Server error');
           }
         } catch (err) {
           console.warn('Server unreachable, queueing report:', err.message);
           syncQueue.add({ type: 'supervisor_report', id: report.id, data: report });
-          setPendingCount(syncQueue.count());
-          alert('⚠️ Server unreachable. Report saved and will sync later.');
+          setPendingCount(syncQueue.countByTypes(['supervisor_report']));
+          toast('⚠️ Server unreachable. Report saved and will sync later.');
         }
       } else {
         // Offline – queue immediately
         console.warn('Offline, queueing report...');
         syncQueue.add({ type: 'supervisor_report', id: report.id, data: report });
-        setPendingCount(syncQueue.count());
-        alert('📋 Supervisor report saved OFFLINE! Will sync when online.');
+        setPendingCount(syncQueue.countByTypes(['supervisor_report']));
+        toast('📋 Supervisor report saved OFFLINE! Will sync when online.');
       }
       
       setShowOfficerReport(false);
@@ -393,7 +396,7 @@ function SupervisorReports({
       });
     } catch (error) {
       console.error('Error submitting officer report:', error);
-      alert('❌ Error submitting report: ' + error.message);
+      toast('❌ Error submitting report: ' + error.message);
     }
   };
 
@@ -462,21 +465,21 @@ function SupervisorReports({
             if (setSupervisorReports) {
               setSupervisorReports(prev => prev.map(r => r.id === report.id ? { ...r, synced: true } : r));
             }
-            alert('✅ Self report submitted successfully!');
+            toast('✅ Self report submitted successfully!');
           } else {
             throw new Error('Server error');
           }
         } catch (err) {
           console.warn('Server unreachable, queueing self report:', err.message);
           syncQueue.add({ type: 'supervisor_report', id: report.id, data: report });
-          setPendingCount(syncQueue.count());
-          alert('⚠️ Server unreachable. Self report saved and will sync later.');
+          setPendingCount(syncQueue.countByTypes(['supervisor_report']));
+          toast('⚠️ Server unreachable. Self report saved and will sync later.');
         }
       } else {
         console.warn('Offline, queueing self report...');
         syncQueue.add({ type: 'supervisor_report', id: report.id, data: report });
-        setPendingCount(syncQueue.count());
-        alert('📋 Self report saved OFFLINE! Will sync when online.');
+        setPendingCount(syncQueue.countByTypes(['supervisor_report']));
+        toast('📋 Self report saved OFFLINE! Will sync when online.');
       }
       
       setShowSelfReport(false);
@@ -495,7 +498,7 @@ function SupervisorReports({
       });
     } catch (error) {
       console.error('Error submitting self report:', error);
-      alert('❌ Error submitting self report: ' + error.message);
+      toast('❌ Error submitting self report: ' + error.message);
     }
   };
 
@@ -532,7 +535,7 @@ function SupervisorReports({
         gap: '8px'
       }}>
         <span style={{ fontWeight: '500', color: isOnline ? '#065f37' : '#991b1b' }}>
-          {isOnline ? '✅ Online' : '❌ Offline'}
+          {isOnline ? t('header.online') : t('header.offline')}
         </span>
         {pendingCount > 0 && (
           <span style={{
@@ -542,7 +545,7 @@ function SupervisorReports({
             borderRadius: '12px',
             fontSize: '12px'
           }}>
-            ⏳ {pendingCount} pending sync
+            {t('supervisor.pending_sync', { count: pendingCount })}
           </span>
         )}
         {isLoading && (
@@ -553,7 +556,7 @@ function SupervisorReports({
             borderRadius: '12px',
             fontSize: '12px'
           }}>
-            🔄 Loading...
+            {t('common.loading')}
           </span>
         )}
       </div>
@@ -571,7 +574,7 @@ function SupervisorReports({
           alignItems: 'center',
           flexWrap: 'wrap'
         }}>
-          <span>📡 You are offline. Reports will be saved and synced when online.</span>
+          <span>{t('supervisor.offline_banner')}</span>
           {pendingCount > 0 && (
             <span style={{
               background: '#f59e0b',
@@ -580,7 +583,7 @@ function SupervisorReports({
               borderRadius: '12px',
               fontSize: '12px'
             }}>
-              {pendingCount} pending sync
+              {t('supervisor.pending_sync', { count: pendingCount })}
             </span>
           )}
         </div>
@@ -601,9 +604,9 @@ function SupervisorReports({
         gap: '16px'
       }}>
         <div>
-          <h2 style={{ fontSize: '24px', fontWeight: '700', margin: '0 0 6px 0' }}>📋 Supervisor Reports</h2>
+          <h2 style={{ fontSize: '24px', fontWeight: '700', margin: '0 0 6px 0' }}>{t('nav.supervisor_reports')}</h2>
           <p style={{ fontSize: '14px', opacity: 0.85, margin: 0, maxWidth: '540px' }}>
-            Submit reports about your team members and your own work status
+            {t('supervisor.hero_subtitle')}
           </p>
         </div>
         <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'center' }}>
@@ -616,7 +619,7 @@ function SupervisorReports({
               fontSize: '13px',
               fontWeight: '600'
             }}>
-              📡 Offline Mode
+              {t('auth.offline_mode')}
             </span>
           )}
           <button
@@ -634,7 +637,7 @@ function SupervisorReports({
               opacity: isLoading ? 0.6 : 1
             }}
           >
-            {isLoading ? '⏳ Loading...' : '🔄 Refresh'}
+            {isLoading ? t('common.loading') : t('supervisor.refresh')}
           </button>
         </div>
       </div>
@@ -672,7 +675,7 @@ function SupervisorReports({
               fontWeight: '500'
             }}
           >
-            📝 Report About Officer
+            {t('supervisor.report_about_officer')}
           </button>
           <button 
             className="btn-primary" 
@@ -693,7 +696,7 @@ function SupervisorReports({
               fontWeight: '500'
             }}
           >
-            📝 Submit Self Report
+            {t('supervisor.submit_self_report')}
           </button>
         </div>
       </div>
@@ -715,9 +718,9 @@ function SupervisorReports({
           gap: '8px'
         }}>
           <div>
-            <h3 style={{ margin: '0', fontSize: '16px', fontWeight: '600' }}>My Supervisor Reports</h3>
+            <h3 style={{ margin: '0', fontSize: '16px', fontWeight: '600' }}>{t('supervisor.my_supervisor_reports')}</h3>
             <p style={{ margin: '2px 0 0 0', color: '#6b7280', fontSize: '13px' }}>
-              {sortedReports.length} reports submitted
+              {t('supervisor.reports_submitted', { count: sortedReports.length })}
             </p>
           </div>
           {pendingCount > 0 && (
@@ -729,7 +732,7 @@ function SupervisorReports({
               fontSize: '12px',
               fontWeight: '500'
             }}>
-              ⏳ {pendingCount} pending sync
+              {t('supervisor.pending_sync', { count: pendingCount })}
             </span>
           )}
         </div>
@@ -738,14 +741,14 @@ function SupervisorReports({
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead>
               <tr style={{ background: '#f8fafc' }}>
-                <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: '600', fontSize: '12px', color: '#6b7280' }}>Submitted</th>
-                <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: '600', fontSize: '12px', color: '#6b7280' }}>Type</th>
-                <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: '600', fontSize: '12px', color: '#6b7280' }}>Officer / Self</th>
-                <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: '600', fontSize: '12px', color: '#6b7280' }}>Performance</th>
-                <th style={{ padding: '12px 16px', textAlign: 'center', fontWeight: '600', fontSize: '12px', color: '#6b7280' }}>Rating</th>
-                <th style={{ padding: '12px 16px', textAlign: 'center', fontWeight: '600', fontSize: '12px', color: '#6b7280' }}>Files</th>
-                <th style={{ padding: '12px 16px', textAlign: 'center', fontWeight: '600', fontSize: '12px', color: '#6b7280' }}>Status</th>
-                <th style={{ padding: '12px 16px', textAlign: 'center', fontWeight: '600', fontSize: '12px', color: '#6b7280' }}>New</th>
+                <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: '600', fontSize: '12px', color: '#6b7280' }}>{t('supervisor.submitted')}</th>
+                <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: '600', fontSize: '12px', color: '#6b7280' }}>{t('supervisor.type')}</th>
+                <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: '600', fontSize: '12px', color: '#6b7280' }}>{t('supervisor.officer_self')}</th>
+                <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: '600', fontSize: '12px', color: '#6b7280' }}>{t('supervisor.performance')}</th>
+                <th style={{ padding: '12px 16px', textAlign: 'center', fontWeight: '600', fontSize: '12px', color: '#6b7280' }}>{t('supervisor.rating')}</th>
+                <th style={{ padding: '12px 16px', textAlign: 'center', fontWeight: '600', fontSize: '12px', color: '#6b7280' }}>{t('supervisor.files')}</th>
+                <th style={{ padding: '12px 16px', textAlign: 'center', fontWeight: '600', fontSize: '12px', color: '#6b7280' }}>{t('common.status')}</th>
+                <th style={{ padding: '12px 16px', textAlign: 'center', fontWeight: '600', fontSize: '12px', color: '#6b7280' }}>{t('supervisor.new')}</th>
               </tr>
             </thead>
             <tbody>
@@ -756,9 +759,9 @@ function SupervisorReports({
                     textAlign: 'center',
                     color: '#6b7280'
                   }}>
-                    <div style={{ fontSize: '48px', marginBottom: '8px' }}>📋</div>
-                    <div>No supervisor reports found</div>
-                    <div style={{ fontSize: '12px', marginTop: '4px' }}>Click &quot;Submit Self Report&quot; or &quot;Report About Officer&quot; to add one.</div>
+                    <div style={{ fontSize: '48px', marginBottom: '8px' }}>📭</div>
+                    <div>{t('supervisor.no_reports_found')}</div>
+                    <div style={{ fontSize: '12px', marginTop: '4px' }}>{t('supervisor.no_reports_hint')}</div>
                   </td>
                 </tr>
               )}
@@ -771,7 +774,7 @@ function SupervisorReports({
                       {displayDate}
                     </td>
                     <td style={{ padding: '12px 16px', fontSize: '13px' }}>
-                      {r.type === 'self_report' ? '📋 Self Report' : '👤 Officer Report'}
+                      {r.type === 'self_report' ? t('supervisor.self_report') : t('supervisor.officer_report')}
                     </td>
                     <td style={{ padding: '12px 16px', fontSize: '13px', fontWeight: '500' }}>
                       {(() => {
@@ -804,11 +807,11 @@ function SupervisorReports({
                               r.overallStatus === 'average' || r.performance === 'average' ? '#92400e' :
                               '#991b1b'
                       }}>
-                        {r.overallStatus || r.performance}
+                        {t(`supervisor.status.${r.overallStatus || r.performance}`, { defaultValue: r.overallStatus || r.performance })}
                       </span>
                     </td>
                     <td style={{ padding: '12px 16px', fontSize: '13px', textAlign: 'center' }}>
-                      {r.type === 'self_report' ? 'N/A' : `${r.overallRating}/5 ⭐`}
+                      {r.type === 'self_report' ? t('supervisor.na') : t('supervisor.rating_value', { rating: r.overallRating })}
                     </td>
                     <td style={{ padding: '12px 16px', textAlign: 'center', fontSize: '13px' }}>
                       {r.attachments && r.attachments.length > 0 ? (
@@ -817,7 +820,7 @@ function SupervisorReports({
                           padding: '2px 10px', borderRadius: '12px', fontSize: '11px',
                           fontWeight: '500', cursor: 'pointer'
                         }}>
-                          📂 Open ({r.attachments.length})
+                          {t('supervisor.open')} ({r.attachments.length})
                         </button>
                       ) : null}
                     </td>
@@ -833,7 +836,7 @@ function SupervisorReports({
                         alignItems: 'center',
                         gap: '4px'
                       }}>
-                        {r.synced ? '✅ Synced' : '📡 Offline'}
+                        {r.synced ? t('supervisor.synced') : t('header.offline')}
                       </span>
                     </td>
                     <td style={{ padding: '12px 16px', textAlign: 'center', fontSize: '13px' }}>
@@ -847,7 +850,7 @@ function SupervisorReports({
                           fontWeight: '700',
                           textTransform: 'uppercase'
                         }}>
-                          NEW
+{t('supervisor.new')}
                         </span>
                       )}
                     </td>
@@ -870,7 +873,7 @@ function SupervisorReports({
             fontSize: '13px',
             color: '#92400e'
           }}>
-            <span>⏳ {pendingCount} report(s) pending sync</span>
+            <span>{t('supervisor.reports_pending_sync', { count: pendingCount })}</span>
             {isOnline && (
               <button
                 onClick={() => window.dispatchEvent(new Event('force-sync'))}
@@ -884,7 +887,7 @@ function SupervisorReports({
                   fontSize: '12px'
                 }}
               >
-                🔄 Sync Now
+                {t('supervisor.sync_now')}
               </button>
             )}
           </div>
@@ -905,8 +908,8 @@ function SupervisorReports({
           }}>
             <div className="modal-header" style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px'}}>
               <h3 style={{fontSize: '20px', fontWeight: '600'}}>
-                📝 Report About Officer
-                {!isOnline && <span style={{fontSize: '12px', color: '#f59e0b', marginLeft: '8px'}}>📡 Offline</span>}
+                {t('supervisor.report_about_officer')}
+                {!isOnline && <span style={{fontSize: '12px', color: '#f59e0b', marginLeft: '8px'}}>{t('header.offline')}</span>}
               </h3>
               <button 
                 className="modal-close" 
@@ -920,7 +923,7 @@ function SupervisorReports({
                   opacity: 1,
                   visibility: 'visible'
                 }}
-              >✕</button>
+              >×</button>
             </div>
 
             {!isOnline && (
@@ -931,10 +934,10 @@ function SupervisorReports({
                 borderRadius: '8px',
                 marginBottom: '16px'
               }}>
-                <strong>📡 Offline Mode:</strong> Your report will be saved locally and synced automatically when online.
+                <strong>{t('auth.offline_mode')}:</strong> {t('supervisor.offline_save_notice')}
                 {pendingCount > 0 && (
                   <span style={{ marginLeft: '8px' }}>
-                    ({pendingCount} pending sync)
+                    ({t('supervisor.pending_sync', { count: pendingCount })})
                   </span>
                 )}
               </div>
@@ -942,7 +945,7 @@ function SupervisorReports({
 
             <form onSubmit={handleOfficerReportSubmit} className="modal-form" style={{display: 'flex', flexDirection: 'column', gap: '16px'}}>
               <div className="form-group" style={{display: 'flex', flexDirection: 'column', gap: '4px'}}>
-                <label style={{fontSize: '13px', fontWeight: '500', color: '#374151'}}>Select Officer *</label>
+                <label style={{fontSize: '13px', fontWeight: '500', color: '#374151'}}>{t('supervisor.select_officer')} *</label>
                 <select 
                   value={form.officerId} 
                   onChange={e => setForm({...form, officerId: e.target.value})}
@@ -959,7 +962,7 @@ function SupervisorReports({
                     background: 'white'
                   }}
                 >
-                  <option value="">Select Officer</option>
+                  <option value="">{t('supervisor.select_officer')}</option>
                   {teamMembers.map(o => (
                     <option key={o.id} value={o.id}>{o.name} ({o.region})</option>
                   ))}
@@ -967,7 +970,7 @@ function SupervisorReports({
               </div>
 
               <div className="form-group" style={{display: 'flex', flexDirection: 'column', gap: '4px'}}>
-                <label style={{fontSize: '13px', fontWeight: '500', color: '#374151'}}>Report Date *</label>
+                <label style={{fontSize: '13px', fontWeight: '500', color: '#374151'}}>{t('supervisor.report_date')} *</label>
                 <input 
                   type="date" 
                   value={form.reportDate} 
@@ -987,7 +990,7 @@ function SupervisorReports({
               </div>
               <div className="form-row" style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px'}}>
                 <div className="form-group" style={{display: 'flex', flexDirection: 'column', gap: '4px'}}>
-                  <label style={{fontSize: '13px', fontWeight: '500', color: '#374151'}}>Performance</label>
+                  <label style={{fontSize: '13px', fontWeight: '500', color: '#374151'}}>{t('supervisor.performance')}</label>
                   <select 
                     value={form.performance} 
                     onChange={e => setForm({...form, performance: e.target.value})}
@@ -1003,14 +1006,14 @@ function SupervisorReports({
                       background: 'white'
                     }}
                   >
-                    <option value="excellent">⭐ Excellent</option>
-                    <option value="good">✅ Good</option>
-                    <option value="average">📊 Average</option>
-                    <option value="poor">⚠️ Poor</option>
+                    <option value="excellent">{t('supervisor.status.excellent')}</option>
+                    <option value="good">{t('supervisor.status.good')}</option>
+                    <option value="average">{t('supervisor.status.average')}</option>
+                    <option value="poor">{t('supervisor.status.poor')}</option>
                   </select>
                 </div>
                 <div className="form-group" style={{display: 'flex', flexDirection: 'column', gap: '4px'}}>
-                  <label style={{fontSize: '13px', fontWeight: '500', color: '#374151'}}>Attendance</label>
+                  <label style={{fontSize: '13px', fontWeight: '500', color: '#374151'}}>{t('supervisor.attendance')}</label>
                   <select 
                     value={form.attendance} 
                     onChange={e => setForm({...form, attendance: e.target.value})}
@@ -1026,16 +1029,16 @@ function SupervisorReports({
                       background: 'white'
                     }}
                   >
-                    <option value="excellent">⭐ Excellent</option>
-                    <option value="good">✅ Good</option>
-                    <option value="average">📊 Average</option>
-                    <option value="poor">⚠️ Poor</option>
+                    <option value="excellent">{t('supervisor.status.excellent')}</option>
+                    <option value="good">{t('supervisor.status.good')}</option>
+                    <option value="average">{t('supervisor.status.average')}</option>
+                    <option value="poor">{t('supervisor.status.poor')}</option>
                   </select>
                 </div>
               </div>
               <div className="form-row" style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px'}}>
                 <div className="form-group" style={{display: 'flex', flexDirection: 'column', gap: '4px'}}>
-                  <label style={{fontSize: '13px', fontWeight: '500', color: '#374151'}}>Quality of Work</label>
+                  <label style={{fontSize: '13px', fontWeight: '500', color: '#374151'}}>{t('supervisor.quality_of_work')}</label>
                   <select 
                     value={form.quality} 
                     onChange={e => setForm({...form, quality: e.target.value})}
@@ -1051,14 +1054,14 @@ function SupervisorReports({
                       background: 'white'
                     }}
                   >
-                    <option value="excellent">⭐ Excellent</option>
-                    <option value="good">✅ Good</option>
-                    <option value="average">📊 Average</option>
-                    <option value="poor">⚠️ Poor</option>
+                    <option value="excellent">{t('supervisor.status.excellent')}</option>
+                    <option value="good">{t('supervisor.status.good')}</option>
+                    <option value="average">{t('supervisor.status.average')}</option>
+                    <option value="poor">{t('supervisor.status.poor')}</option>
                   </select>
                 </div>
                 <div className="form-group" style={{display: 'flex', flexDirection: 'column', gap: '4px'}}>
-                  <label style={{fontSize: '13px', fontWeight: '500', color: '#374151'}}>Punctuality</label>
+                  <label style={{fontSize: '13px', fontWeight: '500', color: '#374151'}}>{t('supervisor.punctuality')}</label>
                   <select 
                     value={form.punctuality} 
                     onChange={e => setForm({...form, punctuality: e.target.value})}
@@ -1074,16 +1077,16 @@ function SupervisorReports({
                       background: 'white'
                     }}
                   >
-                    <option value="excellent">⭐ Excellent</option>
-                    <option value="good">✅ Good</option>
-                    <option value="average">📊 Average</option>
-                    <option value="poor">⚠️ Poor</option>
+                    <option value="excellent">{t('supervisor.status.excellent')}</option>
+                    <option value="good">{t('supervisor.status.good')}</option>
+                    <option value="average">{t('supervisor.status.average')}</option>
+                    <option value="poor">{t('supervisor.status.poor')}</option>
                   </select>
                 </div>
               </div>
               <div className="form-row" style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px'}}>
                 <div className="form-group" style={{display: 'flex', flexDirection: 'column', gap: '4px'}}>
-                  <label style={{fontSize: '13px', fontWeight: '500', color: '#374151'}}>Teamwork</label>
+                  <label style={{fontSize: '13px', fontWeight: '500', color: '#374151'}}>{t('supervisor.teamwork')}</label>
                   <select 
                     value={form.teamwork} 
                     onChange={e => setForm({...form, teamwork: e.target.value})}
@@ -1099,14 +1102,14 @@ function SupervisorReports({
                       background: 'white'
                     }}
                   >
-                    <option value="excellent">⭐ Excellent</option>
-                    <option value="good">✅ Good</option>
-                    <option value="average">📊 Average</option>
-                    <option value="poor">⚠️ Poor</option>
+                    <option value="excellent">{t('supervisor.status.excellent')}</option>
+                    <option value="good">{t('supervisor.status.good')}</option>
+                    <option value="average">{t('supervisor.status.average')}</option>
+                    <option value="poor">{t('supervisor.status.poor')}</option>
                   </select>
                 </div>
                 <div className="form-group" style={{display: 'flex', flexDirection: 'column', gap: '4px'}}>
-                  <label style={{fontSize: '13px', fontWeight: '500', color: '#374151'}}>Communication</label>
+                  <label style={{fontSize: '13px', fontWeight: '500', color: '#374151'}}>{t('supervisor.communication')}</label>
                   <select 
                     value={form.communication} 
                     onChange={e => setForm({...form, communication: e.target.value})}
@@ -1122,15 +1125,15 @@ function SupervisorReports({
                       background: 'white'
                     }}
                   >
-                    <option value="excellent">⭐ Excellent</option>
-                    <option value="good">✅ Good</option>
-                    <option value="average">📊 Average</option>
-                    <option value="poor">⚠️ Poor</option>
+                    <option value="excellent">{t('supervisor.status.excellent')}</option>
+                    <option value="good">{t('supervisor.status.good')}</option>
+                    <option value="average">{t('supervisor.status.average')}</option>
+                    <option value="poor">{t('supervisor.status.poor')}</option>
                   </select>
                 </div>
               </div>
               <div className="form-group" style={{display: 'flex', flexDirection: 'column', gap: '4px'}}>
-                <label style={{fontSize: '13px', fontWeight: '500', color: '#374151'}}>Overall Rating (1-5) *</label>
+                <label style={{fontSize: '13px', fontWeight: '500', color: '#374151'}}>{t('supervisor.overall_rating')} (1-5) *</label>
                 <input 
                   type="number" 
                   min="1" 
@@ -1151,11 +1154,11 @@ function SupervisorReports({
                 />
               </div>
               <div className="form-group" style={{display: 'flex', flexDirection: 'column', gap: '4px'}}>
-                <label style={{fontSize: '13px', fontWeight: '500', color: '#374151'}}>Comments</label>
+                <label style={{fontSize: '13px', fontWeight: '500', color: '#374151'}}>{t('report.comments')}</label>
                 <textarea 
                   value={form.comments} 
                   onChange={e => setForm({...form, comments: e.target.value})}
-                  placeholder="Any additional comments about the officer..." 
+                  placeholder={t('supervisor.comments_placeholder')} 
                   rows="3"
                   style={{
                     padding: '8px 12px',
@@ -1172,11 +1175,11 @@ function SupervisorReports({
                 />
               </div>
               <div className="form-group" style={{display: 'flex', flexDirection: 'column', gap: '4px'}}>
-                <label style={{fontSize: '13px', fontWeight: '500', color: '#374151'}}>Recommendations</label>
+                <label style={{fontSize: '13px', fontWeight: '500', color: '#374151'}}>{t('supervisor.recommendations')}</label>
                 <textarea 
                   value={form.recommendations} 
                   onChange={e => setForm({...form, recommendations: e.target.value})}
-                  placeholder="Recommendations for improvement..." 
+                  placeholder={t('supervisor.recommendations_placeholder')} 
                   rows="2"
                   style={{
                     padding: '8px 12px',
@@ -1200,10 +1203,10 @@ function SupervisorReports({
                 fontSize: '13px',
                 color: !isOnline ? '#92400e' : '#1e40af'
               }}>
-                <strong>ℹ️ {isOnline ? 'Online' : 'Offline'}:</strong>
+                <strong>{isOnline ? t('header.online') : t('header.offline')}:</strong>
                 {isOnline 
-                  ? ' This report will be sent immediately.' 
-                  : ' This report will be saved offline and synced when online.'}
+                  ? t('supervisor.send_immediately') 
+                  : t('supervisor.save_offline_notice')}
               </div>
               <div className="modal-actions" style={{display: 'flex', gap: '12px', marginTop: '8px'}}>
                 <button 
@@ -1225,7 +1228,7 @@ function SupervisorReports({
                     fontWeight: '500'
                   }}
                 >
-                  {isOnline ? 'Submit Report' : '💾 Save Offline'}
+                  {isOnline ? t('report.submit_btn') : t('supervisor.save_offline')}
                 </button>
                 <button 
                   type="button" 
@@ -1247,7 +1250,7 @@ function SupervisorReports({
                     fontWeight: '500'
                   }}
                 >
-                  Cancel
+                  {t('common.cancel')}
                 </button>
               </div>
             </form>
@@ -1269,8 +1272,8 @@ function SupervisorReports({
           }}>
             <div className="modal-header" style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px'}}>
               <h3 style={{fontSize: '20px', fontWeight: '600'}}>
-                📋 Supervisor Self Report
-                {!isOnline && <span style={{fontSize: '12px', color: '#f59e0b', marginLeft: '8px'}}>📡 Offline</span>}
+                {t('supervisor.self_report_title')}
+                {!isOnline && <span style={{fontSize: '12px', color: '#f59e0b', marginLeft: '8px'}}>{t('header.offline')}</span>}
               </h3>
               <button 
                 className="modal-close" 
@@ -1284,7 +1287,7 @@ function SupervisorReports({
                   opacity: 1,
                   visibility: 'visible'
                 }}
-              >✕</button>
+              >×</button>
             </div>
 
             {!isOnline && (
@@ -1295,10 +1298,10 @@ function SupervisorReports({
                 borderRadius: '8px',
                 marginBottom: '16px'
               }}>
-                <strong>📡 Offline Mode:</strong> Your self report will be saved locally and synced automatically when online.
+                <strong>{t('auth.offline_mode')}:</strong> {t('supervisor.self_offline_notice')}
                 {pendingCount > 0 && (
                   <span style={{ marginLeft: '8px' }}>
-                    ({pendingCount} pending sync)
+                    ({t('supervisor.pending_sync', { count: pendingCount })})
                   </span>
                 )}
               </div>
@@ -1306,7 +1309,7 @@ function SupervisorReports({
 
             <form onSubmit={handleSelfReportSubmit} className="modal-form" style={{display: 'flex', flexDirection: 'column', gap: '16px'}}>
               <div className="form-group" style={{display: 'flex', flexDirection: 'column', gap: '4px'}}>
-                <label style={{fontSize: '13px', fontWeight: '500', color: '#374151'}}>Report Date *</label>
+                <label style={{fontSize: '13px', fontWeight: '500', color: '#374151'}}>{t('supervisor.report_date')} *</label>
                 <input 
                   type="date" 
                   value={selfForm.reportDate} 
@@ -1325,7 +1328,7 @@ function SupervisorReports({
                 />
               </div>
               <div className="form-group" style={{display: 'flex', flexDirection: 'column', gap: '4px'}}>
-                <label style={{fontSize: '13px', fontWeight: '500', color: '#374151'}}>Region</label>
+                <label style={{fontSize: '13px', fontWeight: '500', color: '#374151'}}>{t('common.region')}</label>
                 <input 
                   type="text" 
                   value={user?.region || ''} 
@@ -1347,7 +1350,7 @@ function SupervisorReports({
               </div>
               <div className="form-row" style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px'}}>
                 <div className="form-group" style={{display: 'flex', flexDirection: 'column', gap: '4px'}}>
-                  <label style={{fontSize: '13px', fontWeight: '500', color: '#374151'}}>Site Visits *</label>
+                  <label style={{fontSize: '13px', fontWeight: '500', color: '#374151'}}>{t('supervisor.site_visits')} *</label>
                   <input 
                     type="number" 
                     min="0" 
@@ -1367,7 +1370,7 @@ function SupervisorReports({
                   />
                 </div>
                 <div className="form-group" style={{display: 'flex', flexDirection: 'column', gap: '4px'}}>
-                  <label style={{fontSize: '13px', fontWeight: '500', color: '#374151'}}>Issues Resolved</label>
+                  <label style={{fontSize: '13px', fontWeight: '500', color: '#374151'}}>{t('supervisor.issues_resolved')}</label>
                   <input 
                     type="number" 
                     min="0" 
@@ -1388,7 +1391,7 @@ function SupervisorReports({
               </div>
               <div className="form-row" style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px'}}>
                 <div className="form-group" style={{display: 'flex', flexDirection: 'column', gap: '4px'}}>
-                  <label style={{fontSize: '13px', fontWeight: '500', color: '#374151'}}>Team Morale</label>
+                  <label style={{fontSize: '13px', fontWeight: '500', color: '#374151'}}>{t('supervisor.team_morale')}</label>
                   <select 
                     value={selfForm.teamMorale} 
                     onChange={e => setSelfForm({...selfForm, teamMorale: e.target.value})}
@@ -1404,14 +1407,14 @@ function SupervisorReports({
                       background: 'white'
                     }}
                   >
-                    <option value="excellent">⭐ Excellent</option>
-                    <option value="good">✅ Good</option>
-                    <option value="average">📊 Average</option>
-                    <option value="low">⚠️ Low</option>
+                    <option value="excellent">{t('supervisor.status.excellent')}</option>
+                    <option value="good">{t('supervisor.status.good')}</option>
+                    <option value="average">{t('supervisor.status.average')}</option>
+                    <option value="low">{t('supervisor.status.low')}</option>
                   </select>
                 </div>
                 <div className="form-group" style={{display: 'flex', flexDirection: 'column', gap: '4px'}}>
-                  <label style={{fontSize: '13px', fontWeight: '500', color: '#374151'}}>Resource Status</label>
+                  <label style={{fontSize: '13px', fontWeight: '500', color: '#374151'}}>{t('supervisor.resource_status')}</label>
                   <select 
                     value={selfForm.resourceStatus} 
                     onChange={e => setSelfForm({...selfForm, resourceStatus: e.target.value})}
@@ -1427,14 +1430,14 @@ function SupervisorReports({
                       background: 'white'
                     }}
                   >
-                    <option value="adequate">✅ Adequate</option>
-                    <option value="limited">⚠️ Limited</option>
-                    <option value="insufficient">❌ Insufficient</option>
+                    <option value="adequate">{t('supervisor.status.adequate')}</option>
+                    <option value="limited">{t('supervisor.status.limited')}</option>
+                    <option value="insufficient">{t('supervisor.status.insufficient')}</option>
                   </select>
                 </div>
               </div>
               <div className="form-group" style={{display: 'flex', flexDirection: 'column', gap: '4px'}}>
-                <label style={{fontSize: '13px', fontWeight: '500', color: '#374151'}}>Overall Status</label>
+                <label style={{fontSize: '13px', fontWeight: '500', color: '#374151'}}>{t('supervisor.overall_status')}</label>
                 <select 
                   value={selfForm.overallStatus} 
                   onChange={e => setSelfForm({...selfForm, overallStatus: e.target.value})}
@@ -1450,18 +1453,18 @@ function SupervisorReports({
                     background: 'white'
                   }}
                 >
-                  <option value="excellent">⭐ Excellent</option>
-                  <option value="good">✅ Good</option>
-                  <option value="average">📊 Average</option>
-                  <option value="challenging">⚠️ Challenging</option>
+                  <option value="excellent">{t('supervisor.status.excellent')}</option>
+                  <option value="good">{t('supervisor.status.good')}</option>
+                  <option value="average">{t('supervisor.status.average')}</option>
+                  <option value="challenging">{t('supervisor.status.challenging')}</option>
                 </select>
               </div>
               <div className="form-group" style={{display: 'flex', flexDirection: 'column', gap: '4px'}}>
-                <label style={{fontSize: '13px', fontWeight: '500', color: '#374151'}}>Challenges Faced</label>
+                <label style={{fontSize: '13px', fontWeight: '500', color: '#374151'}}>{t('supervisor.challenges_faced')}</label>
                 <textarea 
                   value={selfForm.challenges} 
                   onChange={e => setSelfForm({...selfForm, challenges: e.target.value})}
-                  placeholder="Describe any challenges you faced..." 
+                  placeholder={t('supervisor.challenges_placeholder')} 
                   rows="2"
                   style={{
                     padding: '8px 12px',
@@ -1478,11 +1481,11 @@ function SupervisorReports({
                 />
               </div>
               <div className="form-group" style={{display: 'flex', flexDirection: 'column', gap: '4px'}}>
-                <label style={{fontSize: '13px', fontWeight: '500', color: '#374151'}}>Achievements</label>
+                <label style={{fontSize: '13px', fontWeight: '500', color: '#374151'}}>{t('supervisor.achievements')}</label>
                 <textarea 
                   value={selfForm.achievements} 
                   onChange={e => setSelfForm({...selfForm, achievements: e.target.value})}
-                  placeholder="Describe your achievements..." 
+                  placeholder={t('supervisor.achievements_placeholder')} 
                   rows="2"
                   style={{
                     padding: '8px 12px',
@@ -1499,11 +1502,11 @@ function SupervisorReports({
                 />
               </div>
               <div className="form-group" style={{display: 'flex', flexDirection: 'column', gap: '4px'}}>
-                <label style={{fontSize: '13px', fontWeight: '500', color: '#374151'}}>Recommendations</label>
+                <label style={{fontSize: '13px', fontWeight: '500', color: '#374151'}}>{t('supervisor.recommendations')}</label>
                 <textarea 
                   value={selfForm.recommendations} 
                   onChange={e => setSelfForm({...selfForm, recommendations: e.target.value})}
-                  placeholder="Any recommendations..." 
+                  placeholder={t('supervisor.recommendations_any_placeholder')} 
                   rows="2"
                   style={{
                     padding: '8px 12px',
@@ -1527,10 +1530,10 @@ function SupervisorReports({
                 fontSize: '13px',
                 color: !isOnline ? '#92400e' : '#1e40af'
               }}>
-                <strong>ℹ️ {isOnline ? 'Online' : 'Offline'}:</strong>
+                <strong>{isOnline ? t('header.online') : t('header.offline')}:</strong>
                 {isOnline 
-                  ? ' This report will be sent immediately.' 
-                  : ' This report will be saved offline and synced when online.'}
+                  ? t('supervisor.send_immediately') 
+                  : t('supervisor.save_offline_notice')}
               </div>
               <div className="modal-actions" style={{display: 'flex', gap: '12px', marginTop: '8px'}}>
                 <button 
@@ -1552,7 +1555,7 @@ function SupervisorReports({
                     fontWeight: '500'
                   }}
                 >
-                  {isOnline ? 'Submit Self Report' : '💾 Save Offline'}
+                  {isOnline ? t('supervisor.submit_self_report') : t('supervisor.save_offline')}
                 </button>
                 <button 
                   type="button" 
@@ -1574,7 +1577,7 @@ function SupervisorReports({
                     fontWeight: '500'
                   }}
                 >
-                  Cancel
+                  {t('common.cancel')}
                 </button>
               </div>
             </form>
@@ -1595,12 +1598,12 @@ function SupervisorReports({
             overflow: 'auto', boxShadow: '0 20px 60px rgba(0,0,0,0.3)'
           }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-              <h3 style={{ margin: 0, fontSize: '18px', fontWeight: '700' }}>📎 Attachments ({viewingAttachments.length})</h3>
+              <h3 style={{ margin: 0, fontSize: '18px', fontWeight: '700' }}>{t('supervisor.attachments_count', { count: viewingAttachments.length })}</h3>
               <button onClick={() => setViewingAttachments(null)} style={{
                 background: '#fee2e2', color: '#991b1b', border: 'none',
                 padding: '6px 14px', borderRadius: '8px', cursor: 'pointer',
                 fontWeight: '600', fontSize: '13px'
-              }}>✕ Close</button>
+              }}>{t('supervisor.close')}</button>
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
               {viewingAttachments.map((att, i) => {
@@ -1621,7 +1624,7 @@ function SupervisorReports({
                         padding: '20px', textAlign: 'center', background: '#e5e7eb',
                         borderRadius: '8px', marginBottom: '8px', fontSize: '24px'
                       }}>
-                        📄
+                        ??
                       </div>
                     )}
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -1636,7 +1639,7 @@ function SupervisorReports({
                           background: '#dbeafe', color: '#1e40af', padding: '6px 14px',
                           borderRadius: '8px', textDecoration: 'none', fontWeight: '600',
                           fontSize: '12px'
-                        }}>⬇️ Download</a>
+                        }}>{t('supervisor.download')}</a>
                       )}
                     </div>
                   </div>

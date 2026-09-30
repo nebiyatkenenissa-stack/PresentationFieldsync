@@ -2,7 +2,9 @@
 
 import React, { useState, useMemo, useEffect } from 'react';
 import { formatTime } from '../../utils/helpers';
+import { confirmToast } from '../../utils/confirmToast';
 import { db, checkRealInternet, syncQueue, deleteScreenTimeRecords } from '../../services/database';
+import { useTranslation } from 'react-i18next';
 
 function ScreenTimeManagement({
   screenTime,
@@ -23,6 +25,7 @@ function ScreenTimeManagement({
   const [liveScreenTime, setLiveScreenTime] = useState(screenTime);
   const [deletingIds, setDeletingIds] = useState({});
   const [deletingAll, setDeletingAll] = useState(false);
+  const { t } = useTranslation();
 
   // ===== LIVE REFRESH FROM INDEXEDDB =====
   useEffect(() => {
@@ -48,14 +51,14 @@ function ScreenTimeManagement({
     const checkNetwork = async () => {
       const online = await checkRealInternet();
       setIsOnline(online);
-      setPendingCount(syncQueue.count());
+      setPendingCount(syncQueue.countByTypes(['screen_time', 'screen_time_update', 'screen_time_delete']));
     };
 
     checkNetwork();
     const interval = setInterval(checkNetwork, 5000);
 
     const handleQueueUpdate = () => {
-      setPendingCount(syncQueue.count());
+      setPendingCount(syncQueue.countByTypes(['screen_time', 'screen_time_update', 'screen_time_delete']));
     };
 
     window.addEventListener('sync-queue-updated', handleQueueUpdate);
@@ -149,7 +152,7 @@ function ScreenTimeManagement({
   // ===== DELETE SCREEN TIME RECORDS =====
   const handleDeleteRecord = async (record) => {
     if (!record || !record.id) return;
-    if (!window.confirm(`Delete screen time record for ${record.employeeName || record.employeeId} (${record.date})? This cannot be undone.`)) return;
+    if (!await confirmToast(t('screentime.delete_confirm', { name: record.employeeName || record.employeeId, date: record.date }))) return;
     setDeletingIds(prev => ({ ...prev, [record.id]: true }));
     try {
       await deleteScreenTimeRecords([record]);
@@ -163,7 +166,7 @@ function ScreenTimeManagement({
   const handleDeleteAll = async () => {
     const records = filteredScreenTime;
     if (records.length === 0) return;
-    if (!window.confirm(`Delete ${records.length} screen time record(s)? This cannot be undone.`)) return;
+    if (!await confirmToast(t('screentime.delete_all_confirm', { count: records.length }))) return;
     setDeletingAll(true);
     try {
       await deleteScreenTimeRecords(records);
@@ -183,9 +186,9 @@ function ScreenTimeManagement({
       return (
         <div className="empty-state" style={{ padding: '40px', textAlign: 'center', color: '#64748b' }}>
           <div style={{ fontSize: '48px', marginBottom: '8px' }}>📱</div>
-          <div>No screen time records found</div>
+          <div>{t('screentime.no_records_found')}</div>
           <div style={{ fontSize: '12px', marginTop: '4px' }}>
-            {selectedDate ? `No records for ${selectedDate}` : 'No screen time has been recorded yet'}
+            {selectedDate ? t('screentime.no_records_for_date', { date: selectedDate }) : t('screentime.no_records_yet')}
           </div>
         </div>
       );
@@ -196,15 +199,15 @@ function ScreenTimeManagement({
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
           <thead>
             <tr style={{ background: '#f8fafc', borderBottom: '2px solid #e5e7eb' }}>
-              <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: '600', fontSize: '12px', color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Employee</th>
-              <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: '600', fontSize: '12px', color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Date</th>
-              <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: '600', fontSize: '12px', color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Login</th>
-              <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: '600', fontSize: '12px', color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Logout</th>
-              <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: '600', fontSize: '12px', color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Total Time</th>
-              <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: '600', fontSize: '12px', color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Idle Time</th>
-              <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: '600', fontSize: '12px', color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Status</th>
-              <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: '600', fontSize: '12px', color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Trust Score</th>
-              <th style={{ padding: '12px 16px', textAlign: 'center', fontWeight: '600', fontSize: '12px', color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Action</th>
+              <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: '600', fontSize: '12px', color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.5px' }}>{t('screentime.employee')}</th>
+              <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: '600', fontSize: '12px', color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.5px' }}>{t('common.date')}</th>
+              <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: '600', fontSize: '12px', color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.5px' }}>{t('screentime.login_time')}</th>
+              <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: '600', fontSize: '12px', color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.5px' }}>{t('screentime.logout_time')}</th>
+              <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: '600', fontSize: '12px', color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.5px' }}>{t('screentime.total_time')}</th>
+              <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: '600', fontSize: '12px', color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.5px' }}>{t('screentime.idle_time')}</th>
+              <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: '600', fontSize: '12px', color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.5px' }}>{t('screentime.status')}</th>
+              <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: '600', fontSize: '12px', color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.5px' }}>{t('screentime.trust_score')}</th>
+              <th style={{ padding: '12px 16px', textAlign: 'center', fontWeight: '600', fontSize: '12px', color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.5px' }}>{t('screentime.action')}</th>
             </tr>
           </thead>
           <tbody>
@@ -223,7 +226,7 @@ function ScreenTimeManagement({
                   <td style={{ padding: '12px 16px' }}>
                     <strong style={{ fontSize: '14px', color: '#1a1a2e' }}>{s.employeeName}</strong>
                     {s.employeeId === user?.employeeId && (
-                      <span style={{ fontSize: '11px', color: '#6b7f94', marginLeft: '6px' }}>(You)</span>
+                      <span style={{ fontSize: '11px', color: '#6b7f94', marginLeft: '6px' }}>({t('screentime.you')})</span>
                     )}
                     {!isSynced && (
                       <span style={{ fontSize: '10px', color: '#f59e0b', marginLeft: '4px' }}>📡</span>
@@ -245,7 +248,7 @@ function ScreenTimeManagement({
                     </span>
                   </td>
                   <td style={{ padding: '12px 16px', color: '#6b7280' }}>
-                    {idleSecs > 0 ? formatTime(idleSecs) : '00:00:00'}
+                    {idleSecs > 0 ? formatTime(idleSecs) : t('screentime.zero_time')}
                   </td>
                   <td style={{ padding: '12px 16px' }}>
                     {s.isLoggedIn ? (
@@ -256,7 +259,7 @@ function ScreenTimeManagement({
                         fontWeight: '500',
                         background: '#d1fae5',
                         color: '#065f37'
-                      }}>🟢 Active</span>
+                      }}>🟢 {t('screentime.active')}</span>
                     ) : s.logoutTime ? (
                       <span className="status-badge offline" style={{
                         padding: '2px 10px',
@@ -266,7 +269,7 @@ function ScreenTimeManagement({
                         background: '#f3f4f6',
                         color: '#6b7280'
                       }}>
-                        🔴 Completed
+                        🔴 {t('screentime.completed')}
                       </span>
                     ) : (
                       <span className="status-badge away" style={{
@@ -276,7 +279,7 @@ function ScreenTimeManagement({
                         fontWeight: '500',
                         background: '#f3f4f6',
                         color: '#6b7280'
-                      }}>⚪ Not Started</span>
+                      }}>⚪ {t('screentime.not_started')}</span>
                     )}
                     {!isSynced && <span style={{ fontSize: '10px', color: '#f59e0b', marginLeft: '4px' }}>📡</span>}
                   </td>
@@ -296,7 +299,7 @@ function ScreenTimeManagement({
                     <button
                       onClick={() => handleDeleteRecord(s)}
                       disabled={deletingIds[s.id]}
-                      title="Delete this screen time record"
+                      title={t('screentime.delete_title')}
                       style={{
                         background: '#fee2e2',
                         color: '#991b1b',
@@ -309,7 +312,7 @@ function ScreenTimeManagement({
                         opacity: deletingIds[s.id] ? 0.5 : 1
                       }}
                     >
-                      🗑️ Delete
+                      🗑️ {t('common.delete')}
                     </button>
                   </td>
                 </tr>
@@ -338,11 +341,11 @@ function ScreenTimeManagement({
         gap: '16px'
       }}>
         <div>
-          <h2 style={{ fontSize: '24px', fontWeight: '700', margin: '0 0 6px 0' }}>📱 Screen Time Control</h2>
+          <h2 style={{ fontSize: '24px', fontWeight: '700', margin: '0 0 6px 0' }}>📱 {t('screentime.title')}</h2>
           <p style={{ fontSize: '14px', opacity: 0.85, margin: 0, maxWidth: '540px' }}>
-            {isManager ? 'Monitor all officers work time' :
-              isSupervisor ? 'Monitor team members work time' :
-              'Your screen time'}
+            {isManager ? t('screentime.hero_manager') :
+              isSupervisor ? t('screentime.hero_supervisor') :
+              t('screentime.hero_officer')}
           </p>
         </div>
         <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
@@ -354,7 +357,7 @@ function ScreenTimeManagement({
             fontSize: '13px',
             fontWeight: '600'
           }}>
-            🟢 {stats.active} Active
+            🟢 {stats.active} {t('screentime.active')}
           </span>
           <span style={{
             background: 'rgba(255,255,255,0.15)',
@@ -364,7 +367,7 @@ function ScreenTimeManagement({
             fontSize: '13px',
             fontWeight: '600'
           }}>
-            ✅ {stats.completed} Completed
+            ✅ {stats.completed} {t('screentime.completed')}
           </span>
           <span style={{
             background: 'rgba(96,165,250,0.2)',
@@ -374,7 +377,7 @@ function ScreenTimeManagement({
             fontSize: '13px',
             fontWeight: '600'
           }}>
-            📊 {stats.total} Total
+            📊 {stats.total} {t('screentime.total')}
           </span>
           {pendingCount > 0 && (
             <span style={{
@@ -385,7 +388,7 @@ function ScreenTimeManagement({
               fontSize: '13px',
               fontWeight: '600'
             }}>
-              📡 {pendingCount} Pending Sync
+              📡 {t('screentime.pending_sync_count', { count: pendingCount })}
             </span>
           )}
         </div>
@@ -405,7 +408,7 @@ function ScreenTimeManagement({
         gap: '8px'
       }}>
         <span style={{ fontWeight: '500', color: isOnline ? '#065f37' : '#991b1b' }}>
-          {isOnline ? '✅ Online' : '❌ Offline'}
+          {isOnline ? `✅ ${t('header.online')}` : `❌ ${t('header.offline')}`}
         </span>
         {pendingCount > 0 && (
           <span style={{
@@ -415,7 +418,7 @@ function ScreenTimeManagement({
             borderRadius: '12px',
             fontSize: '12px'
           }}>
-            ⏳ {pendingCount} pending sync
+            ⏳ {t('screentime.pending_sync', { count: pendingCount })}
           </span>
         )}
       </div>
@@ -433,7 +436,7 @@ function ScreenTimeManagement({
           alignItems: 'center',
           flexWrap: 'wrap'
         }}>
-          <span>📡 You are offline. Screen time records will be saved and synced when online.</span>
+          <span>📡 {t('screentime.offline_banner')}</span>
           {pendingCount > 0 && (
             <span style={{
               background: '#f59e0b',
@@ -442,7 +445,7 @@ function ScreenTimeManagement({
               borderRadius: '12px',
               fontSize: '12px'
             }}>
-              {pendingCount} pending sync
+              {t('screentime.pending_sync', { count: pendingCount })}
             </span>
           )}
         </div>
@@ -475,7 +478,7 @@ function ScreenTimeManagement({
             <div className="stat-icon" style={{ fontSize: '24px' }}>⏱️</div>
             <div className="stat-info">
               <div className="stat-value" style={{ fontSize: '20px', fontWeight: '600', color: '#1a1a2e' }}>{formatTime(stats.totalSeconds)}</div>
-              <div className="stat-label" style={{ fontSize: '12px', color: '#6b7280' }}>Total Work Time</div>
+              <div className="stat-label" style={{ fontSize: '12px', color: '#6b7280' }}>{t('screentime.total_work_time')}</div>
             </div>
           </div>
           <div className="stat-card" style={{
@@ -491,7 +494,7 @@ function ScreenTimeManagement({
             <div className="stat-icon" style={{ fontSize: '24px' }}>💤</div>
             <div className="stat-info">
               <div className="stat-value" style={{ fontSize: '20px', fontWeight: '600', color: '#1a1a2e' }}>{formatTime(stats.totalIdleSeconds)}</div>
-              <div className="stat-label" style={{ fontSize: '12px', color: '#6b7280' }}>Total Idle Time</div>
+              <div className="stat-label" style={{ fontSize: '12px', color: '#6b7280' }}>{t('screentime.total_idle_time')}</div>
             </div>
           </div>
           <div className="stat-card" style={{
@@ -507,7 +510,7 @@ function ScreenTimeManagement({
             <div className="stat-icon" style={{ fontSize: '24px' }}>✅</div>
             <div className="stat-info">
               <div className="stat-value" style={{ fontSize: '20px', fontWeight: '600', color: '#1a1a2e' }}>{stats.completed}</div>
-              <div className="stat-label" style={{ fontSize: '12px', color: '#6b7280' }}>Completed</div>
+              <div className="stat-label" style={{ fontSize: '12px', color: '#6b7280' }}>{t('screentime.completed')}</div>
             </div>
           </div>
           <div className="stat-card" style={{
@@ -523,7 +526,7 @@ function ScreenTimeManagement({
             <div className="stat-icon" style={{ fontSize: '24px' }}>🎯</div>
             <div className="stat-info">
               <div className="stat-value" style={{ fontSize: '20px', fontWeight: '600', color: '#1a1a2e' }}>{stats.avgTrust}%</div>
-              <div className="stat-label" style={{ fontSize: '12px', color: '#6b7280' }}>Avg Trust Score</div>
+              <div className="stat-label" style={{ fontSize: '12px', color: '#6b7280' }}>{t('screentime.avg_trust_score')}</div>
             </div>
           </div>
         </div>
@@ -538,7 +541,7 @@ function ScreenTimeManagement({
           borderBottom: '1px solid #e5e7eb'
         }}>
           <div className="filter-group" style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-            <label style={{ fontSize: '12px', fontWeight: '500', color: '#64748b' }}>Date</label>
+            <label style={{ fontSize: '12px', fontWeight: '500', color: '#64748b' }}>{t('common.date')}</label>
             <input
               type="date"
               value={selectedDate}
@@ -556,7 +559,7 @@ function ScreenTimeManagement({
 
           {isManager && (
             <div className="filter-group" style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-              <label style={{ fontSize: '12px', fontWeight: '500', color: '#64748b' }}>Employee</label>
+              <label style={{ fontSize: '12px', fontWeight: '500', color: '#64748b' }}>{t('screentime.employee')}</label>
               <select
                 value={selectedEmployee}
                 onChange={(e) => setSelectedEmployee(e.target.value)}
@@ -570,7 +573,7 @@ function ScreenTimeManagement({
                   background: 'white'
                 }}
               >
-                <option value="all">All Employees</option>
+                <option value="all">{t('screentime.all_employees')}</option>
                 {employeeOptions.map(emp => (
                   <option key={emp.employeeId} value={emp.employeeId}>{emp.employeeName}</option>
                 ))}
@@ -580,7 +583,7 @@ function ScreenTimeManagement({
 
           <div className="filter-group" style={{ display: 'flex', flexDirection: 'column', gap: '4px', justifyContent: 'flex-end' }}>
             <span className="attendance-count" style={{ fontSize: '13px', color: '#64748b' }}>
-              {filteredScreenTime.length} records
+              {t('screentime.records_count', { count: filteredScreenTime.length })}
             </span>
           </div>
 
@@ -599,7 +602,7 @@ function ScreenTimeManagement({
                   fontWeight: '500'
                 }}
               >
-                🔄 Sync Now
+                🔄 {t('screentime.sync_now')}
               </button>
             </div>
           )}
@@ -621,7 +624,7 @@ function ScreenTimeManagement({
                   opacity: deletingAll ? 0.5 : 1
                 }}
               >
-                {deletingAll ? 'Deleting…' : `🗑️ Delete All (${filteredScreenTime.length})`}
+                {deletingAll ? t('screentime.deleting') : `🗑️ ${t('screentime.delete_all', { count: filteredScreenTime.length })}`}
               </button>
             </div>
           )}
@@ -642,7 +645,7 @@ function ScreenTimeManagement({
             fontSize: '13px',
             color: '#92400e'
           }}>
-            <span>⏳ {pendingCount} screen time update(s) pending sync</span>
+            <span>⏳ {t('screentime.updates_pending_sync', { count: pendingCount })}</span>
             {isOnline && (
               <button
                 onClick={() => window.dispatchEvent(new Event('force-sync'))}
@@ -656,7 +659,7 @@ function ScreenTimeManagement({
                   fontSize: '12px'
                 }}
               >
-                🔄 Sync Now
+                🔄 {t('screentime.sync_now')}
               </button>
             )}
           </div>

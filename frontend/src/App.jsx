@@ -8,6 +8,8 @@
 // + FIXED: added ErrorBoundary for each tab to isolate crashes
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import toast from 'react-hot-toast';
+import { confirmToast } from './utils/confirmToast';
 import { 
   db, 
   initializeAllData, 
@@ -117,6 +119,101 @@ class ErrorBoundary extends React.Component {
     }
     return this.props.children;
   }
+}
+
+// ===== SERVER CONNECTION OVERLAY (blocks the page until a response) =====
+function ServerConnectOverlay({ checking, onRetry, onContinueOffline }) {
+  return (
+    <div style={{
+      position: 'fixed',
+      top: 0,
+      left: 0,
+      right: 0,
+      bottom: 0,
+      background: 'linear-gradient(135deg, #0b7e4b 0%, #065f37 100%)',
+      zIndex: 99999,
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center'
+    }}>
+      <div style={{
+        background: 'white',
+        borderRadius: '12px',
+        padding: '40px 48px',
+        maxWidth: '420px',
+        width: '90%',
+        textAlign: 'center',
+        boxShadow: '0 20px 60px rgba(0,0,0,0.3)'
+      }}>
+        <div style={{ fontSize: '44px', marginBottom: '16px' }}>
+          {checking ? '📡' : '🔴'}
+        </div>
+        <h2 style={{ margin: '0 0 8px', fontSize: '20px', color: '#1e293b' }}>
+          {checking ? 'Connecting to server…' : 'Server unreachable'}
+        </h2>
+        {checking ? (
+          <>
+            <p style={{ margin: '0 0 24px', fontSize: '14px', color: '#64748b' }}>
+              Please wait while the app checks the connection.
+            </p>
+            <div style={{
+              display: 'inline-block',
+              width: '28px',
+              height: '28px',
+              borderRadius: '50%',
+              border: '3px solid #d1fae5',
+              borderTopColor: '#0b7e4b',
+              animation: 'spin 0.8s linear infinite'
+            }}></div>
+          </>
+        ) : (
+          <>
+            <p style={{ margin: '0 0 24px', fontSize: '14px', color: '#64748b' }}>
+              The page is blocked until the server responds.
+            </p>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              <button
+                onClick={onRetry}
+                style={{
+                  padding: '10px 16px',
+                  borderRadius: '8px',
+                  border: 'none',
+                  background: '#0b7e4b',
+                  color: 'white',
+                  fontSize: '14px',
+                  fontWeight: '600',
+                  cursor: 'pointer'
+                }}
+              >
+                🔄 Retry Connection
+              </button>
+              <button
+                onClick={onContinueOffline}
+                style={{
+                  padding: '10px 16px',
+                  borderRadius: '8px',
+                  border: '1px solid #e5e7eb',
+                  background: 'white',
+                  color: '#475569',
+                  fontSize: '14px',
+                  fontWeight: '500',
+                  cursor: 'pointer'
+                }}
+              >
+                Continue Offline
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+      <style>{`
+        @keyframes spin {
+          0% { transform: rotate(0deg); }
+          100% { transform: rotate(360deg); }
+        }
+      `}</style>
+    </div>
+  );
 }
 
 // ===== EMPLOYEE ID HELPER =====
@@ -267,12 +364,133 @@ const fetchWithTimeout = async (url, options = {}, timeoutMs = 8000) => {
   }
 };
 
+// ===== HELPER: MERGE USERS FROM SERVER =====
+// Merges server user rows (snake_case) into the local users (camelCase),
+// preserving passwords and preferring the freshest profile photo:
+// server /uploads/ path, then any locally cached base64, then the existing
+// local value. A locally cached base64 is kept under profilePhotoCache as an
+// offline fallback when the server stores a file path instead.
+const mergeUsersFromServer = (localUsers, serverUsers) => {
+  if (!serverUsers || serverUsers.length === 0) {
+    return { users: localUsers || [], changed: false };
+  }
+  const merged = [...(localUsers || [])];
+  let changed = false;
+
+  for (const serverUser of serverUsers) {
+    const existingIndex = merged.findIndex(
+      u => u.id === serverUser.id || (serverUser.employee_id && u.employeeId === serverUser.employee_id)
+    );
+
+    if (existingIndex >= 0) {
+      const existing = merged[existingIndex];
+      const localPhoto = existing.profilePhoto || existing.profile_photo || null;
+      const serverPhoto = serverUser.profile_photo || null;
+      let mergedPhoto = serverPhoto || localPhoto || null;
+      const next = { ...existing };
+
+      if (localPhoto && localPhoto.startsWith('data:') && serverPhoto && serverPhoto.startsWith('/uploads/')) {
+        next.profilePhotoCache = localPhoto;
+        mergedPhoto = serverPhoto;
+      } else if (localPhoto && localPhoto.startsWith('data:') && !serverPhoto) {
+        mergedPhoto = localPhoto;
+      }
+
+      const updated = {
+        ...next,
+        // Fall back to the local value whenever the server sends null/empty.
+        // A user whose profile save is still sitting in the offline queue has
+        // NULL for these columns server-side; without the fallback the pull
+        // would blank out the good local record and the officer's profile
+        // would appear corrupted after reconnecting.
+        name: serverUser.name || existing.name,
+        email: serverUser.email || existing.email,
+        role: serverUser.role || existing.role,
+        region: serverUser.region || existing.region || serverUser.location_path || existing.location_path,
+        supervisorId: serverUser.supervisor_id ?? existing.supervisorId,
+        status: serverUser.status || existing.status,
+        password: existing.password,
+        profilePhoto: mergedPhoto,
+        shift: serverUser.shift || existing.shift || 'Day',
+        department: serverUser.department || existing.department || '',
+        phone: serverUser.phone || existing.phone || '',
+        // Keep the local value when the server omits the field, so a partial
+        // response cannot clear a flag that is still pending locally.
+        must_change_password: serverUser.must_change_password !== undefined
+          ? !!serverUser.must_change_password
+          : !!existing.must_change_password,
+        country_id: serverUser.country_id || existing.country_id || null,
+        region_id: serverUser.region_id || existing.region_id || null,
+        zone_id: serverUser.zone_id || existing.zone_id || null,
+        woreda_id: serverUser.woreda_id || existing.woreda_id || null,
+        kebele_id: serverUser.kebele_id || existing.kebele_id || null,
+        community_id: serverUser.community_id || existing.community_id || null,
+        source: 'server',
+      };
+
+      const photoChanged = (mergedPhoto || null) !== (localPhoto || null);
+      const infoChanged = existing.name !== serverUser.name
+        || existing.email !== serverUser.email
+        || existing.role !== serverUser.role
+        || existing.status !== serverUser.status;
+      if (photoChanged || infoChanged) changed = true;
+
+      merged[existingIndex] = updated;
+    } else {
+      const defaultPassword = serverUser.role === 'manager' ? 'manager123'
+        : serverUser.role === 'supervisor' ? 'super123' : 'officer123';
+      merged.push({
+        id: serverUser.id,
+        employeeId: serverUser.employee_id,
+        name: serverUser.name,
+        email: serverUser.email,
+        // Never take the server's password_hash as the local plaintext
+        // password. Doing so makes every later offline password comparison
+        // fail and lets a queued profile save re-hash the hash. Fall back to
+        // the documented default so an offline officer can still sign in.
+        password: serverUser.password_hash ? defaultPassword : (serverUser.password || defaultPassword),
+        role: serverUser.role,
+        region: serverUser.region,
+        supervisorId: serverUser.supervisor_id,
+        status: serverUser.status,
+        phone: serverUser.phone || '',
+        shift: serverUser.shift || 'Day',
+        department: serverUser.department || '',
+        assignedSites: [],
+        managerId: 'm1',
+        gpsEnabled: true,
+        pin: serverUser.role === 'field_officer' ? '1234' : null,
+        profilePhoto: serverUser.profile_photo || null,
+        // Distinguish an explicit false from an absent field. `|| false` turned
+        // a server row that simply did not carry the key into "no change
+        // required", clearing the flag on any account that had one set.
+        must_change_password: serverUser.must_change_password === undefined
+          ? true
+          : !!serverUser.must_change_password,
+        country_id: serverUser.country_id || null,
+        region_id: serverUser.region_id || null,
+        zone_id: serverUser.zone_id || null,
+        woreda_id: serverUser.woreda_id || null,
+        kebele_id: serverUser.kebele_id || null,
+        community_id: serverUser.community_id || null,
+        source: 'server',
+      });
+      changed = true;
+    }
+  }
+
+  return { users: merged, changed };
+};
+
 // ===== APP CONTENT COMPONENT =====
 function AppContent() {
   // ===== STATE =====
   const [user, setUser] = useState(null);
   const [authView, setAuthView] = useState('home');
   const [isLoading, setIsLoading] = useState(true);
+  const [serverChecking, setServerChecking] = useState(true);
+  const [serverReachable, setServerReachable] = useState(null);
+  const [skipServerBlock, setSkipServerBlock] = useState(false);
   const [reports, setReports] = useState([]);
   const [users, setUsers] = useState([]);
   const [citizens, setCitizens] = useState([]);
@@ -481,8 +699,43 @@ function AppContent() {
     return names.join(' > ') || 'Unknown';
   };
 
+// ============================================================
+  // SERVER CONNECTION CHECK – block page until we get a response
   // ============================================================
-  // Session auto-restore DISABLED – always show home page first
+  const checkServerConnection = useCallback(async () => {
+    setServerChecking(true);
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000);
+      const response = await fetch(`${getApiBase()}/test`, {
+        method: 'GET',
+        cache: 'no-store',
+        signal: controller.signal
+      });
+      clearTimeout(timeoutId);
+      const ok = response.ok;
+      setServerReachable(ok);
+      if (ok) {
+        toast.success('🟢 Connected to the server.');
+      } else {
+        toast.error('🔴 Server responded with an error.');
+      }
+      return ok;
+    } catch (error) {
+      setServerReachable(false);
+      toast.error(`🔴 Could not reach the server at ${getApiBase()}.`);
+      return false;
+    } finally {
+      setServerChecking(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    checkServerConnection();
+  }, [checkServerConnection]);
+
+  // ============================================================
+  // Session auto-restore DISABLED �?" always show home page first
   // ============================================================
   // SESSION: restore on page refresh, but show home on fresh tab open
   // ============================================================
@@ -572,19 +825,29 @@ function AppContent() {
   };
 
   const markNotificationRead = async (notificationId) => {
-    setAppNotifications(prev => {
-      const updated = prev.map(n => n.id === notificationId ? { ...n, read: true } : n);
-      db.notifications.bulkPut(updated);
-      return updated;
-    });
+    if (!notificationId) return;
+    try {
+      await db.notifications.update(notificationId, { read: true });
+    } catch (error) {
+      console.error('Error persisting notification read state:', error);
+    }
+    setAppNotifications(prev =>
+      prev.map(n => n.id === notificationId ? { ...n, read: true } : n)
+    );
   };
 
   const markAllNotificationsRead = async () => {
-    setAppNotifications(prev => {
-      const updated = prev.map(n => n.userId === user?.id ? { ...n, read: true } : n);
-      db.notifications.bulkPut(updated);
-      return updated;
-    });
+    const uid0 = user?.id;
+    if (!uid0) return;
+    try {
+      const userNotifs = appNotifications.filter(n => n.userId === uid0 && !n.read);
+      await db.notifications.bulkUpdate(userNotifs.map(n => ({ key: n.id, changes: { read: true } })));
+    } catch (error) {
+      console.error('Error persisting mark-all-read state:', error);
+    }
+    setAppNotifications(prev =>
+      prev.map(n => n.userId === uid0 ? { ...n, read: true } : n)
+    );
   };
 
   const getUserNotifications = useMemo(() => {
@@ -595,6 +858,26 @@ function AppContent() {
   const unreadNotifications = useMemo(() => {
     return getUserNotifications.filter(n => !n.read);
   }, [getUserNotifications]);
+
+  // ===== 3 CONSECUTIVE PASSED VERIFICATIONS → notify the supervisor =====
+  useEffect(() => {
+    const handleStreakPassed = (event) => {
+      const detail = event.detail;
+      if (!detail || detail.officerId !== user?.id) return;
+      if (!user?.supervisorId) return;
+      const supervisor = (users || []).find(u => u.id === user.supervisorId);
+      if (!supervisor) return;
+      addNotification(
+        supervisor.id,
+        '✅ 3 Consecutive Verifications Passed',
+        `${detail.officerName || user.name} passed 3 consecutive verification checks.`,
+        'success',
+        '/verification'
+      );
+    };
+    window.addEventListener('verification-streak-passed', handleStreakPassed);
+    return () => window.removeEventListener('verification-streak-passed', handleStreakPassed);
+  }, [user, users, addNotification]);
 
   // ============================================================
   // DATA LOADING
@@ -633,66 +916,8 @@ function AppContent() {
           if (response.ok) {
             const serverUsers = await response.json();
             if (serverUsers && serverUsers.length > 0) {
-              const mergedUsers = [...usersData];
-              for (const serverUser of serverUsers) {
-                const existingIndex = mergedUsers.findIndex(
-                  u => u.id === serverUser.id || u.employeeId === serverUser.employee_id
-                );
-                if (existingIndex >= 0) {
-                  mergedUsers[existingIndex] = {
-                    ...mergedUsers[existingIndex],
-                    name: serverUser.name,
-                    email: serverUser.email,
-                    role: serverUser.role,
-                    region: serverUser.region,
-                    supervisorId: serverUser.supervisor_id,
-                    status: serverUser.status,
-                    password: mergedUsers[existingIndex].password,
-                    profilePhoto: serverUser.profile_photo || mergedUsers[existingIndex].profilePhoto || null,
-                    shift: serverUser.shift || mergedUsers[existingIndex].shift || 'Day',
-                    department: serverUser.department || mergedUsers[existingIndex].department || '',
-                    phone: serverUser.phone || mergedUsers[existingIndex].phone || '',
-                    must_change_password: serverUser.must_change_password !== undefined ? serverUser.must_change_password : false,
-                    country_id: serverUser.country_id || mergedUsers[existingIndex].country_id || null,
-                    region_id: serverUser.region_id || mergedUsers[existingIndex].region_id || null,
-                    zone_id: serverUser.zone_id || mergedUsers[existingIndex].zone_id || null,
-                    woreda_id: serverUser.woreda_id || mergedUsers[existingIndex].woreda_id || null,
-                    kebele_id: serverUser.kebele_id || mergedUsers[existingIndex].kebele_id || null,
-                    community_id: serverUser.community_id || mergedUsers[existingIndex].community_id || null,
-                  };
-                } else {
-                  const defaultPassword = 
-                    serverUser.role === 'manager' ? 'manager123' :
-                    serverUser.role === 'supervisor' ? 'super123' : 'officer123';
-                  mergedUsers.push({
-                    id: serverUser.id,
-                    employeeId: serverUser.employee_id,
-                    name: serverUser.name,
-                    email: serverUser.email,
-                    password: serverUser.password_hash || defaultPassword,
-                    role: serverUser.role,
-                    region: serverUser.region,
-                    supervisorId: serverUser.supervisor_id,
-                    status: serverUser.status,
-                    phone: serverUser.phone || '',
-                    shift: serverUser.shift || 'Day',
-                    department: serverUser.department || '',
-                    assignedSites: [],
-                    managerId: 'm1',
-                    gpsEnabled: true,
-                    pin: serverUser.role === 'field_officer' ? '1234' : null,
-                    profilePhoto: serverUser.profile_photo || null,
-                    must_change_password: serverUser.must_change_password || false,
-                    country_id: serverUser.country_id || null,
-                    region_id: serverUser.region_id || null,
-                    zone_id: serverUser.zone_id || null,
-                    woreda_id: serverUser.woreda_id || null,
-                    kebele_id: serverUser.kebele_id || null,
-                    community_id: serverUser.community_id || null,
-                  });
-                }
-              }
-              finalUsers = mergedUsers;
+              const merged = mergeUsersFromServer(usersData, serverUsers);
+              finalUsers = merged.users;
               await db.users.bulkPut(finalUsers);
               console.log(`✅ Synced ${finalUsers.length} users from API (passwords preserved)`);
             }
@@ -722,6 +947,16 @@ function AppContent() {
         setLiveStatus([]);
         setAppNotifications(notificationsData);
         setPermissions(permissionsData);
+
+        setUser(prev => {
+          if (!prev) return prev;
+          const merged = finalUsers.find(u => u.id === prev.id);
+          if (merged && (merged.profilePhoto !== prev.profilePhoto || merged.must_change_password !== prev.must_change_password)) {
+            console.log('🔄 Re-syncing current user after merge – profilePhoto:', merged.profilePhoto);
+            return { ...prev, ...merged, password: prev.password };
+          }
+          return prev;
+        });
 
         await clearStuckSyncItems();
 
@@ -957,6 +1192,66 @@ function AppContent() {
   }, [user, isOnline]);
 
   // ============================================================
+  // REFRESH USERS (profile photos / names / roles) WHEN ONLINE
+  // Keeps every list (messages, reports, register, team, users,
+  // citizens) showing the latest profile image without a full
+  // reload. Runs on login, on 'online' / 'force-sync' / 'sync-complete'
+  // / 'users-updated' and every 30s while online.
+  // ============================================================
+  useEffect(() => {
+    if (!user) return;
+
+    const refresh = async () => {
+      if (!navigator.onLine) return;
+      try {
+        const online = await checkRealInternet();
+        if (!online) return;
+        const response = await fetchWithTimeout(`${getApiBase()}/users`, {}, 15000);
+        if (!response.ok) return;
+        const serverUsers = await response.json();
+        if (!serverUsers || serverUsers.length === 0) return;
+        const localUsers = await db.users.toArray();
+        const merged = mergeUsersFromServer(localUsers, serverUsers);
+        if (!merged.changed) return;
+        await db.users.bulkPut(merged.users);
+        setUsers(merged.users);
+        setUser(prev => {
+          if (!prev) return prev;
+          const matched = merged.users.find(u => u.id === prev.id);
+          if (!matched || matched.profilePhoto === prev.profilePhoto) return prev;
+          console.log('🔄 Refreshed profile photo for', matched.name);
+          return { ...prev, ...matched, password: prev.password };
+        });
+      } catch (err) {
+        console.warn('📡 User refresh skipped:', err.message);
+      }
+    };
+
+    if (isOnline) setTimeout(refresh, 1500);
+
+    const handleOnline = () => { if (navigator.onLine) setTimeout(refresh, 1500); };
+    const handleForceSync = () => { if (navigator.onLine) setTimeout(refresh, 1500); };
+    const handleSyncComplete = () => { if (navigator.onLine) setTimeout(refresh, 1500); };
+    const handleUsersUpdated = () => { if (navigator.onLine) setTimeout(refresh, 800); };
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('force-sync', handleForceSync);
+    window.addEventListener('sync-complete', handleSyncComplete);
+    window.addEventListener('users-updated', handleUsersUpdated);
+
+    const interval = setInterval(() => {
+      if (navigator.onLine) refresh();
+    }, 30000);
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('force-sync', handleForceSync);
+      window.removeEventListener('sync-complete', handleSyncComplete);
+      window.removeEventListener('users-updated', handleUsersUpdated);
+      clearInterval(interval);
+    };
+  }, [user, isOnline]);
+
+  // ============================================================
   // PULL VERIFICATION FOR MANAGER
   // ============================================================
   useEffect(() => {
@@ -1056,7 +1351,8 @@ function AppContent() {
               supervisor.id,
               '📋 Report Submitted',
               `${report.employeeName || 'An officer'} submitted a report`,
-              'success'
+              'success',
+              '/reports'
             );
           }
         }
@@ -1066,7 +1362,8 @@ function AppContent() {
             manager.id,
             '📋 Report Submitted',
             `${report.employeeName || 'An officer'} submitted a report`,
-            'info'
+            'info',
+            '/all_reports'
           );
         }
       } catch (err) {
@@ -1076,6 +1373,51 @@ function AppContent() {
     window.addEventListener('report-synced', handleReportSynced);
     return () => window.removeEventListener('report-synced', handleReportSynced);
   }, [users, addNotification]);
+
+  // ============================================================
+  // ALERT-RECEIVED – when a message that reached the server while this
+  // device was offline is pulled back as soon as internet returns, create
+  // the bell notification for the recipient immediately.
+  // ============================================================
+  useEffect(() => {
+    const handleAlertReceived = async (e) => {
+      if (!user) return;
+      const a = e?.detail?.alert;
+      if (!a) return;
+      try {
+        // Only notify people the message was addressed to, not the sender.
+        if (a.sentBy === user.employeeId) return;
+        const isBroadcast = a.targetAll === true;
+        const targeted = isBroadcast
+          || (Array.isArray(a.targetUsers) && a.targetUsers.some(t => t.id === user.id))
+          || a.targetEmployeeId === user.employeeId;
+        if (!targeted) return;
+
+        // Deterministic id => no duplicate bell entries for the same alert.
+        const notifId = `alert-${a.id}`;
+        const existing = appNotifications.find(n => n.id === notifId)
+          || (await db.notifications.get(notifId).catch(() => null));
+        if (existing) return;
+
+        const detail = {
+          id: notifId,
+          userId: user.id,
+          title: `🚨 ${a.title}`,
+          message: a.message,
+          type: 'error',
+          read: Boolean(a.read),
+          timestamp: a.timestamp,
+          link: '/alerts'
+        };
+        await db.notifications.add(detail);
+        setAppNotifications(prev => [detail, ...prev]);
+      } catch (err) {
+        console.warn('Failed to create alert-received notification:', err);
+      }
+    };
+    window.addEventListener('alert-received', handleAlertReceived);
+    return () => window.removeEventListener('alert-received', handleAlertReceived);
+  }, [user, appNotifications]);
 
   // ============================================================
   // AUTO-SYNC
@@ -1160,14 +1502,14 @@ function AppContent() {
     
     const handleForceSync = () => {
       if (isDevToolsOffline()) {
-        alert('🔌 DevTools says you are offline! Please disable offline mode in DevTools.');
+        toast('🔌 DevTools says you are offline! Please disable offline mode in DevTools.');
         return;
       }
       
       if (navigator.onLine) {
         runSync();
       } else {
-        alert('📡 You are offline. Please connect to the internet.');
+        toast('📡 You are offline. Please connect to the internet.');
       }
     };
     window.addEventListener('force-sync', handleForceSync);
@@ -1265,7 +1607,6 @@ function AppContent() {
           region: r.region,
           totalReports: 0,
           totalRegistrations: citizens.filter(c => c.registeredBy === r.employeeId).length,
-          avgEfficiency: 0,
           trustScore: 0,
           productivityScore: 0,
           tasksCompleted: 0,
@@ -1287,10 +1628,6 @@ function AppContent() {
         map[l.employeeId].tasksCompleted = l.tasksCompleted || 0;
         map[l.employeeId].tasksInProgress = l.tasksInProgress || 0;
       }
-    });
-
-    Object.values(map).forEach(emp => {
-      emp.avgEfficiency = emp.totalReports > 0 ? Math.round((emp.totalRegistrations / (emp.totalReports * 100)) * 100) : 0;
     });
 
     return Object.values(map);
@@ -1413,6 +1750,10 @@ function AppContent() {
           if (existingLocal?.profilePhoto && !localUser.profilePhoto) {
             localUser.profilePhoto = existingLocal.profilePhoto;
           }
+          // Preserve locally cached base64 photo and its cache during login
+          if (existingLocal?.profilePhotoCache) {
+            localUser.profilePhotoCache = existingLocal.profilePhotoCache;
+          }
           if (!localUser.employeeId) {
             const existingUser = users.find(u => u.id === localUser.id && String(u.employeeId || '').trim());
             if (existingUser) {
@@ -1532,7 +1873,7 @@ function AppContent() {
         await db.users.update(user.id, updatedUser);
         setShowForceChangePassword(false);
         setForcePasswordForm({ currentPassword: '', newPassword: '', confirmPassword: '' });
-        alert('✅ Password changed successfully!');
+        toast('✅ Password changed successfully!');
       } else if (localPwMatches && user?.password && (data.error === 'Current password is incorrect' || data.error === 'User not found')) {
         const updatedUser = { ...user, must_change_password: false, password: forcePasswordForm.newPassword };
         setUser(updatedUser);
@@ -1552,7 +1893,7 @@ function AppContent() {
         }
         setShowForceChangePassword(false);
         setForcePasswordForm({ currentPassword: '', newPassword: '', confirmPassword: '' });
-        alert("✅ Password changed! The server couldn't verify your old password, so it was updated locally and synced.");
+        toast("✅ Password changed! The server couldn't verify your old password, so it was updated locally and synced.");
       } else {
         setForcePasswordError(data.error || 'Failed to change password.');
       }
@@ -1575,7 +1916,14 @@ function AppContent() {
       } catch (e) { /* silent */ }
     }
     if (isScreenTimeRunning) {
-      stopScreenTime().catch((err) => console.error('Screen time stop on logout failed:', err));
+      // Awaited: stopScreenTime() probes the network (up to ~12s) before it
+      // can queue the final totals. Clearing the session underneath it could
+      // tear the tab down first and lose the logout-time record entirely.
+      try {
+        await stopScreenTime();
+      } catch (err) {
+        console.error('Screen time stop on logout failed:', err);
+      }
     }
     setUser(null);
     await db.auth.clear();
@@ -1594,12 +1942,12 @@ function AppContent() {
     e.preventDefault();
     const userExists = users.some(u => u.email === newUser.email);
     if (userExists) {
-      alert('User with this email already exists!');
+      toast('User with this email already exists!');
       return;
     }
     const nameExists = users.some(u => String(u.name || '').trim().toLowerCase() === String(newUser.name || '').trim().toLowerCase());
     if (nameExists) {
-      alert('A user with this name already exists. Every employee must have a unique name.');
+      toast('A user with this name already exists. Every employee must have a unique name.');
       return;
     }
 
@@ -1613,7 +1961,7 @@ function AppContent() {
     const employeeId = `${prefix}${String(max + 1).padStart(3, '0')}`;
     const idTaken = users.some(u => String(u.employeeId || '').toUpperCase() === employeeId);
     if (idTaken) {
-      alert(`Could not generate a unique Employee ID. Please try again.`);
+      toast(`Could not generate a unique Employee ID. Please try again.`);
       return;
     }
 
@@ -1637,7 +1985,11 @@ function AppContent() {
       gpsEnabled: true,
       pin: newUser.role === 'field_officer' ? '1234' : null,
       profilePhoto: null,
-      must_change_password: newUser.role === 'field_officer' ? true : false,
+      // Every new account must change its password on first login, not just
+      // field officers. Sent under both spellings: the create handler reads
+      // mustChangePassword, the sync handler reads must_change_password.
+      must_change_password: true,
+      mustChangePassword: true,
       country_id: locationId(selectedLocations.country),
       region_id: locationId(selectedLocations.region),
       zone_id: locationId(selectedLocations.zone),
@@ -1695,16 +2047,17 @@ function AppContent() {
         newUserObj.id,
         'Account Created',
         `Welcome ${newUserObj.name}! Your account has been created.`,
-        'success'
+        'success',
+        '/profile'
       );
     }
     
     const manager = users.find(u => u.role === 'manager');
     if (manager) {
-      addNotification(manager.id, 'New User Created', `${newUserObj.name} (${newUserObj.role}) has been created`, 'info');
+      addNotification(manager.id, 'New User Created', `${newUserObj.name} (${newUserObj.role}) has been created`, 'info', '/users');
     }
 
-    alert(`✅ User ${newUserObj.name} created successfully!${createdPassword ? `\n\nLogin Email: ${newUserObj.email}\nPassword: ${createdPassword}` : ''}`);
+    toast(`✅ User ${newUserObj.name} created successfully!${createdPassword ? `\n\nLogin Email: ${newUserObj.email}\nPassword: ${createdPassword}` : ''}`);
 
     setNewUser({
       name: '',
@@ -1783,19 +2136,19 @@ function AppContent() {
           data: { userId, status: newStatus }
         });
         if (!online) {
-          alert('📋 Status change saved offline. Will sync when online.');
+          toast('📋 Status change saved offline. Will sync when online.');
         }
       }
     }
 
     // 4. Notify
-    addNotification(userId, 'Account Status Updated', `Account ${newStatus === 'active' ? 'activated' : 'deactivated'}`, 'warning');
+    addNotification(userId, 'Account Status Updated', `Account ${newStatus === 'active' ? 'activated' : 'deactivated'}`, 'warning', '/profile');
     addAuditLog('TOGGLE_USER_STATUS', { userId, newStatus });
   };
 
   // ===== FIXED deleteUser =====
   const deleteUser = async (userId) => {
-    if (!window.confirm('Are you sure you want to delete this user?')) return;
+    if (!await confirmToast('Are you sure you want to delete this user?')) return;
     const userObj = users.find(u => u.id === userId);
     if (!userObj) return;
 
@@ -1836,15 +2189,15 @@ function AppContent() {
           data: { userId }
         });
         if (!online) {
-          alert('📋 User deletion saved locally. It will be removed from the server when online.');
+          toast('📋 User deletion saved locally. It will be removed from the server when online.');
         }
       }
     } else {
-      alert(`✅ User ${userObj.name} deleted successfully.`);
+      toast(`✅ User ${userObj.name} deleted successfully.`);
     }
 
     // 4. Notify
-    addNotification(userId, 'Account Deleted', 'Your account has been deleted', 'error');
+    addNotification(userId, 'Account Deleted', 'Your account has been deleted', 'error', '/profile');
     addAuditLog('DELETE_USER', { userId, name: userObj?.name });
   };
 
@@ -1891,16 +2244,16 @@ function AppContent() {
       }
     } else {
       syncQueue.add({ type: 'task', id: task.id, data: task });
-      alert('📋 Task saved offline! Will sync when online.');
+      toast('📋 Task saved offline! Will sync when online.');
     }
     
     const assignedUser = users.find(u => u.employeeId === task.employeeId);
     if (assignedUser) {
-      addNotification(assignedUser.id, 'New Task Assigned', `Task "${task.title}" has been assigned to you`, 'info');
+      addNotification(assignedUser.id, 'New Task Assigned', `Task "${task.title}" has been assigned to you`, 'info', '/tasks');
     }
     const manager = users.find(u => u.role === 'manager');
     if (manager) {
-      addNotification(manager.id, '📋 Task Assigned', `Task "${task.title}" assigned to ${assignedUser?.name}`, 'info');
+      addNotification(manager.id, '📋 Task Assigned', `Task "${task.title}" assigned to ${assignedUser?.name}`, 'info', '/tasks');
     }
     addAuditLog('CREATE_TASK', { task: task.title, assignedTo: task.employeeId });
     setLiveStatus(prev => {
@@ -1926,14 +2279,14 @@ function AppContent() {
         id: taskId,
         data: { taskId, status }
       });
-      alert('📋 Task update saved offline! Will sync when online.');
+      toast('📋 Task update saved offline! Will sync when online.');
     }
     
     const task = tasks.find(t => t.id === taskId);
     if (task) {
       const assignedUser = users.find(u => u.employeeId === task.employeeId);
       if (assignedUser) {
-        addNotification(assignedUser.id, 'Task Updated', `Task "${task.title}" has been marked as ${status}`, 'info');
+        addNotification(assignedUser.id, 'Task Updated', `Task "${task.title}" has been marked as ${status}`, 'info', '/tasks');
       }
       addAuditLog('UPDATE_TASK', { task: task.title, status });
     }
@@ -1956,7 +2309,7 @@ function AppContent() {
   const handleRequestLeave = async (e) => {
     e.preventDefault();
     if (!newLeave.startDate || !newLeave.endDate || !newLeave.reason) {
-      alert('Please fill all required fields');
+      toast('Please fill all required fields');
       return;
     }
 
@@ -2000,26 +2353,26 @@ function AppContent() {
         }
       } else {
         syncQueue.add({ type: 'leave', id: leave.id, data: leave });
-        alert('📅 Leave request saved offline! Will sync when online.');
+        toast('📅 Leave request saved offline! Will sync when online.');
       }
       
       if (isOfficer && user) {
         const supervisor = users.find(u => u.id === user.supervisorId);
         if (supervisor) {
-          addNotification(supervisor.id, '📅 Leave Request', `${user.name} has requested leave`, 'info');
+          addNotification(supervisor.id, '📅 Leave Request', `${user.name} has requested leave`, 'info', '/dashboard');
         }
         const manager = users.find(u => u.role === 'manager');
         if (manager) {
-          addNotification(manager.id, '📅 Leave Request', `${user.name} requested leave`, 'info');
+          addNotification(manager.id, '📅 Leave Request', `${user.name} requested leave`, 'info', '/dashboard');
         }
       }
       addAuditLog('REQUEST_LEAVE', { employee: leave.employeeName, type: leave.type });
       setShowLeaveModal(false);
       setNewLeave({ employeeId: '', startDate: '', endDate: '', reason: '', type: 'annual' });
-      alert('✅ Leave request submitted successfully!');
+      toast('✅ Leave request submitted successfully!');
     } catch (error) {
       console.error('Error submitting leave:', error);
-      alert('❌ Error submitting leave request');
+      toast('❌ Error submitting leave request');
     }
   };
 
@@ -2027,7 +2380,7 @@ function AppContent() {
     try {
       const leave = leaves.find(l => l.id === leaveId);
       if (!leave) {
-        alert('Leave request not found');
+        toast('Leave request not found');
         return;
       }
 
@@ -2051,19 +2404,19 @@ function AppContent() {
           id: leaveId,
           data: { leaveId, status }
         });
-        alert(`📋 Leave ${approve ? 'approved' : 'rejected'} offline! Will sync when online.`);
+        toast(`📋 Leave ${approve ? 'approved' : 'rejected'} offline! Will sync when online.`);
       } else {
         const officer = users.find(u => u.employeeId === leave.employeeId);
         if (officer) {
-          addNotification(officer.id, 'Leave Request Update', `Your leave request has been ${approve ? 'approved ✅' : 'rejected ❌'}`, approve ? 'success' : 'error');
+          addNotification(officer.id, 'Leave Request Update', `Your leave request has been ${approve ? 'approved ✅' : 'rejected ❌'}`, approve ? 'success' : 'error', '/dashboard');
         }
-        alert(`✅ Leave ${approve ? 'approved' : 'rejected'} successfully!`);
+        toast(`✅ Leave ${approve ? 'approved' : 'rejected'} successfully!`);
       }
       
       addAuditLog('APPROVE_LEAVE', { leaveId, status });
     } catch (error) {
       console.error('Error updating leave:', error);
-      alert('❌ Error updating leave');
+      toast('❌ Error updating leave');
     }
   };
 
@@ -2073,7 +2426,7 @@ function AppContent() {
   const handleRequestPermission = async (e) => {
     e.preventDefault();
     if (!permissionRequest.permissionType || !permissionRequest.startDate || !permissionRequest.endDate || !permissionRequest.reason) {
-      alert('Please fill all required fields');
+      toast('Please fill all required fields');
       return;
     }
 
@@ -2117,26 +2470,26 @@ function AppContent() {
         }
       } else {
         syncQueue.add({ type: 'permission', id: permission.id, data: permission });
-        alert('📋 Permission request saved offline! Will sync when online.');
+        toast('📋 Permission request saved offline! Will sync when online.');
       }
       
       if (isOfficer && user) {
         const supervisor = users.find(u => u.id === user.supervisorId);
         if (supervisor) {
-          addNotification(supervisor.id, '📋 Permission Request', `${user.name} has requested permission for ${permission.permissionType}`, 'info');
+          addNotification(supervisor.id, '📋 Permission Request', `${user.name} has requested permission for ${permission.permissionType}`, 'info', '/permissions');
         }
         const manager = users.find(u => u.role === 'manager');
         if (manager) {
-          addNotification(manager.id, '📋 Permission Request', `${user.name} requested permission`, 'info');
+          addNotification(manager.id, '📋 Permission Request', `${user.name} requested permission`, 'info', '/permissions');
         }
       }
       addAuditLog('REQUEST_PERMISSION', { employee: permission.employeeName, type: permission.permissionType });
       setShowPermissionRequestModal(false);
       setPermissionRequest({ permissionType: '', startDate: '', endDate: '', reason: '' });
-      alert('✅ Permission request submitted successfully!');
+      toast('✅ Permission request submitted successfully!');
     } catch (error) {
       console.error('Error submitting permission:', error);
-      alert('❌ Error submitting permission request');
+      toast('❌ Error submitting permission request');
     }
   };
 
@@ -2144,7 +2497,7 @@ function AppContent() {
     try {
       const permission = permissions.find(p => p.id === permissionId);
       if (!permission) {
-        alert('Permission request not found');
+        toast('Permission request not found');
         return;
       }
 
@@ -2168,19 +2521,19 @@ function AppContent() {
           id: permissionId,
           data: { permissionId, status }
         });
-        alert(`📋 Permission ${approve ? 'approved' : 'rejected'} offline! Will sync when online.`);
+        toast(`📋 Permission ${approve ? 'approved' : 'rejected'} offline! Will sync when online.`);
       } else {
         const officer = users.find(u => u.employeeId === permission.employeeId);
         if (officer) {
-          addNotification(officer.id, 'Permission Request Update', `Your permission request has been ${approve ? 'approved ✅' : 'rejected ❌'}`, approve ? 'success' : 'error');
+          addNotification(officer.id, 'Permission Request Update', `Your permission request has been ${approve ? 'approved ✅' : 'rejected ❌'}`, approve ? 'success' : 'error', '/permissions');
         }
-        alert(`✅ Permission ${approve ? 'approved' : 'rejected'} successfully!`);
+        toast(`✅ Permission ${approve ? 'approved' : 'rejected'} successfully!`);
       }
       
       addAuditLog('APPROVE_PERMISSION', { permissionId, status });
     } catch (error) {
       console.error('Error updating permission:', error);
-      alert('❌ Error updating permission');
+      toast('❌ Error updating permission');
     }
   };
 
@@ -2191,15 +2544,15 @@ function AppContent() {
     e.preventDefault();
 
     if (!citizenForm.firstName.trim() || !citizenForm.lastName.trim()) {
-      alert('First name and last name are required');
+      toast('First name and last name are required');
       return;
     }
     if (!citizenForm.dateOfBirth) {
-      alert('Date of birth is required');
+      toast('Date of birth is required');
       return;
     }
     if (!citizenForm.phone.trim()) {
-      alert('Phone number is required');
+      toast('Phone number is required');
       return;
     }
 
@@ -2207,7 +2560,10 @@ function AppContent() {
 
     const newCitizen = {
       id: uid(),
-      nationalId: generateNationalId(),
+      nationalId: generateNationalId({
+        region: citizenForm.region || user.region,
+        dateOfBirth: citizenForm.dateOfBirth
+      }),
       firstName: citizenForm.firstName.trim(),
       lastName: citizenForm.lastName.trim(),
       dateOfBirth: citizenForm.dateOfBirth,
@@ -2251,17 +2607,17 @@ function AppContent() {
       }
     } else {
       syncQueue.add({ type: 'citizen', id: newCitizen.id, data: newCitizen });
-      alert('🆔 Citizen saved offline! Will sync when online.');
+      toast('🆔 Citizen saved offline! Will sync when online.');
     }
 
     if (isOfficer && user) {
       const supervisor = users.find(u => u.id === user.supervisorId);
       if (supervisor) {
-        addNotification(supervisor.id, '🆔 New Citizen Registered', `${user.name} registered ${newCitizen.firstName} ${newCitizen.lastName}`, 'success');
+        addNotification(supervisor.id, '🆔 New Citizen Registered', `${user.name} registered ${newCitizen.firstName} ${newCitizen.lastName}`, 'success', '/citizens');
       }
       const manager = users.find(u => u.role === 'manager');
       if (manager) {
-        addNotification(manager.id, '🆔 New Citizen Registered', `${user.name} registered ${newCitizen.firstName} ${newCitizen.lastName}`, 'success');
+        addNotification(manager.id, '🆔 New Citizen Registered', `${user.name} registered ${newCitizen.firstName} ${newCitizen.lastName}`, 'success', '/citizens');
       }
     }
     addAuditLog('REGISTER_CITIZEN', { nationalId: newCitizen.nationalId, name: `${newCitizen.firstName} ${newCitizen.lastName}` });
@@ -2284,7 +2640,7 @@ function AppContent() {
       idNumber: '',
       biometrics: false
     });
-    alert('✅ Citizen registered successfully!');
+    toast('✅ Citizen registered successfully!');
   };
 
   // ============================================================
@@ -2292,10 +2648,10 @@ function AppContent() {
   // ============================================================
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!user) return alert('Please login first');
+    if (!user) return toast('Please login first');
 
     if (form.registrations < 0) {
-      alert('Registrations cannot be negative');
+      toast('Registrations cannot be negative');
       return;
     }
 
@@ -2343,7 +2699,7 @@ function AppContent() {
           await db.reports.update(newReport.id, { synced: true });
           setReports(prev => prev.map(r => r.id === newReport.id ? { ...r, synced: true } : r));
           if (addNotification) {
-            await addNotification(user.id, '✅ Report Synced', `Report submitted and synced to the server.`, 'success');
+            await addNotification(user.id, '✅ Report Synced', `Report submitted and synced to the server.`, 'success', '/reports');
           }
         } else {
           throw new Error(`Server responded with ${response.status}`);
@@ -2354,22 +2710,22 @@ function AppContent() {
       }
     } else {
       syncQueue.add({ type: 'report', id: newReport.id, data: newReport });
-      alert('📋 Report saved offline! It will sync when you\'re back online.');
+      toast('📋 Report saved offline! It will sync when you\'re back online.');
     }
 
     if (isOfficer && user) {
       const supervisor = users.find(u => u.id === user.supervisorId);
       if (supervisor) {
-        addNotification(supervisor.id, '📋 Report Submitted', `${user.name} submitted a report`, 'success');
+        addNotification(supervisor.id, '📋 Report Submitted', `${user.name} submitted a report`, 'success', '/reports');
       }
       const manager = users.find(u => u.role === 'manager');
       if (manager) {
-        addNotification(manager.id, '📋 Report Submitted', `${user.name} submitted a report`, 'info');
+        addNotification(manager.id, '📋 Report Submitted', `${user.name} submitted a report`, 'info', '/all_reports');
       }
     } else if (isSupervisor && user) {
       const manager = users.find(u => u.role === 'manager');
       if (manager) {
-        addNotification(manager.id, '📋 Report Submitted', `${user.name} submitted a report`, 'info');
+        addNotification(manager.id, '📋 Report Submitted', `${user.name} submitted a report`, 'info', '/all_reports');
       }
     }
     addAuditLog('SUBMIT_REPORT', { registrations: form.registrations });
@@ -2390,7 +2746,7 @@ function AppContent() {
       weatherConditions: '',
       communityFeedback: ''
     });
-    alert('📋 Report submitted and synced successfully!');
+    toast('📋 Report submitted and synced successfully!');
   };
 
   // ============================================================
@@ -2400,7 +2756,7 @@ function AppContent() {
     e.preventDefault();
     const officer = users.find(u => u.id === supervisorReportForm.officerId);
     if (!officer) {
-      alert('Please select an officer');
+      toast('Please select an officer');
       return;
     }
 
@@ -2458,17 +2814,17 @@ function AppContent() {
       }
     } else {
       syncQueue.add({ type: 'supervisor_report', id: newReport.id, data: newReport });
-      alert('📋 Supervisor report saved offline! Will sync when online.');
+      toast('📋 Supervisor report saved offline! Will sync when online.');
     }
 
     const manager = users.find(u => u.role === 'manager');
     if (manager) {
-      addNotification(manager.id, '📋 Supervisor Report', `${user.name} submitted a report about ${officer.name}`, 'info');
+      addNotification(manager.id, '📋 Supervisor Report', `${user.name} submitted a report about ${officer.name}`, 'info', '/supervisor_reports');
     }
-    addNotification(officer.id, '📋 Supervisor Report', `${user.name} submitted a report about you`, 'info');
+    addNotification(officer.id, '📋 Supervisor Report', `${user.name} submitted a report about you`, 'info', '/supervisor_reports');
     addAuditLog('SUPERVISOR_REPORT', { officer: officer.name, rating: supervisorReportForm.overallRating });
     setShowSupervisorReportModal(false);
-    alert('✅ Supervisor report submitted successfully!');
+    toast('✅ Supervisor report submitted successfully!');
   };
 
   // ============================================================
@@ -2519,16 +2875,16 @@ function AppContent() {
       }
     } else {
       syncQueue.add({ type: 'supervisor_report', id: newReport.id, data: newReport });
-      alert('📋 Self report saved offline! Will sync when online.');
+      toast('📋 Self report saved offline! Will sync when online.');
     }
 
     const manager = users.find(u => u.role === 'manager');
     if (manager) {
-      addNotification(manager.id, '📋 Supervisor Self Report', `${user.name} submitted their self report`, 'info');
+      addNotification(manager.id, '📋 Supervisor Self Report', `${user.name} submitted their self report`, 'info', '/supervisor_reports');
     }
     addAuditLog('SUPERVISOR_SELF_REPORT', { supervisor: user.name });
     setShowSupervisorSelfReportModal(false);
-    alert('✅ Self report submitted successfully!');
+    toast('✅ Self report submitted successfully!');
   };
 
   // ============================================================
@@ -2536,12 +2892,12 @@ function AppContent() {
   // ============================================================
   const exportCSVWithNotification = (data, filename) => {
     if (data.length === 0) {
-      alert('No data to export');
+      toast('No data to export');
       return;
     }
     exportCSV(data, filename);
     if (user) {
-      addNotification(user.id, 'Export Complete', `${filename} exported successfully`, 'success');
+      addNotification(user.id, 'Export Complete', `${filename} exported successfully`, 'success', '/reports');
     }
     addAuditLog('EXPORT_CSV', { filename });
   };
@@ -2549,7 +2905,7 @@ function AppContent() {
   const exportJSONWithNotification = (data, filename) => {
     exportJSON(data, filename);
     if (user) {
-      addNotification(user.id, 'Export Complete', `${filename} exported successfully`, 'success');
+      addNotification(user.id, 'Export Complete', `${filename} exported successfully`, 'success', '/reports');
     }
     addAuditLog('EXPORT_JSON', { filename });
   };
@@ -2572,6 +2928,20 @@ function AppContent() {
   // ============================================================
   // LOGIN PAGE (Home first, then Login)
   // ============================================================
+  // BLOCK THE PAGE until the server responds (startup connection check)
+  if (serverChecking) {
+    return <ServerConnectOverlay checking />;
+  }
+  if (serverReachable === false && !skipServerBlock) {
+    return (
+      <ServerConnectOverlay
+        checking={false}
+        onRetry={checkServerConnection}
+        onContinueOffline={() => setSkipServerBlock(true)}
+      />
+    );
+  }
+
   if (!user) {
     if (isLoading) {
       return <LoadingScreen />;
@@ -2738,7 +3108,6 @@ function AppContent() {
           reports={reports}
           citizens={citizens}
           verificationScore={verificationScore}
-          onLogout={handleLogout}
           onProfileClick={() => setActiveTab('profile')}
         />
         <div className="main-content">
@@ -2755,7 +3124,9 @@ function AppContent() {
             setNotifications={setAppNotifications}
             markNotificationRead={markNotificationRead}
             markAllNotificationsRead={markAllNotificationsRead}
+            setActiveTab={setActiveTab}
             onProfileClick={() => setActiveTab('profile')}
+            onLogout={handleLogout}
           />
           <div className="content">
             {/* Each tab wrapped with ErrorBoundary to isolate crashes */}

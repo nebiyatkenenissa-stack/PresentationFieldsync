@@ -2,8 +2,19 @@
 // Profile as a full page (own tab) with password visibility toggles
 
 import React, { useState, useEffect } from 'react';
+import toast from 'react-hot-toast';
 import { db, syncQueue, checkRealInternet, getApiBase } from '../../services/database';
 import { getProfilePhotoUrl } from '../../utils/helpers';
+
+// Convert a File object to a base64 data URL string for local caching.
+const fileToBase64 = (file) => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+};
 
 const inputStyle = {
   width: '100%',
@@ -103,8 +114,10 @@ function ProfilePage({ user, setUser, setUsers }) {
   });
 
   const [photoPreview, setPhotoPreview] = useState(
-    user?.profilePhoto ? getProfilePhotoUrl(user.profilePhoto) : null
+    user?.profilePhoto ? getProfilePhotoUrl(user.profilePhoto)
+      : (user?.profilePhotoCache ? getProfilePhotoUrl(user.profilePhotoCache) : null)
   );
+  const [photoFailed, setPhotoFailed] = useState(false);
   const [selectedProfileFile, setSelectedProfileFile] = useState(null);
   const [showPassword, setShowPassword] = useState(false);
   const [showCurrentPassword, setShowCurrentPassword] = useState(false);
@@ -159,18 +172,38 @@ function ProfilePage({ user, setUser, setUsers }) {
 
   const set = (key) => (e) => setForm(prev => ({ ...prev, [key]: e.target.value }));
 
+  // Re-seed the form and photo whenever the user object changes. Without this
+  // the fields are a one-time snapshot from mount: after a server pull (or an
+  // offline save round trip) the banner shows the new values while the inputs
+  // still show the old ones, which reads as a corrupted profile. Password
+  // fields are deliberately left untouched.
+  useEffect(() => {
+    setForm(prev => ({
+      ...prev,
+      name: user?.name || '',
+      email: user?.email || '',
+      phone: user?.phone || ''
+    }));
+    setPhotoPreview(
+      user?.profilePhoto ? getProfilePhotoUrl(user.profilePhoto)
+        : (user?.profilePhotoCache ? getProfilePhotoUrl(user.profilePhotoCache) : null)
+    );
+    setPhotoFailed(false);
+  }, [user]);
+
   const handlePhotoChange = (e) => {
     const file = e.target.files[0];
     if (!file) return;
     if (file.size > 2 * 1024 * 1024) {
-      alert('Image must be under 2 MB.');
+      toast('Image must be under 2 MB.');
       return;
     }
     if (!file.type.startsWith('image/')) {
-      alert('Only image files are allowed.');
+      toast('Only image files are allowed.');
       return;
     }
     setSelectedProfileFile(file);
+    setPhotoFailed(false);
     const reader = new FileReader();
     reader.onload = (ev) => setPhotoPreview(ev.target.result);
     reader.readAsDataURL(file);
@@ -182,30 +215,30 @@ function ProfilePage({ user, setUser, setUsers }) {
     setSaving(true);
 
     if (!form.name.trim() || !form.email.trim()) {
-      alert('Name and Email are required.');
+      toast('Name and Email are required.');
       setSaving(false);
       return;
     }
 
     if (form.phone.trim() && !/^(\+251|0)9\d{8}$/.test(form.phone.trim())) {
-      alert('Phone must start with 09 or +2519 and have 9 digits after 0/+251 (e.g. 0912345678).');
+      toast('Phone must start with 09 or +2519 and have 9 digits after 0/+251 (e.g. 0912345678).');
       setSaving(false);
       return;
     }
 
     if (form.password || form.confirmPassword) {
       if (form.password !== form.confirmPassword) {
-        alert('Passwords do not match.');
+        toast('Passwords do not match.');
         setSaving(false);
         return;
       }
       if (form.password.length < 4) {
-        alert('Password must be at least 4 characters.');
+        toast('Password must be at least 4 characters.');
         setSaving(false);
         return;
       }
       if (!form.currentPassword) {
-        alert('Please enter your current password to change it.');
+        toast('Please enter your current password to change it.');
         setSaving(false);
         return;
       }
@@ -214,6 +247,7 @@ function ProfilePage({ user, setUser, setUsers }) {
     const online = await checkRealInternet();
     let updatedUser = { ...user };
     let serverSuccess = false;
+    const messages = [];
 
     const updatedFields = {
       name: form.name.trim(),
@@ -221,6 +255,7 @@ function ProfilePage({ user, setUser, setUsers }) {
       phone: form.phone.trim()
     };
 
+    // ===== 1. PROFILE TEXT FIELDS =====
     if (online) {
       try {
         const response = await fetch(`${getApiBase()}/users/${user.id}`, {
@@ -255,41 +290,44 @@ function ProfilePage({ user, setUser, setUsers }) {
       setUser(updatedUser);
       setUsers(prev => prev.map(u => u.id === updatedUser.id ? updatedUser : u));
       await db.users.update(user.id, updatedUser);
-      if (!online) {
-        const queueItems = syncQueue.getAll();
-        const alreadyQueued = queueItems.some(item => item.id === user.id && item.type === 'user_update');
-        if (!alreadyQueued) {
-          syncQueue.add({ type: 'user_update', id: user.id, data: updatedUser });
-          alert('📋 Profile saved offline. Will sync when online.');
-        }
-      } else {
-        alert('Profile saved locally, but server update failed. Please try again later.');
+      const queueItems = syncQueue.getAll();
+      const alreadyQueued = queueItems.some(item => item.id === user.id && item.type === 'user_update');
+      if (!alreadyQueued) {
+        // Deliberately not spreading `...updatedUser`: it carries the locally
+        // held plaintext password, and the sync handler would re-hash it over
+        // password_hash. Only the fields the officer actually edited.
+        syncQueue.add({
+          type: 'user_update',
+          id: user.id,
+          data: { id: user.id, ...updatedFields }
+        });
       }
+      messages.push('Profile saved locally. Will sync when online.');
     }
 
+    // ===== 2. PASSWORD CHANGE =====
     if (form.password) {
       const localPwMatches = !user.password || form.currentPassword === user.password;
       if (!localPwMatches) {
-        alert('❌ Current password is incorrect.');
+        messages.push('❌ Password not changed: current password is incorrect.');
       } else {
-        const pwPayload = {
-          email: user.email,
-          currentPassword: form.currentPassword,
-          newPassword: form.password
-        };
         if (online) {
           try {
             const pwRes = await fetch(`${getApiBase()}/auth/change-password`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(pwPayload)
+              body: JSON.stringify({
+                email: user.email,
+                currentPassword: form.currentPassword,
+                newPassword: form.password
+              })
             });
             if (pwRes.ok) {
               const userWithPw = { ...updatedUser, password: form.password };
               setUser(userWithPw);
               setUsers(prev => prev.map(u => u.id === userWithPw.id ? userWithPw : u));
               await db.users.update(user.id, userWithPw);
-              alert('✅ Password changed successfully!');
+              messages.push('✅ Password changed.');
             } else {
               const errData = await pwRes.json();
               if (user.password && (errData.error === 'Current password is incorrect' || errData.error === 'User not found')) {
@@ -309,35 +347,50 @@ function ProfilePage({ user, setUser, setUsers }) {
                 } catch (syncErr) {
                   console.error('Password sync error:', syncErr);
                 }
-                alert("✅ Password changed! The server couldn't verify your old password, so it was updated locally and synced.");
+                messages.push('✅ Password changed locally and synced.');
               } else {
-                alert(`❌ Password change failed: ${errData.error || 'Unknown error'}`);
+                messages.push(`❌ Password change failed: ${errData.error || 'Unknown error'}`);
               }
             }
           } catch (err) {
             console.error('Password change error:', err);
-            alert('Network error while changing password.');
+            messages.push('❌ Network error while changing password.');
           }
         } else {
-          alert('Offline: password change will be synced later.');
+          // Offline: save password locally and queue for sync.
+          // The payload must carry the current password and the explicit
+          // passwordChange opt-in so the server can verify the change instead
+          // of blindly overwriting password_hash when the queue flushes.
           const userWithPw = { ...updatedUser, password: form.password };
           setUser(userWithPw);
           setUsers(prev => prev.map(u => u.id === userWithPw.id ? userWithPw : u));
           await db.users.update(user.id, userWithPw);
-          const queueItems = syncQueue.getAll();
-          const alreadyQueued = queueItems.some(item => item.id === user.id && item.type === 'user_update');
-          if (!alreadyQueued) {
-            syncQueue.add({ type: 'user_update', id: user.id, data: userWithPw });
-          }
+          syncQueue.remove(user.id);
+          syncQueue.add({
+            type: 'user_update',
+            id: user.id,
+            data: {
+              id: user.id,
+              name: userWithPw.name,
+              email: userWithPw.email,
+              phone: userWithPw.phone,
+              password: form.password,
+              currentPassword: form.currentPassword,
+              passwordChange: true
+            }
+          });
+          messages.push('✅ Password saved locally. Will sync when online.');
         }
       }
     }
 
+    // ===== 3. PROFILE PHOTO =====
     if (selectedProfileFile) {
-      const formData = new FormData();
-      formData.append('profilePhoto', selectedProfileFile);
+      let photoSaved = false;
       if (online) {
         try {
+          const formData = new FormData();
+          formData.append('profilePhoto', selectedProfileFile);
           const photoRes = await fetch(`${getApiBase()}/users/${user.id}/photo`, {
             method: 'POST',
             body: formData
@@ -349,23 +402,52 @@ function ProfilePage({ user, setUser, setUsers }) {
             setUsers(prev => prev.map(u => u.id === userWithPhoto.id ? userWithPhoto : u));
             await db.users.update(user.id, userWithPhoto);
             setPhotoPreview(getProfilePhotoUrl(photoData.profilePhoto));
+            photoSaved = true;
             console.log('✅ Photo uploaded');
           } else {
             throw new Error('Photo upload failed');
           }
         } catch (err) {
           console.error('Photo upload error:', err);
-          alert('Photo upload failed. Please try again.');
+        }
+      }
+
+      if (!photoSaved) {
+        // Offline or server upload failed: save as base64 locally
+        try {
+          const base64 = await fileToBase64(selectedProfileFile);
+          const userWithLocalPhoto = { ...updatedUser, profilePhoto: base64 };
+          setUser(userWithLocalPhoto);
+          setUsers(prev => prev.map(u => u.id === userWithLocalPhoto.id ? userWithLocalPhoto : u));
+          await db.users.update(user.id, userWithLocalPhoto);
+          setPhotoPreview(base64);
+          syncQueue.remove(`photo_${user.id}`);
+          syncQueue.add({ type: 'user_photo_upload', id: `photo_${user.id}`, data: { userId: user.id, photoBase64: base64 } });
+          photoSaved = true;
+          messages.push('✅ Photo saved locally. Will upload when online.');
+        } catch (localErr) {
+          console.error('Failed to save photo locally:', localErr);
+          messages.push('❌ Photo could not be saved. Please try again.');
         }
       } else {
-        alert('Offline: photo will be uploaded when online.');
+        messages.push('✅ Photo uploaded.');
       }
     }
 
     setForm(prev => ({ ...prev, currentPassword: '', password: '', confirmPassword: '' }));
     setSelectedProfileFile(null);
     setSaving(false);
-    alert('✅ Profile updated successfully!');
+
+    // Tell every open page/device to re-pull /users so the freshest
+    // profile photo (and name/role) shows everywhere immediately.
+    try { window.dispatchEvent(new CustomEvent('users-updated')); } catch (e) { /* noop */ }
+
+    // Show one consolidated message instead of multiple alerts
+    if (messages.length > 0) {
+      toast(messages.join('\n'));
+    } else {
+      toast('✅ Profile updated successfully!');
+    }
   };
 
   const initials = (user?.name || 'U')
@@ -424,8 +506,13 @@ function ProfilePage({ user, setUser, setUsers }) {
                 alignItems: 'center',
                 justifyContent: 'center'
               }}>
-                {photoPreview ? (
-                  <img src={photoPreview} alt="Profile" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                {photoPreview && !photoFailed ? (
+                  <img
+                    src={photoPreview}
+                    alt="Profile"
+                    style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                    onError={() => setPhotoFailed(true)}
+                  />
                 ) : (
                   <span style={{
                     fontSize: '38px',

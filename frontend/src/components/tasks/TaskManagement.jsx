@@ -1,6 +1,8 @@
 // components/tasks/TaskManagement.js
 
 import React, { useState, useEffect } from 'react';
+import toast from 'react-hot-toast';
+import { useTranslation } from 'react-i18next';
 import { uid } from '../../utils/helpers';
 import { db } from '../../services/database';
 import { syncQueue, checkRealInternet } from '../../services/database';
@@ -22,6 +24,7 @@ function TaskManagement({
   addNotification,
   setTasks
 }) {
+  const { t } = useTranslation();
   const [showModal, setShowModal] = useState(false);
   const [taskFilter, setTaskFilter] = useState('all');
   const [isOnline, setIsOnline] = useState(navigator.onLine);
@@ -36,18 +39,20 @@ function TaskManagement({
   });
 
   // ===== CHECK ONLINE STATUS =====
+  const getPendingTaskCount = () => syncQueue.countByTypes(['task', 'task_update']);
+
   useEffect(() => {
     const checkNetwork = async () => {
       const online = await checkRealInternet();
       setIsOnline(online);
-      setPendingCount(syncQueue.count());
+      setPendingCount(getPendingTaskCount());
     };
 
     checkNetwork();
     const interval = setInterval(checkNetwork, 5000);
 
     const handleQueueUpdate = () => {
-      setPendingCount(syncQueue.count());
+      setPendingCount(getPendingTaskCount());
     };
 
     window.addEventListener('sync-queue-updated', handleQueueUpdate);
@@ -68,7 +73,7 @@ function TaskManagement({
       body: JSON.stringify(task)
     });
     if (!response.ok) {
-      throw new Error(`Server error: ${response.status}`);
+      throw new Error(t('task.server_error', { status: response.status }));
     }
     return await response.json();
   };
@@ -80,7 +85,7 @@ function TaskManagement({
       body: JSON.stringify(updateData)
     });
     if (!response.ok) {
-      throw new Error(`Server error: ${response.status}`);
+      throw new Error(t('task.server_error', { status: response.status }));
     }
     return await response.json();
   };
@@ -108,7 +113,7 @@ function TaskManagement({
     e.preventDefault();
 
     if (!newTask.employeeId || !newTask.title || !newTask.deadline) {
-      alert('Please fill all required fields');
+      toast(t('task.fill_required_fields'));
       return;
     }
 
@@ -153,14 +158,15 @@ function TaskManagement({
             id: task.id,
             data: task
           });
-          setPendingCount(syncQueue.count());
-          alert('⚠️ Task saved locally but server sync failed. Will retry later.');
+          setPendingCount(getPendingTaskCount());
+          toast(t('task.sync_failed_save'));
           if (addNotification) {
             await addNotification(
               user.id,
-              '⚠️ Sync Failed',
-              `Task "${task.title}" saved locally but could not reach server.`,
-              'warning'
+              t('task.sync_failed'),
+              t('task.notif_save_failed', { title: task.title }),
+              'warning',
+              '/tasks'
             );
           }
           return; // exit early to avoid double alert
@@ -172,14 +178,15 @@ function TaskManagement({
           id: task.id,
           data: task
         });
-        setPendingCount(syncQueue.count());
-        alert('📋 Task saved OFFLINE! Will sync when online.');
+        setPendingCount(getPendingTaskCount());
+        toast(t('task.saved_offline'));
         if (addNotification) {
           await addNotification(
             user.id,
-            '💾 Offline Save',
-            `Task "${task.title}" saved offline. Will sync when online.`,
-            'warning'
+            t('task.offline_save'),
+            t('task.notif_offline_save', { title: task.title }),
+            'warning',
+            '/tasks'
           );
         }
         return;
@@ -190,18 +197,19 @@ function TaskManagement({
       if (assignedUser && addNotification) {
         await addNotification(
           assignedUser.id,
-          '📋 New Task Assigned',
-          `Task "${task.title}" has been assigned to you by ${user.name}`,
-          'info'
+          t('task.notif_new_task'),
+          t('task.notif_assigned', { title: task.title, name: user.name }),
+          'info',
+          '/tasks'
         );
       }
-      alert('✅ Task assigned successfully!');
+      toast(t('task.assigned_success'));
 
       setShowModal(false);
       setNewTask({ employeeId: '', title: '', description: '', deadline: '', priority: 'medium' });
     } catch (error) {
       console.error('Error creating task:', error);
-      alert('❌ Error creating task: ' + error.message);
+      toast(t('task.error_creating', { message: error.message }));
     }
   };
 
@@ -213,14 +221,14 @@ function TaskManagement({
     try {
       const task = tasks.find(t => t.id === taskId);
       if (!task) {
-        alert('Task not found');
+        toast(t('task.not_found'));
         setIsUpdating(false);
         return;
       }
 
       // Permission checks
       if (isOfficer && task.employeeId !== user.employeeId) {
-        alert('You can only update your own tasks');
+        toast(t('task.only_own_tasks'));
         setIsUpdating(false);
         return;
       }
@@ -228,7 +236,7 @@ function TaskManagement({
       if (isSupervisor) {
         const teamIds = teamMembers.map(m => m.employeeId);
         if (!teamIds.includes(task.employeeId) && task.employeeId !== user.employeeId) {
-          alert('You can only update tasks for your team members');
+          toast(t('task.only_team_tasks'));
           setIsUpdating(false);
           return;
         }
@@ -269,14 +277,15 @@ function TaskManagement({
             id: taskId,
             data: { taskId, status: newStatus }
           });
-          setPendingCount(syncQueue.count());
-          alert('⚠️ Task update saved locally but server sync failed. Will retry later.');
+          setPendingCount(getPendingTaskCount());
+          toast(t('task.update_sync_failed'));
           if (addNotification) {
             await addNotification(
               user.id,
-              '⚠️ Sync Failed',
-              `Task "${task.title}" status updated locally but could not reach server.`,
-              'warning'
+              t('task.sync_failed'),
+              t('task.notif_update_sync_failed', { title: task.title }),
+              'warning',
+              '/tasks'
             );
           }
           setIsUpdating(false);
@@ -289,14 +298,15 @@ function TaskManagement({
           id: taskId,
           data: { taskId, status: newStatus }
         });
-        setPendingCount(syncQueue.count());
-        alert('📋 Task status updated OFFLINE! Will sync when online.');
+        setPendingCount(getPendingTaskCount());
+        toast(t('task.status_updated_offline'));
         if (addNotification) {
           await addNotification(
             user.id,
-            '💾 Offline Update',
-            `Task "${task.title}" status changed to ${newStatus.replace('_', ' ')} offline.`,
-            'warning'
+            t('task.offline_update'),
+            t('task.notif_offline_update', { title: task.title, status: newStatus.replace('_', ' ') }),
+            'warning',
+            '/tasks'
           );
         }
         setIsUpdating(false);
@@ -308,9 +318,10 @@ function TaskManagement({
       if (assignedUser && addNotification && assignedUser.id !== user.id) {
         await addNotification(
           assignedUser.id,
-          '📋 Task Status Updated',
-          `Task "${task.title}" status changed to ${newStatus.replace('_', ' ')} by ${user.name}`,
-          'info'
+          t('task.notif_status_updated'),
+          t('task.notif_changed_by', { title: task.title, status: newStatus.replace('_', ' '), name: user.name }),
+          'info',
+          '/tasks'
         );
       }
 
@@ -318,16 +329,17 @@ function TaskManagement({
       if (manager && manager.id !== user.id && addNotification) {
         await addNotification(
           manager.id,
-          '📋 Task Status Updated',
-          `${user.name} updated task "${task.title}" to ${newStatus.replace('_', ' ')}`,
-          'info'
+          t('task.notif_status_updated'),
+          t('task.notif_manager_changed', { name: user.name, title: task.title, status: newStatus.replace('_', ' ') }),
+          'info',
+          '/tasks'
         );
       }
 
-      alert(`✅ Task status updated to ${newStatus.replace('_', ' ')} successfully!`);
+      toast(t('task.status_updated_success', { status: newStatus.replace('_', ' ') }));
     } catch (error) {
       console.error('Error updating task:', error);
-      alert('❌ Error updating task: ' + error.message);
+      toast(t('task.error_updating', { message: error.message }));
     } finally {
       setIsUpdating(false);
     }
@@ -379,9 +391,9 @@ function TaskManagement({
         gap: '16px'
       }}>
         <div>
-          <h2 style={{ fontSize: '24px', fontWeight: '700', margin: '0 0 6px 0' }}>📋 Task Management</h2>
+          <h2 style={{ fontSize: '24px', fontWeight: '700', margin: '0 0 6px 0' }}>📋 {t('header.page_titles.tasks')}</h2>
           <p style={{ fontSize: '14px', opacity: 0.85, margin: 0, maxWidth: '540px' }}>
-            {isManager ? 'Manage all tasks' : isSupervisor ? 'Manage team tasks' : 'Your tasks'}
+            {isManager ? t('task.hero_manage_all') : isSupervisor ? t('task.hero_manage_team') : t('task.hero_your_tasks')}
           </p>
         </div>
         <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
@@ -393,7 +405,7 @@ function TaskManagement({
             fontSize: '13px',
             fontWeight: '600'
           }}>
-            ⏳ {taskStats.pending} Pending
+            {t('task.pending_count', { count: taskStats.pending })}
           </span>
           <span style={{
             background: 'rgba(96,165,250,0.2)',
@@ -403,7 +415,7 @@ function TaskManagement({
             fontSize: '13px',
             fontWeight: '600'
           }}>
-            🔄 {taskStats.inProgress} In Progress
+            {t('task.in_progress_count', { count: taskStats.inProgress })}
           </span>
           <span style={{
             background: 'rgba(16,185,129,0.2)',
@@ -413,7 +425,7 @@ function TaskManagement({
             fontSize: '13px',
             fontWeight: '600'
           }}>
-            ✅ {taskStats.completed} Completed
+            {t('task.completed_count', { count: taskStats.completed })}
           </span>
           {pendingCount > 0 && (
             <span style={{
@@ -424,7 +436,7 @@ function TaskManagement({
               fontSize: '13px',
               fontWeight: '600'
             }}>
-              📡 {pendingCount} Pending Sync
+              {t('task.pending_sync_count', { count: pendingCount })}
             </span>
           )}
         </div>
@@ -444,7 +456,7 @@ function TaskManagement({
         gap: '8px'
       }}>
         <span style={{ fontWeight: '500', color: isOnline ? '#065f37' : '#991b1b' }}>
-          {isOnline ? '✅ Online' : '❌ Offline'}
+          {isOnline ? `✅ ${t('header.online')}` : `❌ ${t('header.offline')}`}
         </span>
         {pendingCount > 0 && (
           <span style={{
@@ -454,7 +466,7 @@ function TaskManagement({
             borderRadius: '12px',
             fontSize: '12px'
           }}>
-            ⏳ {pendingCount} pending sync
+            {t('task.pending_sync', { count: pendingCount })}
           </span>
         )}
       </div>
@@ -472,7 +484,7 @@ function TaskManagement({
           alignItems: 'center',
           flexWrap: 'wrap'
         }}>
-          <span>📡 You are offline. Tasks will be saved and synced when online.</span>
+          <span>{t('task.offline_banner')}</span>
           {pendingCount > 0 && (
             <span style={{
               background: '#f59e0b',
@@ -481,7 +493,7 @@ function TaskManagement({
               borderRadius: '12px',
               fontSize: '12px'
             }}>
-              {pendingCount} pending sync
+              {t('task.pending_sync', { count: pendingCount })}
             </span>
           )}
         </div>
@@ -516,10 +528,10 @@ function TaskManagement({
                   background: 'white'
                 }}
               >
-                <option value="all">All Tasks ({taskStats.total})</option>
-                <option value="pending">⏳ Pending ({taskStats.pending})</option>
-                <option value="in_progress">🔄 In Progress ({taskStats.inProgress})</option>
-                <option value="completed">✅ Completed ({taskStats.completed})</option>
+                <option value="all">{t('task.all_tasks')} ({taskStats.total})</option>
+                <option value="pending">{t('task.pending')} ({taskStats.pending})</option>
+                <option value="in_progress">{t('task.in_progress')} ({taskStats.inProgress})</option>
+                <option value="completed">{t('task.completed')} ({taskStats.completed})</option>
               </select>
             </div>
             <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
@@ -541,7 +553,7 @@ function TaskManagement({
                     fontWeight: '500'
                   }}
                 >
-                  ➕ Assign Task {!isOnline && '📡'}
+                  {t('task.assign_task')} {!isOnline && '📴'}
                 </button>
               )}
               {isOnline && pendingCount > 0 && (
@@ -558,7 +570,7 @@ function TaskManagement({
                     fontWeight: '500'
                   }}
                 >
-                  🔄 Sync Now
+                  {t('task.sync_now')}
                 </button>
               )}
             </div>
@@ -569,58 +581,58 @@ function TaskManagement({
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
               <thead>
                 <tr style={{ background: '#f8fafc', borderBottom: '2px solid #e5e7eb' }}>
-                  <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: '600', fontSize: '12px', color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Task</th>
-                  <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: '600', fontSize: '12px', color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Assigned To</th>
-                  <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: '600', fontSize: '12px', color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Region</th>
-                  <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: '600', fontSize: '12px', color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Deadline</th>
-                  <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: '600', fontSize: '12px', color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Priority</th>
-                  <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: '600', fontSize: '12px', color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Status</th>
-                  <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: '600', fontSize: '12px', color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Action</th>
+                  <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: '600', fontSize: '12px', color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.5px' }}>{t('task.table_task')}</th>
+                  <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: '600', fontSize: '12px', color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.5px' }}>{t('task.assigned_to')}</th>
+                  <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: '600', fontSize: '12px', color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.5px' }}>{t('common.region')}</th>
+                  <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: '600', fontSize: '12px', color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.5px' }}>{t('task.deadline')}</th>
+                  <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: '600', fontSize: '12px', color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.5px' }}>{t('task.priority_label')}</th>
+                  <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: '600', fontSize: '12px', color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.5px' }}>{t('common.status')}</th>
+                  <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: '600', fontSize: '12px', color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.5px' }}>{t('task.action')}</th>
                 </tr>
               </thead>
               <tbody>
                 {displayTasks.length === 0 && (
                   <tr>
                     <td colSpan="7" className="empty-state" style={{ padding: '40px', textAlign: 'center', color: '#6b7280' }}>
-                      <div style={{ fontSize: '48px', marginBottom: '8px' }}>📋</div>
-                      <div>No tasks found</div>
+                      <div style={{ fontSize: '48px', marginBottom: '8px' }}>📭</div>
+                      <div>{t('task.no_tasks_found')}</div>
                       <div style={{ fontSize: '12px', color: '#94a3b8', marginTop: '4px' }}>
-                        {isManager || isSupervisor ? 'Click "Assign Task" to create a new task' : 'No tasks assigned to you yet'}
+                        {isManager || isSupervisor ? t('task.no_tasks_hint') : t('task.no_tasks_for_you')}
                       </div>
                     </td>
                   </tr>
                 )}
-                {displayTasks.map(t => {
-                  const assignedUser = users.find(u => u.employeeId === t.employeeId);
-                  const isAssignedToMe = isOfficer && t.employeeId === user.employeeId;
-                  const isAssignedToTeam = isSupervisor && teamMembers.some(m => m.employeeId === t.employeeId);
+                {displayTasks.map(task => {
+                  const assignedUser = users.find(u => u.employeeId === task.employeeId);
+                  const isAssignedToMe = isOfficer && task.employeeId === user.employeeId;
+                  const isAssignedToTeam = isSupervisor && teamMembers.some(m => m.employeeId === task.employeeId);
                   const canUpdate = isManager || isAssignedToMe || isAssignedToTeam;
-                  const statusStyle = getStatusBadgeStyle(t.status);
-                  const priorityStyle = getPriorityBadgeStyle(t.priority);
+                  const statusStyle = getStatusBadgeStyle(task.status);
+                  const priorityStyle = getPriorityBadgeStyle(task.priority);
 
                   return (
-                    <tr key={t.id} style={{ borderBottom: '1px solid #f3f4f6' }}>
+                    <tr key={task.id} style={{ borderBottom: '1px solid #f3f4f6' }}>
                       <td style={{ padding: '12px 16px' }}>
-                        <strong style={{ fontSize: '14px', color: '#1a1a2e' }}>{t.title}</strong>
-                        {t.description && <div className="task-description" style={{ fontSize: '13px', color: '#64748b', marginTop: '2px' }}>{t.description}</div>}
-                        {t.assignedByName && (
+                        <strong style={{ fontSize: '14px', color: '#1a1a2e' }}>{task.title}</strong>
+                        {task.description && <div className="task-description" style={{ fontSize: '13px', color: '#64748b', marginTop: '2px' }}>{task.description}</div>}
+                        {task.assignedByName && (
                           <div style={{ fontSize: '11px', color: '#94a3b8', marginTop: '2px' }}>
-                            Assigned by: {t.assignedByName}
+                            {t('task.assigned_by')}: {task.assignedByName}
                           </div>
                         )}
-                        {!t.synced && (
-                          <span style={{ fontSize: '10px', color: '#f59e0b', marginLeft: '4px' }}>📡 Offline</span>
+                        {!task.synced && (
+                          <span style={{ fontSize: '10px', color: '#f59e0b', marginLeft: '4px' }}>📴 {t('header.offline')}</span>
                         )}
                       </td>
                       <td style={{ padding: '12px 16px' }}>
-                        {assignedUser?.name || t.employeeId}
-                        {isAssignedToMe && <span style={{ fontSize: '10px', color: '#1e3a5f', marginLeft: '4px' }}>(You)</span>}
+                        {assignedUser?.name || task.employeeId}
+                        {isAssignedToMe && <span style={{ fontSize: '10px', color: '#1e3a5f', marginLeft: '4px' }}>({t('task.you')})</span>}
                       </td>
-                      <td style={{ padding: '12px 16px' }}>{assignedUser?.region || 'N/A'}</td>
-                      <td style={{ padding: '12px 16px', color: new Date(t.deadline) < new Date() && t.status !== 'completed' ? '#dc2626' : 'inherit' }}>
-                        {t.deadline}
-                        {new Date(t.deadline) < new Date() && t.status !== 'completed' && (
-                          <span style={{ fontSize: '10px', color: '#dc2626', marginLeft: '4px' }}>⚠️ Overdue</span>
+                      <td style={{ padding: '12px 16px' }}>{assignedUser?.region || t('task.na')}</td>
+                      <td style={{ padding: '12px 16px', color: new Date(task.deadline) < new Date() && task.status !== 'completed' ? '#dc2626' : 'inherit' }}>
+                        {task.deadline}
+                        {new Date(task.deadline) < new Date() && task.status !== 'completed' && (
+                          <span style={{ fontSize: '10px', color: '#dc2626', marginLeft: '4px' }}>{t('task.overdue')}</span>
                         )}
                       </td>
                       <td style={{ padding: '12px 16px' }}>
@@ -631,7 +643,7 @@ function TaskManagement({
                           fontWeight: '500',
                           ...priorityStyle
                         }}>
-                          {t.priority}
+                          {t(`task.priority.${task.priority}`, { defaultValue: task.priority })}
                         </span>
                       </td>
                       <td style={{ padding: '12px 16px' }}>
@@ -642,17 +654,17 @@ function TaskManagement({
                           fontWeight: '500',
                           ...statusStyle
                         }}>
-                          {t.status === 'in_progress' ? 'In Progress' : t.status.charAt(0).toUpperCase() + t.status.slice(1)}
+                          {t(`task.status.${task.status}`, { defaultValue: task.status.charAt(0).toUpperCase() + task.status.slice(1) })}
                         </span>
-                        {!t.synced && t.status !== 'pending' && (
-                          <span style={{ fontSize: '10px', color: '#f59e0b', marginLeft: '4px' }}>📡</span>
+                        {!task.synced && task.status !== 'pending' && (
+                          <span style={{ fontSize: '10px', color: '#f59e0b', marginLeft: '4px' }}>📴</span>
                         )}
                       </td>
                       <td style={{ padding: '12px 16px' }}>
                         {canUpdate ? (
                           <select
-                            value={t.status}
-                            onChange={(e) => updateTaskStatus(t.id, e.target.value)}
+                            value={task.status}
+                            onChange={(e) => updateTaskStatus(task.id, e.target.value)}
                             disabled={isUpdating}
                             className="task-status-select"
                             style={{
@@ -664,15 +676,15 @@ function TaskManagement({
                               cursor: isUpdating ? 'not-allowed' : 'pointer'
                             }}
                           >
-                            <option value="pending">⏳ Pending</option>
-                            <option value="in_progress">🔄 In Progress</option>
-                            <option value="completed">✅ Completed</option>
+                            <option value="pending">{t('task.pending')}</option>
+                            <option value="in_progress">{t('task.in_progress')}</option>
+                            <option value="completed">{t('task.completed')}</option>
                           </select>
                         ) : (
                           <span style={{ fontSize: '12px', color: '#94a3b8' }}>—</span>
                         )}
                         {!isOnline && canUpdate && (
-                          <span style={{ fontSize: '10px', color: '#f59e0b', marginLeft: '4px' }}>📡 Offline</span>
+                          <span style={{ fontSize: '10px', color: '#f59e0b', marginLeft: '4px' }}>📴 {t('header.offline')}</span>
                         )}
                       </td>
                     </tr>
@@ -695,7 +707,7 @@ function TaskManagement({
               marginTop: '16px',
               borderRadius: '0 0 8px 8px'
             }}>
-              <span>⏳ {pendingCount} task(s) pending sync</span>
+              <span>{t('task.tasks_pending_sync', { count: pendingCount })}</span>
               {isOnline && (
                 <button
                   onClick={() => window.dispatchEvent(new Event('force-sync'))}
@@ -709,7 +721,7 @@ function TaskManagement({
                     fontSize: '12px'
                   }}
                 >
-                  🔄 Sync Now
+                  {t('task.sync_now')}
                 </button>
               )}
             </div>
@@ -731,8 +743,8 @@ function TaskManagement({
           }}>
             <div className="modal-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
               <h3 style={{ fontSize: '20px', fontWeight: '600' }}>
-                Assign New Task
-                {!isOnline && <span style={{ fontSize: '12px', color: '#f59e0b', marginLeft: '8px' }}>📡 Offline</span>}
+                {t('task.assign_new_task')}
+                {!isOnline && <span style={{ fontSize: '12px', color: '#f59e0b', marginLeft: '8px' }}>📴 {t('header.offline')}</span>}
               </h3>
               <button
                 className="modal-close"
@@ -744,7 +756,7 @@ function TaskManagement({
                   cursor: 'pointer',
                   color: '#64748b'
                 }}
-              >✕</button>
+              >×</button>
             </div>
 
             {!isOnline && (
@@ -755,10 +767,10 @@ function TaskManagement({
                 borderRadius: '8px',
                 marginBottom: '16px'
               }}>
-                <strong>📡 Offline Mode:</strong> Task will be saved locally and synced automatically when online.
+                <strong>📴 {t('auth.offline_mode')}:</strong> {t('task.offline_save_notice')}
                 {pendingCount > 0 && (
                   <span style={{ marginLeft: '8px' }}>
-                    ({pendingCount} pending sync)
+                    ({t('task.pending_sync', { count: pendingCount })})
                   </span>
                 )}
               </div>
@@ -766,7 +778,7 @@ function TaskManagement({
 
             <form onSubmit={handleCreateTask} className="modal-form" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
               <div className="form-group" style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                <label style={{ fontSize: '13px', fontWeight: '500', color: '#374151' }}>Assign To *</label>
+                <label style={{ fontSize: '13px', fontWeight: '500', color: '#374151' }}>{t('task.assign_to')} *</label>
                 <select
                   value={newTask.employeeId}
                   onChange={e => setNewTask({ ...newTask, employeeId: e.target.value })}
@@ -780,19 +792,19 @@ function TaskManagement({
                     background: 'white'
                   }}
                 >
-                  <option value="">Select Officer</option>
+                  <option value="">{t('task.select_officer')}</option>
                   {(isManager ? users.filter(u => u.role === 'field_officer' || u.role === 'supervisor') : teamMembers).map(u => (
                     <option key={u.id} value={u.employeeId}>{u.name} ({u.region})</option>
                   ))}
                 </select>
               </div>
               <div className="form-group" style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                <label style={{ fontSize: '13px', fontWeight: '500', color: '#374151' }}>Task Title *</label>
+                <label style={{ fontSize: '13px', fontWeight: '500', color: '#374151' }}>{t('task.task_title')} *</label>
                 <input
                   type="text"
                   value={newTask.title}
                   onChange={e => setNewTask({ ...newTask, title: e.target.value })}
-                  placeholder="Enter task title"
+                  placeholder={t('task.enter_task_title')}
                   required
                   style={{
                     padding: '8px 12px',
@@ -804,11 +816,11 @@ function TaskManagement({
                 />
               </div>
               <div className="form-group" style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                <label style={{ fontSize: '13px', fontWeight: '500', color: '#374151' }}>Description</label>
+                <label style={{ fontSize: '13px', fontWeight: '500', color: '#374151' }}>{t('task.description')}</label>
                 <textarea
                   value={newTask.description}
                   onChange={e => setNewTask({ ...newTask, description: e.target.value })}
-                  placeholder="Enter task description"
+                  placeholder={t('task.enter_task_description')}
                   rows="3"
                   style={{
                     padding: '8px 12px',
@@ -823,7 +835,7 @@ function TaskManagement({
               </div>
               <div className="form-row" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
                 <div className="form-group" style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                  <label style={{ fontSize: '13px', fontWeight: '500', color: '#374151' }}>Deadline *</label>
+                  <label style={{ fontSize: '13px', fontWeight: '500', color: '#374151' }}>{t('task.deadline')} *</label>
                   <input
                     type="date"
                     value={newTask.deadline}
@@ -839,7 +851,7 @@ function TaskManagement({
                   />
                 </div>
                 <div className="form-group" style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                  <label style={{ fontSize: '13px', fontWeight: '500', color: '#374151' }}>Priority</label>
+                  <label style={{ fontSize: '13px', fontWeight: '500', color: '#374151' }}>{t('task.priority_label')}</label>
                   <select
                     value={newTask.priority}
                     onChange={e => setNewTask({ ...newTask, priority: e.target.value })}
@@ -852,9 +864,9 @@ function TaskManagement({
                       background: 'white'
                     }}
                   >
-                    <option value="low">Low</option>
-                    <option value="medium">Medium</option>
-                    <option value="high">High</option>
+                    <option value="low">{t('task.priority.low')}</option>
+                    <option value="medium">{t('task.priority.medium')}</option>
+                    <option value="high">{t('task.priority.high')}</option>
                   </select>
                 </div>
               </div>
@@ -865,10 +877,10 @@ function TaskManagement({
                 fontSize: '13px',
                 color: !isOnline ? '#92400e' : '#1e40af'
               }}>
-                <strong>ℹ️ {isOnline ? 'Online' : 'Offline'}:</strong>
+                <strong>{isOnline ? '🟢' : '📴'} {isOnline ? t('header.online') : t('header.offline')}:</strong>
                 {isOnline
-                  ? ' This task will be assigned immediately.'
-                  : ' This task will be saved offline and synced when online.'}
+                  ? ' ' + t('task.assign_immediately')
+                  : ' ' + t('task.save_offline_notice')}
               </div>
               <div className="modal-actions" style={{ display: 'flex', gap: '12px', marginTop: '8px' }}>
                 <button
@@ -888,7 +900,7 @@ function TaskManagement({
                     fontWeight: '500'
                   }}
                 >
-                  {isOnline ? '➕ Assign Task' : '💾 Save Offline'}
+                  {isOnline ? t('task.assign_task') : '📴 ' + t('report.save_offline')}
                 </button>
                 <button
                   type="button"
@@ -908,7 +920,7 @@ function TaskManagement({
                     fontWeight: '500'
                   }}
                 >
-                  Cancel
+                  {t('common.cancel')}
                 </button>
               </div>
             </form>
@@ -920,3 +932,4 @@ function TaskManagement({
 }
 
 export default TaskManagement;
+

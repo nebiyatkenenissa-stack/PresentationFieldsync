@@ -3,8 +3,10 @@
 // to the next scheduled verification (target = epoch ms from the hook).
 
 import React, { useState, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 
 function NextVerificationCountdown({ target }) {
+  const { t } = useTranslation();
   const [now, setNow] = useState(() => Date.now());
 
   useEffect(() => {
@@ -25,7 +27,7 @@ function NextVerificationCountdown({ target }) {
   return (
     <div className="verification-countdown-indicator">
       <span className="countdown-icon">🔍</span>
-      <span className="countdown-label">Next verification in:</span>
+      <span className="countdown-label">{t('verification.next_verification_in')}</span>
       <span className="countdown-timer">{timeLabel}</span>
 
       <style>{`

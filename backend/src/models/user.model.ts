@@ -1,7 +1,12 @@
 import { pool } from '../config/db.js';
 
+// Columns safe to return from the list/detail endpoints. password_hash is
+// deliberately excluded: it was being shipped to every client, and the offline
+// merge code stored it as the user's local plaintext `password`. A later
+// offline profile save then pushed that hash back as if it were a new password
+// and re-hashed it, permanently locking the account out.
 const USER_COLUMNS = `id, employee_id, name, email, role, region, supervisor_id,
-    status, password_hash, phone, shift, department, profile_photo,
+    status, phone, shift, department, profile_photo,
     must_change_password, country_id, region_id, zone_id, woreda_id, kebele_id, community_id,
     location_path, created_at, updated_at`;
 
@@ -79,7 +84,7 @@ export async function createOrUpdateUser(
         phone = EXCLUDED.phone,
         shift = EXCLUDED.shift,
         department = EXCLUDED.department,
-        profile_photo = EXCLUDED.profile_photo,
+        profile_photo = COALESCE(EXCLUDED.profile_photo, users.profile_photo),
         must_change_password = EXCLUDED.must_change_password,
         country_id = EXCLUDED.country_id,
         region_id = EXCLUDED.region_id,
@@ -189,7 +194,7 @@ export async function updateUserProfile(id: string, body: any): Promise<any> {
     updates.push(`department = $${paramIndex++}`);
     values.push(body.department);
   }
-  if (body.profilePhoto !== undefined) {
+  if (body.profilePhoto !== undefined && body.profilePhoto !== null) {
     updates.push(`profile_photo = $${paramIndex++}`);
     values.push(body.profilePhoto);
   }
@@ -259,6 +264,11 @@ export async function updateUserPhoto(id: string, filePath: string): Promise<any
     [filePath, id]
   );
   return result.rows[0];
+}
+
+export async function getCurrentPhoto(id: string): Promise<string | null> {
+  const result = await pool.query('SELECT profile_photo FROM users WHERE id = $1', [id]);
+  return result.rows[0]?.profile_photo || null;
 }
 
 export async function getSupervisorsByWoreda(woredaId: string): Promise<any[]> {

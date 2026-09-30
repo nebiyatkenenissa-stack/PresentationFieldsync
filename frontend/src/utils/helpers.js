@@ -1,27 +1,105 @@
+import toast from 'react-hot-toast';
 // utils/helpers.js - Complete fixed version
+import { buildRegionOptions } from './regions';
+
 
 export const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 
-// National ID format: ETH2026 + 5 zero-padded digits (e.g. ETH2026-03817)
-export const generateNationalId = () => {
-  const digits = Math.floor(Math.random() * 100000).toString().padStart(5, '0');
-  return `ETH2026-${digits}`;
+// ===== STRUCTURED NATIONAL ID (with checksum) =====
+// Format: ET-<birthYearYY>-<regionCode>-<sequence5>-<check>
+// e.g. ET-26-AM-00017-4  →  Ethiopian national ID, region Amhara,
+//                           birth year 2026, sequence 00017, check 4.
+// The sequence + year + region index are protected by a Luhn check digit so
+// typos and transcription errors are detected automatically.
+const REGION_CODES = [
+  ['ADDIS ABABA', 'AA'],
+  ['AFAR', 'AF'],
+  ['AMHARA', 'AM'],
+  ['BENISHANGUL', 'BG'],
+  ['DIRE DAWA', 'DD'],
+  ['GAMBELA', 'GA'],
+  ['HARARI', 'HA'],
+  ['OROMIA', 'OR'],
+  ['OROMIYA', 'OR'],
+  ['SIDAMA', 'SD'],
+  ['SOMALI', 'SO'],
+  ['SOUTH WEST', 'SW'],
+  ['SOUTHERN', 'SN'],
+  ['SOUTHERN NATIONS', 'SN'],
+  ['SNNPR', 'SN'],
+  ['TIGRAY', 'TG'],
+  ['NORTH', 'NO'],
+  ['SOUTH', 'SO'],
+  ['EAST', 'EA'],
+  ['WEST', 'WE'],
+  ['CENTRAL', 'CE']
+];
+
+// 2-letter code for a region name (unknown → XX).
+export const getRegionCode = (region = '') => {
+  const r = String(region || '').trim().toUpperCase();
+  if (!r) return 'XX';
+  for (const [name, code] of REGION_CODES) {
+    if (r.includes(name)) return code;
+  }
+  return r.replace(/[^A-Z]/g, '').slice(0, 2) || 'XX';
+};
+
+// Standard Luhn check digit for a digit string (0–9).
+const luhnCheckDigit = (digits) => {
+  const reversed = String(digits).split('').reverse();
+  let sum = 0;
+  reversed.forEach((ch, i) => {
+    let d = Number(ch);
+    if (i % 2 === 1) {
+      d *= 2;
+      if (d > 9) d -= 9;
+    }
+    sum += d;
+  });
+  return (10 - (sum % 10)) % 10;
+};
+
+// Canonical order of region codes → gives the 2-digit region index embedded in
+// the ID. It is derived from the printed code (not the input name) so the Luhn
+// check digit can be verified from the ID alone.
+export const REGION_CODE_ORDER = ['AA', 'AF', 'AM', 'BG', 'DD', 'GA', 'HA', 'OR', 'SD', 'SO', 'SW', 'SN', 'TG', 'NO', 'EA', 'WE', 'CE'];
+
+// Verifies an ET-<YY>-<REG>-<seq>-<check> national ID (typos/transcriptions).
+export const isValidNationalId = (nationalId) => {
+  const m = String(nationalId || '').trim().match(/^ET-(\d{2})-([A-Z]{2})-(\d{5})-(\d)$/);
+  if (!m) return false;
+  const regionIndex = String(Math.max(REGION_CODE_ORDER.indexOf(m[2]), 0)).padStart(2, '0');
+  return luhnCheckDigit(`${m[1]}${regionIndex}${m[3]}`) === Number(m[4]);
+};
+
+export const generateNationalId = ({ region = '', dateOfBirth = null } = {}) => {
+  const regionCode = getRegionCode(region);
+  const birthYear = dateOfBirth ? String(new Date(dateOfBirth).getFullYear()).slice(-2)
+    : String(new Date().getFullYear()).slice(-2);
+  const regionIndex = String(Math.max(REGION_CODE_ORDER.indexOf(regionCode), 0)).padStart(2, '0');
+  const sequence = String(Math.floor(Math.random() * 100000)).padStart(5, '0');
+  const check = luhnCheckDigit(`${birthYear}${regionIndex}${sequence}`);
+  return `ET-${birthYear}-${regionCode}-${sequence}-${check}`;
 };
 
 export const getToday = () => new Date().toISOString().slice(0, 10);
 
 // Resolve the server origin (no /api suffix) so uploaded profile photos load
 // correctly both on localhost and from other devices on the same network.
+const API_PORT = (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_API_PORT)
+  || '5000';
+
 export const getServerBase = () => {
   try {
-    if (typeof window === 'undefined' || !window.location) return 'http://localhost:5000';
+    if (typeof window === 'undefined' || !window.location) return `http://localhost:${API_PORT}`;
     const { hostname } = window.location;
     if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1') {
-      return 'http://localhost:5000';
+      return `http://localhost:${API_PORT}`;
     }
-    return `http://${hostname}:5000`;
+    return `http://${hostname}:${API_PORT}`;
   } catch (e) {
-    return 'http://localhost:5000';
+    return `http://localhost:${API_PORT}`;
   }
 };
 
@@ -35,15 +113,15 @@ export const getProfilePhotoUrl = (path) => {
   return `${getServerBase()}${path}`;
 };
 
-// Region options built ONLY from the regions listed in the users list.
-// Returns ['All', ...distinctRegions].
-export const getRegionOptions = (users) => {
-  const set = new Set();
-  (users || []).forEach(u => {
-    const r = u && u.region;
-    if (r && r !== 'All' && r !== 'all' && r !== '') set.add(r);
-  });
-  return ['All', ...set];
+// Region options for a filter dropdown. Returns ['All', ...realRegionNames] where
+// the names come from the real region list (utils/regions.js) and any region
+// found in the supplied users list. Kebele / woreda / zone values are never
+// offered as regions.
+export const getRegionOptions = (users, regions) => {
+  const raw = (users || [])
+    .map(u => u && u.region)
+    .filter(r => r && r !== 'All' && r !== 'all' && r !== '');
+  return ['All', ...buildRegionOptions(raw, regions)];
 };
 
 // Map each employeeId to the region listed for that user.
@@ -103,7 +181,7 @@ export const fakeSyncApi = (report) => {
 
 export const exportCSV = (data, filename) => {
   if (!data || data.length === 0) { 
-    alert('No data to export'); 
+    toast('No data to export'); 
     return; 
   }
   const headers = Object.keys(data[0]);

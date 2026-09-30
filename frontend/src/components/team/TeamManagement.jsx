@@ -1,4 +1,9 @@
 import React, { useState, useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
+import UserAvatar from '../common/UserAvatar';
+import useRegions from '../../hooks/useRegions';
+import { getRegionOptions } from '../../utils/helpers';
+import { regionOfPath } from '../../utils/regions';
 
 function TeamManagement({ 
   users, 
@@ -13,9 +18,12 @@ function TeamManagement({
   setSelectedOfficer,
   citizens // ADDED: citizens array for accurate counting
 }) {
+  const { t } = useTranslation();
   const [searchTerm, setSearchTerm] = useState('');
   const [filterRegion, setFilterRegion] = useState('All');
   const [cardFilter, setCardFilter] = useState(null);
+  // The REAL region list (Amhara, Oromia, ...) from the backend.
+  const regionList = useRegions();
 
   // Get team members
   const displayMembers = useMemo(() => {
@@ -31,11 +39,12 @@ function TeamManagement({
     }
 
     if (filterRegion !== 'All') {
-      members = members.filter(m => m.region === filterRegion);
+      // Compare the real region name, not the raw full location path.
+      members = members.filter(m => regionOfPath(m.region, regionList) === filterRegion);
     }
 
     return members;
-  }, [users, teamMembers, isManager, searchTerm, filterRegion]);
+  }, [users, teamMembers, isManager, searchTerm, filterRegion, regionList]);
 
   // Members after applying the stat-card filter (online / has reports / has citizens)
   const filteredMembers = useMemo(() => {
@@ -88,14 +97,23 @@ function TeamManagement({
     };
   };
 
-  // Get region options
-  const regions = useMemo(() => {
-    const set = new Set();
-    (users || []).forEach(u => {
-      if (u.region && u.region !== 'All' && u.region !== 'all' && u.region !== '') set.add(u.region);
-    });
-    return ['All', ...set];
-  }, [users]);
+  // Region options come from the REAL region list (utils/regions.js).
+  const regions = useMemo(() => getRegionOptions(users, regionList), [users, regionList]);
+
+  // Localized role name, falling back to the readable raw slug.
+  const roleLabel = (role) => role
+    ? t(`team.role_${role}`, { defaultValue: role.replace(/_/g, ' ') })
+    : '';
+
+  // Localized account status for the detail modal.
+  const accountStatusLabel = (status) => status
+    ? t(`team.account_${status}`, { defaultValue: t(`team.status_${status}`, { defaultValue: status }) })
+    : t('team.n_a');
+
+  // Localized live presence shown on each member card.
+  const presenceLabel = (status) => status
+    ? t(`team.status_${status}`, { defaultValue: status.charAt(0).toUpperCase() + status.slice(1) })
+    : '';
 
   return (
     <div className="team-view" style={{padding: '0'}}>
@@ -114,9 +132,9 @@ function TeamManagement({
         gap: '16px'
       }}>
         <div>
-          <h2 style={{ fontSize: '24px', fontWeight: '700', margin: '0 0 6px 0' }}>👥 Team Management</h2>
+          <h2 style={{ fontSize: '24px', fontWeight: '700', margin: '0 0 6px 0' }}>{t('team.title')}</h2>
           <p style={{ fontSize: '14px', opacity: 0.85, margin: 0, maxWidth: '540px' }}>
-            {isManager ? 'Manage all team members' : 'View your team members'}
+            {isManager ? t('team.manage_all') : t('team.view_your_team')}
           </p>
         </div>
         <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
@@ -138,7 +156,7 @@ function TeamManagement({
             fontSize: '13px',
             fontWeight: '600'
           }}>
-            👥 {displayMembers.length} Members
+            {t('team.members', { count: displayMembers.length })}
           </span>
         </div>
       </div>
@@ -169,8 +187,8 @@ function TeamManagement({
           e.currentTarget.style.boxShadow = cardFilter === null ? '0 4px 12px rgba(30, 58, 95, 0.2)' : '0 0 0 3px rgba(255,255,255,0.7), 0 4px 12px rgba(30, 58, 95, 0.2)';
         }}>
           <div style={{fontSize: '28px', fontWeight: '700'}}>{teamStats.totalMembers}</div>
-          <div style={{fontSize: '13px', opacity: 0.8}}>👥 Total Members</div>
-          <div style={{fontSize: '11px', opacity: 0.7, marginTop: '6px'}}>{cardFilter === null ? 'Click to view all' : '✓ Showing all'}</div>
+          <div style={{fontSize: '13px', opacity: 0.8}}>{t('team.total_members')}</div>
+          <div style={{fontSize: '11px', opacity: 0.7, marginTop: '6px'}}>{cardFilter === null ? t('team.click_view_all') : t('team.showing_all')}</div>
         </div>
         <div style={{
           background: 'linear-gradient(135deg, #0b7e4b, #0a6a3f)',
@@ -191,8 +209,8 @@ function TeamManagement({
           e.currentTarget.style.boxShadow = cardFilter === 'online' ? '0 0 0 3px rgba(255,255,255,0.7), 0 4px 12px rgba(11, 126, 75, 0.2)' : '0 4px 12px rgba(11, 126, 75, 0.2)';
         }}>
           <div style={{fontSize: '28px', fontWeight: '700'}}>{teamStats.onlineMembers}</div>
-          <div style={{fontSize: '13px', opacity: 0.8}}>🟢 Online Now</div>
-          <div style={{fontSize: '11px', opacity: 0.7, marginTop: '6px'}}>{cardFilter === 'online' ? '✓ Filtering online' : 'Click to filter online'}</div>
+          <div style={{fontSize: '13px', opacity: 0.8}}>{t('team.online_now')}</div>
+          <div style={{fontSize: '11px', opacity: 0.7, marginTop: '6px'}}>{cardFilter === 'online' ? t('team.filtering_online') : t('team.click_filter_online')}</div>
         </div>
         <div style={{
           background: 'linear-gradient(135deg, #2563eb, #1d4ed8)',
@@ -213,8 +231,8 @@ function TeamManagement({
           e.currentTarget.style.boxShadow = cardFilter === 'reports' ? '0 0 0 3px rgba(255,255,255,0.7), 0 4px 12px rgba(37, 99, 235, 0.2)' : '0 4px 12px rgba(37, 99, 235, 0.2)';
         }}>
           <div style={{fontSize: '28px', fontWeight: '700'}}>{teamStats.totalReports}</div>
-          <div style={{fontSize: '13px', opacity: 0.8}}>📋 Total Reports</div>
-          <div style={{fontSize: '11px', opacity: 0.7, marginTop: '6px'}}>{cardFilter === 'reports' ? '✓ Filtering with reports' : 'Click to filter with reports'}</div>
+          <div style={{fontSize: '13px', opacity: 0.8}}>{t('team.total_reports')}</div>
+          <div style={{fontSize: '11px', opacity: 0.7, marginTop: '6px'}}>{cardFilter === 'reports' ? t('team.filtering_reports') : t('team.click_filter_reports')}</div>
         </div>
         <div style={{
           background: 'linear-gradient(135deg, #d97706, #b45309)',
@@ -236,8 +254,8 @@ function TeamManagement({
         }}>
           {/* ✅ FIX: Display actual citizens count */}
           <div style={{fontSize: '28px', fontWeight: '700'}}>{teamStats.totalRegistrations}</div>
-          <div style={{fontSize: '13px', opacity: 0.8}}>🆔 Citizens Registered</div>
-          <div style={{fontSize: '11px', opacity: 0.7, marginTop: '6px'}}>{cardFilter === 'citizens' ? '✓ Filtering with citizens' : 'Click to filter with citizens'}</div>
+          <div style={{fontSize: '13px', opacity: 0.8}}>{t('team.citizens_registered')}</div>
+          <div style={{fontSize: '11px', opacity: 0.7, marginTop: '6px'}}>{cardFilter === 'citizens' ? t('team.filtering_citizens') : t('team.click_filter_citizens')}</div>
         </div>
       </div>
 
@@ -265,7 +283,7 @@ function TeamManagement({
       }}>
         <input
           type="text"
-          placeholder="🔍 Search by name or ID..."
+          placeholder={t('team.search_placeholder')}
           value={searchTerm}
           onChange={(e) => setSearchTerm(e.target.value)}
           style={{
@@ -310,11 +328,11 @@ function TeamManagement({
           }}
         >
           {regions.map(r => (
-            <option key={r} value={r}>{r === 'All' ? '🌍 All Regions' : r}</option>
+            <option key={r} value={r}>{r === 'All' ? t('team.all_regions') : r}</option>
           ))}
         </select>
         <span style={{color: '#64748b', fontSize: '14px'}}>
-          {displayMembers.length} members found
+          {t('team.members_found', { count: displayMembers.length })}
         </span>
       </div>
 
@@ -333,11 +351,11 @@ function TeamManagement({
           marginBottom: '16px'
         }}>
           <span style={{ fontSize: '14px', fontWeight: '500' }}>
-            {cardFilter === 'online' ? '🟢 Showing online members' :
-             cardFilter === 'reports' ? '📋 Showing members with reports' :
-             '🆔 Showing members with citizen registrations'}
+            {cardFilter === 'online' ? t('team.showing_online_members') :
+             cardFilter === 'reports' ? t('team.showing_reports_members') :
+             t('team.showing_citizens_members')}
             <span style={{ opacity: 0.8, marginLeft: '8px' }}>
-              ({filteredMembers.length} of {displayMembers.length})
+              ({t('team.of_total', { filtered: filteredMembers.length, total: displayMembers.length })})
             </span>
           </span>
           <button
@@ -353,7 +371,7 @@ function TeamManagement({
               fontWeight: '500'
             }}
           >
-            ✕ Clear Filter
+            {t('team.clear_filter')}
           </button>
         </div>
       )}
@@ -385,7 +403,7 @@ function TeamManagement({
             e.currentTarget.style.boxShadow = 'none';
           }}>
             <div style={{fontSize: '48px', marginBottom: '8px'}}>👥</div>
-            <div>No team members found</div>
+            <div>{t('team.no_team_members')}</div>
           </div>
         )}
         {filteredMembers.map((member, index) => {
@@ -437,7 +455,7 @@ function TeamManagement({
                   transition: 'all 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94)'
                 }}></span>
                 <span style={{fontSize: '11px', color: '#64748b', textTransform: 'capitalize'}}>
-                  {perf.status}
+                  {presenceLabel(perf.status)}
                 </span>
               </div>
 
@@ -456,20 +474,18 @@ function TeamManagement({
                 }}
                 onMouseEnter={(e) => {
                   e.currentTarget.style.transform = 'scale(1.1)';
-                  e.currentTarget.style.background = '#d1dbe8';
                 }}
                 onMouseLeave={(e) => {
                   e.currentTarget.style.transform = 'scale(1)';
-                  e.currentTarget.style.background = '#e8edf5';
                 }}>
-                  {member.role === 'supervisor' ? '👨‍💼' : '👤'}
+                  <UserAvatar user={member} name={member.name} role={member.role} size={48} />
                 </div>
                 <div>
                   <div style={{fontWeight: '600', fontSize: '16px', color: '#1a202c'}}>
                     {member.name}
                   </div>
                   <div style={{fontSize: '13px', color: '#64748b'}}>
-                    {member.employeeId} • {member.role?.replace('_', ' ')}
+                    {member.employeeId} • {roleLabel(member.role)}
                   </div>
                   <div style={{
                     display: 'inline-block',
@@ -507,14 +523,14 @@ function TeamManagement({
                   <div style={{fontSize: '18px', fontWeight: '700', color: '#2563eb'}}>
                     {perf.reports}
                   </div>
-                  <div style={{fontSize: '11px', color: '#64748b'}}>📋 Reports</div>
+                  <div style={{fontSize: '11px', color: '#64748b'}}>{t('team.reports')}</div>
                 </div>
                 <div style={{textAlign: 'center'}}>
                   {/* ✅ FIX: Display actual citizens count */}
                   <div style={{fontSize: '18px', fontWeight: '700', color: '#d97706'}}>
                     {perf.registrations}
                   </div>
-                  <div style={{fontSize: '11px', color: '#64748b'}}>🆔 Citizens</div>
+                  <div style={{fontSize: '11px', color: '#64748b'}}>{t('team.citizens')}</div>
                 </div>
               </div>
 
@@ -534,7 +550,7 @@ function TeamManagement({
                 e.currentTarget.style.color = '#4a90d9';
                 e.currentTarget.style.fontWeight = '400';
               }}>
-                Click to view details →
+                {t('team.click_details')}
               </div>
             </div>
           );
@@ -573,7 +589,7 @@ function TeamManagement({
                   {selectedOfficer.name}
                 </h3>
                 <p style={{color: '#64748b', fontSize: '14px', margin: '4px 0 0 0'}}>
-                  {selectedOfficer.employeeId} • {selectedOfficer.role?.replace('_', ' ')}
+                  {selectedOfficer.employeeId} • {roleLabel(selectedOfficer.role)}
                 </p>
               </div>
               <button 
@@ -607,11 +623,11 @@ function TeamManagement({
               marginBottom: '20px'
             }}>
               {[
-                { label: 'Employee ID', value: selectedOfficer.employeeId },
-                { label: 'Region', value: selectedOfficer.region },
-                { label: 'Role', value: selectedOfficer.role?.replace('_', ' ') },
-                { label: 'Status', value: selectedOfficer.status, color: selectedOfficer.status === 'active' ? '#0b7e4b' : '#dc2626' },
-                { label: 'Phone', value: selectedOfficer.phone || 'N/A' }
+                { label: t('team.detail_employee_id'), value: selectedOfficer.employeeId },
+                { label: t('team.detail_region'), value: selectedOfficer.region },
+                { label: t('team.detail_role'), value: roleLabel(selectedOfficer.role) },
+                { label: t('team.detail_status'), value: accountStatusLabel(selectedOfficer.status), color: selectedOfficer.status === 'active' ? '#0b7e4b' : '#dc2626' },
+                { label: t('team.detail_phone'), value: selectedOfficer.phone || t('team.n_a') }
               ].map((item, index) => (
                 <div key={index} style={{
                   padding: '10px 14px',
@@ -637,7 +653,7 @@ function TeamManagement({
             {/* Performance Summary - Enhanced with actual citizens */}
             <div style={{borderTop: '1px solid #f1f5f9', paddingTop: '16px'}}>
               <h4 style={{fontSize: '16px', fontWeight: '600', marginBottom: '12px', color: '#1a202c'}}>
-                📊 Performance Summary
+                {t('team.performance_summary')}
               </h4>
               {(() => {
                 const perf = employeePerformance?.find(p => p.employeeId === selectedOfficer.employeeId);
@@ -650,8 +666,8 @@ function TeamManagement({
                     gap: '8px'
                   }}>
                     {[
-                      { label: '📋 Reports', value: perf?.totalReports || 0, color: '#2563eb' },
-                      { label: '🆔 Citizens', value: actualRegistrations, color: '#d97706' } // ✅ Actual citizens
+                      { label: t('team.reports'), value: perf?.totalReports || 0, color: '#2563eb' },
+                      { label: t('team.citizens'), value: actualRegistrations, color: '#d97706' } // ✅ Actual citizens
                     ].map((item, index) => (
                       <div key={index} style={{
                         padding: '10px 12px',
@@ -704,7 +720,7 @@ function TeamManagement({
                   e.currentTarget.style.boxShadow = 'none';
                 }}
               >
-                Close
+                {t('team.close')}
               </button>
             </div>
           </div>

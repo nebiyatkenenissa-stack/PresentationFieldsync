@@ -8,7 +8,7 @@ RUN npm install
 
 COPY . .
 
-RUN npm run build
+RUN VITE_API_PORT=5001 npm run build
 
 FROM nginx:alpine
 

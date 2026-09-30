@@ -1,6 +1,8 @@
 // components/attendance/AttendanceManagement.js – FULL FIXED (removed DevTools offline alert)
 
 import React, { useState, useMemo, useEffect } from 'react';
+import toast from 'react-hot-toast';
+import { useTranslation } from 'react-i18next';
 import { db } from '../../services/database';
 import { getToday, uid, getServerBase } from '../../utils/helpers';
 import { syncQueue, checkRealInternet, clearStuckSyncItems } from '../../services/database';
@@ -23,6 +25,7 @@ function AttendanceManagement({
   renderAttendanceModal,
   addNotification
 }) {
+  const { t } = useTranslation();
   const [showModal, setShowModal] = useState(false);
   const [selectedOfficer, setSelectedOfficer] = useState(null);
   const [isOnline, setIsOnline] = useState(navigator.onLine);
@@ -242,7 +245,7 @@ function AttendanceManagement({
               );
             }
             console.log('✅ Attendance sent to PostgreSQL');
-            alert('✅ Attendance submitted successfully!');
+            toast(t('attendance.success'));
           } else {
             throw new Error('API failed');
           }
@@ -250,13 +253,13 @@ function AttendanceManagement({
           console.warn('⚠️ API call failed, queueing attendance for sync');
           syncQueue.add({ type: 'attendance', id: recordId, data: payload });
           setPendingCount(syncQueue.count());
-          alert('⚠️ Online but server unreachable. Saved locally and will sync later.');
+          toast(t('attendance.toast_server_unreachable'));
         }
       } else {
         // OFFLINE – always queue
         syncQueue.add({ type: 'attendance', id: recordId, data: payload });
         setPendingCount(syncQueue.count());
-        alert('📋 Attendance saved OFFLINE! Will sync automatically when online.');
+        toast(t('attendance.toast_saved_offline'));
       }
 
       // Notify manager
@@ -264,18 +267,20 @@ function AttendanceManagement({
       if (manager && addNotification) {
         await addNotification(
           manager.id,
-          '📋 Attendance Updated',
-          `${user.name} updated attendance for ${selectedOfficer.name}`,
-          'info'
+          t('attendance.notif_title'),
+          t('attendance.notif_updated_body', { name: user.name, officer: selectedOfficer.name }),
+          'info',
+          '/dashboard'
         );
       }
 
       if (addNotification) {
         await addNotification(
           selectedOfficer.id,
-          '📋 Attendance Updated',
-          `Your attendance has been updated by ${user.name}`,
-          'info'
+          t('attendance.notif_title'),
+          t('attendance.notif_officer_body', { name: user.name }),
+          'info',
+          '/dashboard'
         );
       }
 
@@ -283,7 +288,7 @@ function AttendanceManagement({
       setSelectedOfficer(null);
     } catch (error) {
       console.error('Error submitting attendance:', error);
-      alert('❌ Error submitting attendance: ' + error.message);
+      toast(t('attendance.toast_submit_error', { error: error.message }));
     }
   };
 
@@ -292,7 +297,7 @@ function AttendanceManagement({
     try {
       setIsClearing(true);
       const result = await clearStuckSyncItems();
-      alert(`🧹 Cleared ${result.clearedStore} stuck records and ${result.clearedQueue} stuck queue items`);
+      toast(t('attendance.toast_cleared', { records: result.clearedStore, queue: result.clearedQueue }));
       
       const updatedAttendance = await db.attendance.toArray();
       if (setAttendance) setAttendance(updatedAttendance);
@@ -300,7 +305,7 @@ function AttendanceManagement({
       setPendingCount(syncQueue.count());
     } catch (error) {
       console.error('Error clearing stuck items:', error);
-      alert('Error clearing stuck items: ' + error.message);
+      toast(t('attendance.toast_clear_error', { error: error.message }));
     } finally {
       setIsClearing(false);
     }
@@ -369,7 +374,7 @@ function AttendanceManagement({
         gap: '8px'
       }}>
         <span style={{ fontWeight: '500', color: isOnline ? '#065f37' : '#991b1b' }}>
-          {isOnline ? '✅ Online' : '❌ Offline'}
+          {isOnline ? `✅ ${t('header.online')}` : `❌ ${t('header.offline')}`}
         </span>
         <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
           {isClearing && (
@@ -381,7 +386,7 @@ function AttendanceManagement({
               fontSize: '12px',
               fontWeight: '500'
             }}>
-              🧹 Clearing stuck...
+              🧹 {t('attendance.clearing_stuck')}
             </span>
           )}
           {stuckCount > 0 && (
@@ -393,7 +398,7 @@ function AttendanceManagement({
               fontSize: '12px',
               fontWeight: '500'
             }}>
-              ⚠️ {stuckCount} stuck
+              ⚠️ {t('attendance.stuck_count', { count: stuckCount })}
             </span>
           )}
           {isOnline && pendingCount > 0 && (
@@ -405,7 +410,7 @@ function AttendanceManagement({
               fontSize: '12px',
               fontWeight: '500'
             }}>
-              ⏳ {pendingCount} syncing...
+              ⏳ {t('attendance.syncing_count', { count: pendingCount })}
             </span>
           )}
           {!isOnline && pendingCount > 0 && (
@@ -417,7 +422,7 @@ function AttendanceManagement({
               fontSize: '12px',
               fontWeight: '500'
             }}>
-              📡 {pendingCount} saved offline
+              📡 {t('attendance.saved_offline_count', { count: pendingCount })}
             </span>
           )}
         </div>
@@ -438,8 +443,8 @@ function AttendanceManagement({
           gap: '8px'
         }}>
           <span>
-            ⚠️ <strong>{stuckCount} record(s) stuck in 'syncing' state.</strong>
-            {isClearing ? ' Auto-clearing in progress...' : ' Auto-clearing will fix this.'}
+            ⚠️ <strong>{t('attendance.stuck_banner', { count: stuckCount })}</strong>
+            {' '}{isClearing ? t('attendance.auto_clearing_progress') : t('attendance.auto_clearing_will_fix')}
           </span>
           <button
             onClick={handleClearStuck}
@@ -456,7 +461,7 @@ function AttendanceManagement({
               opacity: isClearing ? 0.6 : 1
             }}
           >
-            {isClearing ? '🧹 Clearing...' : '🧹 Clear Stuck'}
+            {isClearing ? `🧹 ${t('attendance.clearing')}` : `🧹 ${t('attendance.clear_stuck')}`}
           </button>
         </div>
       )}
@@ -474,9 +479,9 @@ function AttendanceManagement({
           alignItems: 'center',
           flexWrap: 'wrap'
         }}>
-          <span>📡 <strong>Offline:</strong> {pendingCount} attendance record(s) saved locally. Will sync when online.</span>
+          <span>📡 <strong>{t('header.offline')}:</strong> {t('attendance.offline_banner', { count: pendingCount })}</span>
           <span style={{ fontSize: '12px', color: '#92400e' }}>
-            ⏳ Waiting for connection...
+            ⏳ {t('attendance.waiting_connection')}
           </span>
         </div>
       )}
@@ -494,9 +499,9 @@ function AttendanceManagement({
           alignItems: 'center',
           flexWrap: 'wrap'
         }}>
-          <span>🔄 <strong>Syncing:</strong> {pendingCount} attendance record(s) being synced...</span>
+          <span>🔄 <strong>{t('attendance.syncing')}:</strong> {t('attendance.syncing_banner', { count: pendingCount })}</span>
           <span style={{ fontSize: '12px', color: '#1e40af' }}>
-            ⏳ Please wait...
+            ⏳ {t('attendance.please_wait')}
           </span>
         </div>
       )}
@@ -516,10 +521,10 @@ function AttendanceManagement({
         gap: '16px'
       }}>
         <div>
-          <h2 style={{ fontSize: '24px', fontWeight: '700', margin: '0 0 6px 0' }}>📋 Attendance Management</h2>
+          <h2 style={{ fontSize: '24px', fontWeight: '700', margin: '0 0 6px 0' }}>📋 {t('attendance.title')}</h2>
           <p style={{ fontSize: '14px', opacity: 0.85, margin: 0, maxWidth: '540px' }}>
-            {isSupervisor ? `Manage your team (${supervisorOfficers.length} officers)` : 'Your attendance records'}
-            {displayFilteredAttendance.length > 0 && ` • ${displayFilteredAttendance.length} synced records`}
+            {isSupervisor ? t('attendance.manage_team', { count: supervisorOfficers.length }) : t('attendance.your_records')}
+            {displayFilteredAttendance.length > 0 && ` • ${t('attendance.synced_records', { count: displayFilteredAttendance.length })}`}
           </p>
         </div>
         <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
@@ -531,7 +536,7 @@ function AttendanceManagement({
             fontSize: '13px',
             fontWeight: '600'
           }}>
-            ✅ {attendanceSummary.rate}% Present
+            ✅ {t('attendance.present_rate', { rate: attendanceSummary.rate })}
           </span>
           {stuckCount > 0 && (
             <span style={{
@@ -542,7 +547,7 @@ function AttendanceManagement({
               fontSize: '13px',
               fontWeight: '600'
             }}>
-              ⚠️ {stuckCount} Stuck
+              ⚠️ {t('attendance.stuck', { count: stuckCount })}
             </span>
           )}
           {isSupervisor && pendingApproval > 0 && (
@@ -554,7 +559,7 @@ function AttendanceManagement({
               fontSize: '13px',
               fontWeight: '600'
             }}>
-              ⏳ {pendingApproval} Pending
+              ⏳ {t('attendance.pending_count', { count: pendingApproval })}
             </span>
           )}
           {pendingCount > 0 && (
@@ -566,7 +571,7 @@ function AttendanceManagement({
               fontSize: '13px',
               fontWeight: '600'
             }}>
-              📡 {pendingCount} Pending Sync
+              📡 {t('attendance.pending_sync_badge', { count: pendingCount })}
             </span>
           )}
         </div>
@@ -608,12 +613,12 @@ function AttendanceManagement({
                 transition: 'border-color 0.2s'
               }}
             >
-              <option value="all">All Status</option>
-              <option value="present">Present</option>
-              <option value="late">Late</option>
-              <option value="half_day">Half Day</option>
-              <option value="absent">Absent</option>
-              <option value="pending">Pending</option>
+              <option value="all">{t('attendance.status_filter_all')}</option>
+              <option value="present">{t('attendance.status.present')}</option>
+              <option value="late">{t('attendance.status.late')}</option>
+              <option value="half_day">{t('attendance.status.half_day')}</option>
+              <option value="absent">{t('attendance.status.absent')}</option>
+              <option value="pending">{t('attendance.status.pending')}</option>
             </select>
             {isOnline && pendingCount > 0 && (
               <button
@@ -629,11 +634,11 @@ function AttendanceManagement({
                   fontWeight: '500'
                 }}
               >
-                🔄 Sync Now
+                🔄 {t('attendance.sync_now')}
               </button>
             )}
           </div>
-          <span style={{color: '#6b7280', fontSize: '14px'}}>{displayFilteredAttendance.length} records</span>
+          <span style={{color: '#6b7280', fontSize: '14px'}}>{t('attendance.record_count', { count: displayFilteredAttendance.length })}</span>
         </div>
       </div>
 
@@ -641,9 +646,9 @@ function AttendanceManagement({
       {isSupervisor && supervisorOfficers.length > 0 && (
         <div style={{marginBottom: '20px'}}>
           <h4 style={{fontSize: '15px', fontWeight: '600', color: '#1a1a2e', marginBottom: '14px'}}>
-            👤 Officers - Quick Edit Today's Attendance
-            {!isOnline && <span style={{fontSize: '12px', color: '#f59e0b', marginLeft: '8px'}}>📡 Offline</span>}
-            {stuckCount > 0 && <span style={{fontSize: '12px', color: '#dc2626', marginLeft: '8px'}}>⚠️ Stuck syncs clearing...</span>}
+            👤 {t('attendance.quick_edit_title')}
+            {!isOnline && <span style={{fontSize: '12px', color: '#f59e0b', marginLeft: '8px'}}>📡 {t('header.offline')}</span>}
+            {stuckCount > 0 && <span style={{fontSize: '12px', color: '#dc2626', marginLeft: '8px'}}>⚠️ {t('attendance.stuck_clearing')}</span>}
           </h4>
           <div style={{
             display: 'grid',
@@ -678,13 +683,13 @@ function AttendanceManagement({
                       <div style={{fontSize: '12px', color: '#6b7280'}}>{officer.region}</div>
                       <div style={{fontSize: '12px', marginTop: '4px', fontWeight: '500'}}>
                         {isStuck ? (
-                          <span style={{color: '#dc2626'}}>⚠️ Stuck - Auto-clearing</span>
+                          <span style={{color: '#dc2626'}}>⚠️ {t('attendance.stuck_auto_clearing')}</span>
                         ) : todayAtt && isSynced ? (
-                          <span style={{color: '#16a34a'}}>✅ Synced</span>
+                          <span style={{color: '#16a34a'}}>✅ {t('attendance.synced')}</span>
                         ) : todayAtt && !isSynced ? (
-                          <span style={{color: '#f59e0b'}}>📡 Waiting to Sync</span>
+                          <span style={{color: '#f59e0b'}}>📡 {t('attendance.waiting_sync')}</span>
                         ) : (
-                          <span style={{color: '#9ca3af'}}>Not Submitted</span>
+                          <span style={{color: '#9ca3af'}}>{t('attendance.not_submitted')}</span>
                         )}
                       </div>
                     </div>
@@ -703,7 +708,7 @@ function AttendanceManagement({
                         transition: 'all 0.2s ease'
                       }}
                     >
-                      {isStuck ? '⏳ Fixing...' : todayAtt ? '✏️ Edit' : '📝 Add'}
+                      {isStuck ? `⏳ ${t('attendance.fixing')}` : todayAtt ? `✏️ ${t('common.edit')}` : `📝 ${t('attendance.add')}`}
                     </button>
                   </div>
                   {todayAtt && isSynced && (
@@ -717,10 +722,10 @@ function AttendanceManagement({
                       fontSize: '12px',
                       color: '#6b7280'
                     }}>
-                      <span>Status: <strong style={{color: '#1a1a2e'}}>{todayAtt.status}</strong></span>
-                      <span>In: <strong style={{color: '#1a1a2e'}}>{todayAtt.checkIn}</strong></span>
-                      <span>Out: <strong style={{color: '#1a1a2e'}}>{todayAtt.checkOut}</strong></span>
-                      <span>Hours: <strong style={{color: '#1a1a2e'}}>{todayAtt.workHours}h</strong></span>
+                      <span>{t('common.status')}: <strong style={{color: '#1a1a2e'}}>{t(`attendance.status.${todayAtt.status}`, { defaultValue: todayAtt.status })}</strong></span>
+                      <span>{t('attendance.in')}: <strong style={{color: '#1a1a2e'}}>{todayAtt.checkIn}</strong></span>
+                      <span>{t('attendance.out')}: <strong style={{color: '#1a1a2e'}}>{todayAtt.checkOut}</strong></span>
+                      <span>{t('attendance.hours')}: <strong style={{color: '#1a1a2e'}}>{todayAtt.workHours}h</strong></span>
                     </div>
                   )}
                   {isStuck && (
@@ -735,7 +740,7 @@ function AttendanceManagement({
                       padding: '6px',
                       borderRadius: '4px'
                     }}>
-                      ⚠️ Stuck in sync - Auto-clearing in progress
+                      ⚠️ {t('attendance.stuck_sync_clearing')}
                     </div>
                   )}
                   {todayAtt && !isSynced && !isStuck && (
@@ -747,7 +752,7 @@ function AttendanceManagement({
                       color: '#f59e0b',
                       textAlign: 'center'
                     }}>
-                      ⏳ Offline - Will appear when online
+                      ⏳ {t('attendance.offline_will_appear')}
                     </div>
                   )}
                   {!todayAtt && !isStuck && (
@@ -759,7 +764,7 @@ function AttendanceManagement({
                       color: '#9ca3af',
                       textAlign: 'center'
                     }}>
-                      No attendance recorded today
+                      {t('attendance.no_today')}
                     </div>
                   )}
                 </div>
@@ -778,7 +783,7 @@ function AttendanceManagement({
         overflow: 'hidden'
       }}>
         <div style={{padding: '16px 20px', borderBottom: '1px solid #e5e7eb', background: '#fafafa', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap'}}>
-          <h4 style={{margin: 0, fontSize: '15px', fontWeight: '600', color: '#1a1a2e'}}>📊 Attendance Records</h4>
+          <h4 style={{margin: 0, fontSize: '15px', fontWeight: '600', color: '#1a1a2e'}}>📊 {t('attendance.records_title')}</h4>
           <div style={{display: 'flex', gap: '8px', alignItems: 'center'}}>
             {stuckCount > 0 && (
               <span style={{
@@ -789,7 +794,7 @@ function AttendanceManagement({
                 fontSize: '12px',
                 fontWeight: '500'
               }}>
-                ⚠️ {stuckCount} stuck
+                ⚠️ {t('attendance.stuck_count', { count: stuckCount })}
               </span>
             )}
             {pendingCount > 0 && (
@@ -801,11 +806,11 @@ function AttendanceManagement({
                 fontSize: '12px',
                 fontWeight: '500'
               }}>
-                ⏳ {pendingCount} pending sync
+                ⏳ {t('attendance.pending_sync', { count: pendingCount })}
               </span>
             )}
             <span style={{fontSize: '12px', color: '#64748b'}}>
-              {displayFilteredAttendance.length} records
+              {t('attendance.record_count', { count: displayFilteredAttendance.length })}
             </span>
           </div>
         </div>
@@ -818,19 +823,19 @@ function AttendanceManagement({
           }}>
             <thead>
               <tr style={{background: '#f8f9fa', borderBottom: '2px solid #e5e7eb'}}>
-                <th style={{padding: '12px 16px', textAlign: 'left', fontWeight: '600', color: '#4a5568', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.5px'}}>Employee</th>
-                <th style={{padding: '12px 16px', textAlign: 'left', fontWeight: '600', color: '#4a5568', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.5px'}}>Region</th>
-                <th style={{padding: '12px 16px', textAlign: 'left', fontWeight: '600', color: '#4a5568', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.5px'}}>Date</th>
-                <th style={{padding: '12px 16px', textAlign: 'left', fontWeight: '600', color: '#4a5568', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.5px'}}>Status</th>
-                <th style={{padding: '12px 16px', textAlign: 'left', fontWeight: '600', color: '#4a5568', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.5px'}}>Check In</th>
-                <th style={{padding: '12px 16px', textAlign: 'left', fontWeight: '600', color: '#4a5568', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.5px'}}>Check Out</th>
-                <th style={{padding: '12px 16px', textAlign: 'left', fontWeight: '600', color: '#4a5568', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.5px'}}>Hours</th>
-                <th style={{padding: '12px 16px', textAlign: 'left', fontWeight: '600', color: '#4a5568', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.5px'}}>Overtime</th>
-                <th style={{padding: '12px 16px', textAlign: 'left', fontWeight: '600', color: '#4a5568', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.5px'}}>Break</th>
-                <th style={{padding: '12px 16px', textAlign: 'left', fontWeight: '600', color: '#4a5568', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.5px'}}>Manager Seen</th>
-                <th style={{padding: '12px 16px', textAlign: 'left', fontWeight: '600', color: '#4a5568', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.5px'}}>Status</th>
-                <th style={{padding: '12px 16px', textAlign: 'left', fontWeight: '600', color: '#4a5568', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.5px'}}>Notes</th>
-                {isSupervisor && <th style={{padding: '12px 16px', textAlign: 'left', fontWeight: '600', color: '#4a5568', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.5px'}}>Action</th>}
+                <th style={{padding: '12px 16px', textAlign: 'left', fontWeight: '600', color: '#4a5568', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.5px'}}>{t('attendance.employee')}</th>
+                <th style={{padding: '12px 16px', textAlign: 'left', fontWeight: '600', color: '#4a5568', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.5px'}}>{t('common.region')}</th>
+                <th style={{padding: '12px 16px', textAlign: 'left', fontWeight: '600', color: '#4a5568', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.5px'}}>{t('common.date')}</th>
+                <th style={{padding: '12px 16px', textAlign: 'left', fontWeight: '600', color: '#4a5568', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.5px'}}>{t('common.status')}</th>
+                <th style={{padding: '12px 16px', textAlign: 'left', fontWeight: '600', color: '#4a5568', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.5px'}}>{t('attendance.check_in_header')}</th>
+                <th style={{padding: '12px 16px', textAlign: 'left', fontWeight: '600', color: '#4a5568', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.5px'}}>{t('attendance.check_out_header')}</th>
+                <th style={{padding: '12px 16px', textAlign: 'left', fontWeight: '600', color: '#4a5568', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.5px'}}>{t('attendance.hours')}</th>
+                <th style={{padding: '12px 16px', textAlign: 'left', fontWeight: '600', color: '#4a5568', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.5px'}}>{t('attendance.overtime')}</th>
+                <th style={{padding: '12px 16px', textAlign: 'left', fontWeight: '600', color: '#4a5568', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.5px'}}>{t('attendance.break')}</th>
+                <th style={{padding: '12px 16px', textAlign: 'left', fontWeight: '600', color: '#4a5568', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.5px'}}>{t('attendance.manager_seen')}</th>
+                <th style={{padding: '12px 16px', textAlign: 'left', fontWeight: '600', color: '#4a5568', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.5px'}}>{t('common.status')}</th>
+                <th style={{padding: '12px 16px', textAlign: 'left', fontWeight: '600', color: '#4a5568', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.5px'}}>{t('attendance.notes')}</th>
+                {isSupervisor && <th style={{padding: '12px 16px', textAlign: 'left', fontWeight: '600', color: '#4a5568', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.5px'}}>{t('common.actions')}</th>}
               </tr>
             </thead>
             <tbody>
@@ -840,17 +845,17 @@ function AttendanceManagement({
                     <div style={{fontSize: '36px', marginBottom: '8px'}}>📋</div>
                     <div>
                       {!isOnline && pendingCount > 0 
-                        ? 'Attendance saved offline. Will appear when online.' 
+                        ? t('attendance.empty_offline') 
                         : stuckCount > 0 
-                        ? '⚠️ Attendance records are stuck in sync. Auto-clearing in progress...'
-                        : 'No synced attendance records found'}
+                        ? `⚠️ ${t('attendance.empty_stuck')}`
+                        : t('attendance.empty_no_records')}
                     </div>
                     <div style={{fontSize: '12px', marginTop: '4px', color: '#9ca3af'}}>
                       {!isOnline && pendingCount > 0 
-                        ? `📡 ${pendingCount} record(s) waiting to sync` 
+                        ? `📡 ${t('attendance.waiting_sync_count', { count: pendingCount })}` 
                         : stuckCount > 0
-                        ? 'Please wait while stuck records are cleared...'
-                        : 'Try adjusting your filters'}
+                        ? t('attendance.wait_stuck_cleared')
+                        : t('attendance.adjust_filters')}
                     </div>
                   </td>
                 </tr>
@@ -871,7 +876,7 @@ function AttendanceManagement({
                     <td style={{padding: '10px 16px', fontWeight: '600', color: '#1a1a2e'}}>
                       {a.employeeName}
                     </td>
-                    <td style={{padding: '10px 16px', color: '#4a5568'}}>{a.region || 'N/A'}</td>
+                    <td style={{padding: '10px 16px', color: '#4a5568'}}>{a.region || t('supervisor.na')}</td>
                     <td style={{padding: '10px 16px', color: '#4a5568'}}>{a.date}</td>
                     <td style={{padding: '10px 16px'}}>
                       <span style={{
@@ -888,7 +893,7 @@ function AttendanceManagement({
                                a.status === 'absent' ? '#dc2626' : 
                                a.status === 'half_day' ? '#92400e' : '#6b7280'
                       }}>
-                        {a.status || 'Not Marked'}
+                        {t(`attendance.status.${a.status || 'not_marked'}`, { defaultValue: a.status || 'Not Marked' })}
                       </span>
                     </td>
                     <td style={{padding: '10px 16px', color: '#4a5568'}}>{a.checkIn || '--'}</td>
@@ -898,9 +903,9 @@ function AttendanceManagement({
                     <td style={{padding: '10px 16px', color: '#4a5568'}}>{a.breakTime || 0}h</td>
                     <td style={{padding: '10px 16px'}}>
                       {a.seenByManager ? (
-                        <span style={{color: '#ca8a04', fontWeight: '600'}}>👁️ Seen</span>
+                        <span style={{color: '#ca8a04', fontWeight: '600'}}>👁️ {t('attendance.seen')}</span>
                       ) : a.submittedToManager ? (
-                        <span style={{color: '#dc2626', fontWeight: '600'}}>🔴 Not Seen</span>
+                        <span style={{color: '#dc2626', fontWeight: '600'}}>🔴 {t('attendance.not_seen')}</span>
                       ) : (
                         <span style={{color: '#9ca3af'}}>—</span>
                       )}
@@ -914,7 +919,7 @@ function AttendanceManagement({
                           fontWeight: '500',
                           background: '#dcfce7',
                           color: '#16a34a'
-                        }}>✅ Approved</span>
+                        }}>✅ {t('attendance.approved')}</span>
                       ) : a.submittedToManager ? (
                         <span style={{
                           padding: '4px 12px',
@@ -923,7 +928,7 @@ function AttendanceManagement({
                           fontWeight: '500',
                           background: '#fef3c7',
                           color: '#ca8a04'
-                        }}>⏳ Pending</span>
+                        }}>⏳ {t('attendance.status.pending')}</span>
                       ) : (
                         <span style={{
                           padding: '4px 12px',
@@ -932,7 +937,7 @@ function AttendanceManagement({
                           fontWeight: '500',
                           background: '#f3f4f6',
                           color: '#6b7280'
-                        }}>Not Submitted</span>
+                        }}>{t('attendance.not_submitted')}</span>
                       )}
                     </td>
                     <td style={{padding: '10px 16px', color: '#6b7280', maxWidth: '120px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'}}>{a.notes || '--'}</td>
@@ -954,7 +959,7 @@ function AttendanceManagement({
                             width: '100%'
                           }}
                         >
-                          {stuckCount > 0 ? '⏳ Fixing...' : '✏️ Edit'} {!isOnline && '📡'}
+                          {stuckCount > 0 ? `⏳ ${t('attendance.fixing')}` : `✏️ ${t('common.edit')}`} {!isOnline && '📡'}
                         </button>
                       </td>
                     )}
@@ -977,7 +982,7 @@ function AttendanceManagement({
             fontSize: '13px',
             color: '#92400e'
           }}>
-            <span>⏳ {pendingCount} attendance record(s) pending sync</span>
+            <span>⏳ {t('attendance.pending_sync_records', { count: pendingCount })}</span>
             {isOnline && (
               <button
                 onClick={() => window.dispatchEvent(new Event('force-sync'))}
@@ -991,7 +996,7 @@ function AttendanceManagement({
                   fontSize: '12px'
                 }}
               >
-                🔄 Sync Now
+                🔄 {t('attendance.sync_now')}
               </button>
             )}
           </div>
@@ -1008,7 +1013,7 @@ function AttendanceManagement({
             fontSize: '13px',
             color: '#991b1b'
           }}>
-            <span>⚠️ {stuckCount} record(s) stuck in sync. Auto-clearing in progress...</span>
+            <span>⚠️ {t('attendance.stuck_sync_records', { count: stuckCount })}</span>
             <button
               onClick={handleClearStuck}
               disabled={isClearing}
@@ -1023,7 +1028,7 @@ function AttendanceManagement({
                 opacity: isClearing ? 0.6 : 1
               }}
             >
-              {isClearing ? '🧹 Clearing...' : '🧹 Clear Stuck'}
+              {isClearing ? `🧹 ${t('attendance.clearing')}` : `🧹 ${t('attendance.clear_stuck')}`}
             </button>
           </div>
         )}
@@ -1064,8 +1069,8 @@ function AttendanceManagement({
               borderBottom: '2px solid #f3f4f6'
             }}>
               <h3 style={{fontSize: '20px', fontWeight: '600', color: '#1a1a2e', margin: 0}}>
-                ✏️ Edit Attendance - {selectedOfficer.name}
-                {!isOnline && <span style={{fontSize: '12px', color: '#f59e0b', marginLeft: '8px'}}>📡 Offline</span>}
+                ✏️ {t('attendance.edit_title', { name: selectedOfficer.name })}
+                {!isOnline && <span style={{fontSize: '12px', color: '#f59e0b', marginLeft: '8px'}}>📡 {t('header.offline')}</span>}
               </h3>
               <button 
                 onClick={() => setShowModal(false)} 
@@ -1092,10 +1097,10 @@ function AttendanceManagement({
                 borderRadius: '8px',
                 marginBottom: '16px'
               }}>
-                <strong>📡 Offline Mode:</strong> Attendance will be saved locally and appear when online.
+                <strong>📡 {t('attendance.offline_mode')}:</strong> {t('attendance.offline_save_warning')}
                 {pendingCount > 0 && (
                   <span style={{ marginLeft: '8px' }}>
-                    ({pendingCount} pending sync)
+                    ({t('attendance.pending_sync', { count: pendingCount })})
                   </span>
                 )}
               </div>
@@ -1104,7 +1109,7 @@ function AttendanceManagement({
             <div style={{display: 'flex', flexDirection: 'column', gap: '18px'}}>
               <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px'}}>
                 <div style={{display: 'flex', flexDirection: 'column', gap: '4px'}}>
-                  <label style={{fontSize: '13px', fontWeight: '500', color: '#374151'}}>Employee</label>
+                  <label style={{fontSize: '13px', fontWeight: '500', color: '#374151'}}>{t('attendance.employee')}</label>
                   <input 
                     type="text" 
                     value={selectedOfficer.name} 
@@ -1120,7 +1125,7 @@ function AttendanceManagement({
                   />
                 </div>
                 <div style={{display: 'flex', flexDirection: 'column', gap: '4px'}}>
-                  <label style={{fontSize: '13px', fontWeight: '500', color: '#374151'}}>Date</label>
+                  <label style={{fontSize: '13px', fontWeight: '500', color: '#374151'}}>{t('common.date')}</label>
                   <input 
                     type="text" 
                     value={getToday()} 
@@ -1138,7 +1143,7 @@ function AttendanceManagement({
               </div>
 
               <div style={{display: 'flex', flexDirection: 'column', gap: '4px'}}>
-                <label style={{fontSize: '13px', fontWeight: '500', color: '#374151'}}>Status *</label>
+                <label style={{fontSize: '13px', fontWeight: '500', color: '#374151'}}>{t('common.status')} *</label>
                 <select 
                   value={form.status} 
                   onChange={e => setForm({...form, status: e.target.value})}
@@ -1151,17 +1156,17 @@ function AttendanceManagement({
                     transition: 'border-color 0.2s'
                   }}
                 >
-                  <option value="present">✅ Present</option>
-                  <option value="late">⏰ Late</option>
-                  <option value="half_day">🌗 Half Day</option>
-                  <option value="absent">❌ Absent</option>
-                  <option value="pending">⏳ Pending</option>
+                  <option value="present">✅ {t('attendance.status.present')}</option>
+                  <option value="late">⏰ {t('attendance.status.late')}</option>
+                  <option value="half_day">🌗 {t('attendance.status.half_day')}</option>
+                  <option value="absent">❌ {t('attendance.status.absent')}</option>
+                  <option value="pending">⏳ {t('attendance.status.pending')}</option>
                 </select>
               </div>
 
               <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px'}}>
                 <div style={{display: 'flex', flexDirection: 'column', gap: '4px'}}>
-                  <label style={{fontSize: '13px', fontWeight: '500', color: '#374151'}}>Check In Time</label>
+                  <label style={{fontSize: '13px', fontWeight: '500', color: '#374151'}}>{t('attendance.check_in')}</label>
                   <input 
                     type="time" 
                     value={form.checkIn} 
@@ -1176,7 +1181,7 @@ function AttendanceManagement({
                   />
                 </div>
                 <div style={{display: 'flex', flexDirection: 'column', gap: '4px'}}>
-                  <label style={{fontSize: '13px', fontWeight: '500', color: '#374151'}}>Check Out Time</label>
+                  <label style={{fontSize: '13px', fontWeight: '500', color: '#374151'}}>{t('attendance.check_out')}</label>
                   <input 
                     type="time" 
                     value={form.checkOut} 
@@ -1194,7 +1199,7 @@ function AttendanceManagement({
 
               <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '14px'}}>
                 <div style={{display: 'flex', flexDirection: 'column', gap: '4px'}}>
-                  <label style={{fontSize: '13px', fontWeight: '500', color: '#374151'}}>Work Hours</label>
+                  <label style={{fontSize: '13px', fontWeight: '500', color: '#374151'}}>{t('attendance.work_hours')}</label>
                   <input 
                     type="number" 
                     min="0" 
@@ -1212,7 +1217,7 @@ function AttendanceManagement({
                   />
                 </div>
                 <div style={{display: 'flex', flexDirection: 'column', gap: '4px'}}>
-                  <label style={{fontSize: '13px', fontWeight: '500', color: '#374151'}}>Overtime (hrs)</label>
+                  <label style={{fontSize: '13px', fontWeight: '500', color: '#374151'}}>{t('attendance.overtime_label')}</label>
                   <input 
                     type="number" 
                     min="0" 
@@ -1230,7 +1235,7 @@ function AttendanceManagement({
                   />
                 </div>
                 <div style={{display: 'flex', flexDirection: 'column', gap: '4px'}}>
-                  <label style={{fontSize: '13px', fontWeight: '500', color: '#374151'}}>Break Time (hrs)</label>
+                  <label style={{fontSize: '13px', fontWeight: '500', color: '#374151'}}>{t('attendance.break_time_label')}</label>
                   <input 
                     type="number" 
                     min="0" 
@@ -1250,11 +1255,11 @@ function AttendanceManagement({
               </div>
 
               <div style={{display: 'flex', flexDirection: 'column', gap: '4px'}}>
-                <label style={{fontSize: '13px', fontWeight: '500', color: '#374151'}}>Notes</label>
+                <label style={{fontSize: '13px', fontWeight: '500', color: '#374151'}}>{t('attendance.notes')}</label>
                 <textarea 
                   value={form.notes} 
                   onChange={e => setForm({...form, notes: e.target.value})}
-                  placeholder="Additional notes about this attendance..."
+                  placeholder={t('attendance.notes_placeholder')}
                   rows="3"
                   style={{
                     padding: '10px 14px',
@@ -1277,10 +1282,10 @@ function AttendanceManagement({
                 color: !isOnline ? '#92400e' : '#1e40af',
                 border: !isOnline ? '1px solid #f59e0b' : '1px solid #93c5fd'
               }}>
-                <strong>ℹ️ {isOnline ? 'Online' : 'Offline'}:</strong> 
+                <strong>ℹ️ {isOnline ? t('header.online') : t('header.offline')}:</strong>{' '} 
                 {isOnline 
-                  ? ' This attendance will be sent to the manager for review.' 
-                  : ' This attendance will be saved offline and appear when online.'}
+                  ? t('attendance.online_notice') 
+                  : t('attendance.offline_notice')}
               </div>
 
               <div style={{display: 'flex', gap: '12px', marginTop: '8px'}}>
@@ -1299,7 +1304,7 @@ function AttendanceManagement({
                     flex: 1
                   }}
                 >
-                  {isOnline ? '📤 Submit to Manager' : '💾 Save Offline'}
+                  {isOnline ? `📤 ${t('attendance.submit_to_manager')}` : `💾 ${t('attendance.save_offline')}`}
                 </button>
                 <button 
                   onClick={() => setShowModal(false)}
@@ -1315,7 +1320,7 @@ function AttendanceManagement({
                     transition: 'background 0.2s ease'
                   }}
                 >
-                  Cancel
+                  {t('common.cancel')}
                 </button>
               </div>
             </div>

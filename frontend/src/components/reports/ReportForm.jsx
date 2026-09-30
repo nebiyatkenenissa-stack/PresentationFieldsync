@@ -1,15 +1,18 @@
 // components/reports/ReportForm.js – FULLY FIXED (with date validation: today only)
 
 import React, { useState, useEffect } from 'react';
+import toast from 'react-hot-toast';
 import { db, syncQueue, checkRealInternet, getApiBase } from '../../services/database';
 import { uid } from '../../utils/helpers';
 import LocationCascade from '../common/LocationCascade';
 import GpsCapture from '../common/GpsCapture';
 import { getCurrentGps } from '../../utils/gps';
+import { useTranslation } from 'react-i18next';
 
 const API_BASE = getApiBase();
 
 function ReportForm({ form, setForm, handleSubmit, user, isOfficer, isSupervisor, addNotification, users }) {
+  const { t } = useTranslation();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   const [errors, setErrors] = useState({});
@@ -49,51 +52,51 @@ function ReportForm({ form, setForm, handleSubmit, user, isOfficer, isSupervisor
   const validateField = (name, value, allFormValues = null) => {
     switch (name) {
       case 'reportDate':
-        if (!value) return 'Report date is required';
+        if (!value) return t('report.date_required');
         const selectedDate = new Date(value);
         const today = new Date();
         // Reset time to compare dates only
         const todayStr = today.toISOString().slice(0, 10);
-        if (value > todayStr) return 'Report date cannot be in the future';
-        if (value < todayStr) return 'Report date cannot be in the past (only today allowed)';
+        if (value > todayStr) return t('report.date_future');
+        if (value < todayStr) return t('report.date_past');
         return '';
       case 'registrations':
         const num = Number(value);
-        if (isNaN(num) || num < 0) return 'Registrations must be a non-negative number';
+        if (isNaN(num) || num < 0) return t('report.registrations_positive');
         return '';
       case 'workHours':
         const hours = Number(value);
-        if (isNaN(hours) || hours < 0 || hours > 24) return 'Work hours must be between 0 and 24';
+        if (isNaN(hours) || hours < 0 || hours > 24) return t('report.work_hours_range');
         return '';
       case 'operationalStatus':
-        if (!value) return 'Operational status is required';
+        if (!value) return t('report.operational_required');
         return '';
       case 'activities':
-        if (!value || !value.trim()) return 'Activities performed is required';
+        if (!value || !value.trim()) return t('report.activities_required');
         return '';
       case 'equipmentStatus':
-        if (!value) return 'Equipment status is required';
+        if (!value) return t('report.equipment_required');
         return '';
       case 'materialsUsed':
-        if (!value || !value.trim()) return 'Materials used is required';
+        if (!value || !value.trim()) return t('report.materials_required');
         return '';
       case 'teamMembers':
-        if (!value || !value.trim()) return 'Team members is required';
+        if (!value || !value.trim()) return t('report.team_members_required');
         return '';
       case 'weatherConditions':
-        if (!value || !value.trim()) return 'Weather conditions is required';
+        if (!value || !value.trim()) return t('report.weather_required');
         return '';
       case 'communityFeedback':
-        if (!value || !value.trim()) return 'Community feedback is required';
+        if (!value || !value.trim()) return t('report.community_feedback_required');
         return '';
       case 'challenges':
-        if (!value || !value.trim()) return 'Challenges is required';
+        if (!value || !value.trim()) return t('report.challenges_required');
         return '';
       case 'issues':
-        if (!value || !value.trim()) return 'Issues encountered is required';
+        if (!value || !value.trim()) return t('report.issues_required');
         return '';
       case 'comments':
-        if (!value || !value.trim()) return 'Comments is required';
+        if (!value || !value.trim()) return t('report.comments_required');
         return '';
       default:
         return '';
@@ -151,18 +154,18 @@ function ReportForm({ form, setForm, handleSubmit, user, isOfficer, isSupervisor
 
     const remaining = MAX_FILES - attachments.length;
     if (remaining <= 0) {
-      alert(`Maximum ${MAX_FILES} files allowed.`);
+      toast(`Maximum ${MAX_FILES} files allowed.`);
       return;
     }
 
     const validFiles = [];
     for (const file of files.slice(0, remaining)) {
       if (!ALLOWED_TYPES.includes(file.type)) {
-        alert(`"${file.name}" is not an allowed file type.`);
+        toast(`"${file.name}" is not an allowed file type.`);
         continue;
       }
       if (file.size > MAX_FILE_SIZE) {
-        alert(`"${file.name}" exceeds the 10 MB size limit.`);
+        toast(`"${file.name}" exceeds the 10 MB size limit.`);
         continue;
       }
       const base64 = await fileToBase64(file);
@@ -202,7 +205,7 @@ function ReportForm({ form, setForm, handleSubmit, user, isOfficer, isSupervisor
   const handleFormSubmit = async (e) => {
     e.preventDefault();
     if (!user) {
-      alert('Please login first');
+      toast('Please login first');
       return;
     }
 
@@ -234,7 +237,7 @@ function ReportForm({ form, setForm, handleSubmit, user, isOfficer, isSupervisor
         })
         .join('\n');
       
-      alert(`Please fix the following errors:\n\n${errorMessages}`);
+      toast(`Please fix the following errors:\n\n${errorMessages}`);
       return;
     }
 
@@ -257,7 +260,7 @@ function ReportForm({ form, setForm, handleSubmit, user, isOfficer, isSupervisor
         }
       });
       if (mismatchLevels.length > 0) {
-        alert(`❌ You can only work in your assigned area. ${mismatchLevels.join(', ')} cannot be changed.`);
+        toast(`? You can only work in your assigned area. ${mismatchLevels.join(', ')} cannot be changed.`);
         return;
       }
     }
@@ -307,6 +310,8 @@ function ReportForm({ form, setForm, handleSubmit, user, isOfficer, isSupervisor
         latitude: gpsData?.success ? gpsData.latitude : null,
         longitude: gpsData?.success ? gpsData.longitude : null,
         gpsAccuracy: gpsData?.success ? gpsData.accuracy : null,
+        gpsLowAccuracy: gpsData?.success ? !!gpsData.lowAccuracy : null,
+        gpsNetworkEstimate: gpsData?.success ? !!gpsData.networkEstimate : null,
         gpsCapturedAt: gpsData?.success ? gpsData.timestamp : null,
         attachments: attachments.map(f => ({ name: f.name, type: f.type, size: f.size, data: f.data })),
         synced: false,
@@ -342,7 +347,7 @@ function ReportForm({ form, setForm, handleSubmit, user, isOfficer, isSupervisor
             throw new Error(`Server responded with ${response.status}`);
           }
         } catch (syncError) {
-          console.warn('❌ Failed to sync report, queueing:', syncError.message);
+          console.warn('? Failed to sync report, queueing:', syncError.message);
           await db.reports.update(newReport.id, {
             synced: false,
             syncError: syncError.message,
@@ -356,12 +361,13 @@ function ReportForm({ form, setForm, handleSubmit, user, isOfficer, isSupervisor
           if (addNotification) {
             await addNotification(
               user.id,
-              '📋 Report Queued for Sync',
+              '📤 Report Queued for Sync',
               `Report saved locally. Server sync failed and will be retried automatically.`,
-              'warning'
+              'warning',
+              '/reports'
             );
           }
-          alert('⚠️ Report saved locally, but the server could not be reached. It will be retried automatically.');
+          toast('📤 Report saved locally, but the server could not be reached. It will be retried automatically.');
         }
       } else {
         await db.reports.update(newReport.id, {
@@ -376,12 +382,13 @@ function ReportForm({ form, setForm, handleSubmit, user, isOfficer, isSupervisor
         if (addNotification) {
           await addNotification(
             user.id,
-            '💾 Report Saved Offline',
+            '📴 Report Saved Offline',
             `Report saved offline. Will sync automatically when online.`,
-            'warning'
+            'warning',
+            '/reports'
           );
         }
-        alert('📋 Report saved OFFLINE! Will sync automatically when internet is back.');
+        toast('📴 Report saved OFFLINE! Will sync automatically when internet is back.');
       }
 
       // Notify the supervisor/manager only after the report actually reaches
@@ -394,18 +401,20 @@ function ReportForm({ form, setForm, handleSubmit, user, isOfficer, isSupervisor
           if (supervisor && addNotification) {
             await addNotification(
               supervisor.id,
-              '📋 Report Submitted',
+              '✅ Report Submitted',
               `${user.name} submitted a report`,
-              'success'
+              'success',
+              '/reports'
             );
           }
           const manager = users?.find(u => u.role === 'manager');
           if (manager && addNotification) {
             await addNotification(
               manager.id,
-              '📋 Report Submitted',
+              '✅ Report Submitted',
               `${user.name} submitted a report`,
-              'info'
+              'info',
+              '/all_reports'
             );
           }
         } else if (isSupervisor && user) {
@@ -413,9 +422,10 @@ function ReportForm({ form, setForm, handleSubmit, user, isOfficer, isSupervisor
           if (manager && addNotification) {
             await addNotification(
               manager.id,
-              '📋 Report Submitted',
+              '✅ Report Submitted',
               `${user.name} submitted a report`,
-              'info'
+              'info',
+              '/all_reports'
             );
           }
         }
@@ -424,16 +434,17 @@ function ReportForm({ form, setForm, handleSubmit, user, isOfficer, isSupervisor
       if (syncSuccess && addNotification) {
         await addNotification(
           user.id,
-          '✅ Report Synced',
+          '? Report Synced',
           `Report submitted and synced to the server.`,
-          'success'
+          'success',
+          '/reports'
         );
       }
 
       if (syncSuccess) {
         window.dispatchEvent(new CustomEvent('report-update', { detail: { id: newReport.id, synced: true } }));
         await notifySupervisorManager();
-        alert('📋 Report submitted and synced successfully!');
+        toast('✅ Report submitted and synced successfully!');
       }
 
       // Reset form (keep reportDate as today)
@@ -459,7 +470,7 @@ function ReportForm({ form, setForm, handleSubmit, user, isOfficer, isSupervisor
 
     } catch (error) {
       console.error('Error submitting report:', error);
-      alert('❌ Error submitting report: ' + error.message);
+      toast('? Error submitting report: ' + error.message);
     } finally {
       setIsSubmitting(false);
     }
@@ -486,10 +497,10 @@ function ReportForm({ form, setForm, handleSubmit, user, isOfficer, isSupervisor
       }}>
         <div>
           <h2 style={{ fontSize: '24px', fontWeight: '700', margin: '0 0 6px 0' }}>
-            {isSupervisor ? '👤 Submit Supervisor Report' : '📋 Submit Daily Report'}
+            {isSupervisor ? `📤 ${t('report.supervisor_submit_title')}` : `📤 ${t('report.submit_title')}`}
           </h2>
           <p style={{ fontSize: '14px', opacity: 0.85, margin: 0, maxWidth: '540px' }}>
-            {isSupervisor ? 'Submit your supervisor report' : 'Record registration data'}
+            {isSupervisor ? t('report.supervisor_submit_subtitle') : t('report.submit_subtitle')}
           </p>
         </div>
         <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
@@ -501,7 +512,7 @@ function ReportForm({ form, setForm, handleSubmit, user, isOfficer, isSupervisor
             fontSize: '13px',
             fontWeight: '600'
           }}>
-            {isOnline ? '✅ Online' : '📡 Offline'}
+            {isOnline ? `🟢 ${t('header.online')}` : `📴 ${t('header.offline')}`}
           </span>
           <span style={{
             background: 'rgba(96,165,250,0.2)',
@@ -511,7 +522,7 @@ function ReportForm({ form, setForm, handleSubmit, user, isOfficer, isSupervisor
             fontSize: '13px',
             fontWeight: '600'
           }}>
-            {isOnline ? 'Auto-Sync Enabled' : 'Offline Save'}
+            {isOnline ? t('report.auto_sync_enabled') : t('report.offline_save')}
           </span>
         </div>
       </div>
@@ -535,10 +546,11 @@ function ReportForm({ form, setForm, handleSubmit, user, isOfficer, isSupervisor
             alignItems: 'center',
             gap: '8px'
           }}>
-            <span>📡</span>
+            <span>📴</span>
             <span>
-              <strong>You are offline.</strong> Your report will be saved locally and 
-              <strong> automatically synced</strong> when internet is back.
+              <strong>{t('report.you_are_offline')}</strong>{' '}
+              {t('report.offline_part1')} <strong>{t('report.offline_part2')}</strong>{' '}
+              {t('report.offline_part3')}
             </span>
           </div>
         )}
@@ -553,24 +565,24 @@ function ReportForm({ form, setForm, handleSubmit, user, isOfficer, isSupervisor
             marginBottom: '16px',
             color: '#991b1b'
           }}>
-            <strong>⚠️ Please fix the following errors:</strong>
+            <strong>⚠️ {t('report.fix_errors')}</strong>
             <ul style={{ margin: '8px 0 0 0', paddingLeft: '20px' }}>
               {Object.entries(errors).map(([field, msg]) => {
                 if (!msg) return null;
                 const fieldNames = {
-                  reportDate: 'Report Date',
-                  registrations: 'Citizens Registered',
-                  workHours: 'Work Hours',
-                  operationalStatus: 'Operational Status',
-                  activities: 'Activities',
-                  equipmentStatus: 'Equipment Status',
-                  materialsUsed: 'Materials Used',
-                  teamMembers: 'Team Members',
-                  weatherConditions: 'Weather Conditions',
-                  communityFeedback: 'Community Feedback',
-                  challenges: 'Challenges',
-                  issues: 'Issues',
-                  comments: 'Comments'
+                  reportDate: t('report.report_date'),
+                  registrations: t('report.registrations'),
+                  workHours: t('report.work_hours'),
+                  operationalStatus: t('report.operational_status'),
+                  activities: t('report.activities'),
+                  equipmentStatus: t('report.equipment_status'),
+                  materialsUsed: t('report.materials_used'),
+                  teamMembers: t('report.team_members'),
+                  weatherConditions: t('report.weather'),
+                  communityFeedback: t('report.community_feedback'),
+                  challenges: t('report.challenges'),
+                  issues: t('report.issues'),
+                  comments: t('report.comments')
                 };
                 return <li key={field}>{fieldNames[field] || field}: {msg}</li>;
               })}
@@ -583,7 +595,7 @@ function ReportForm({ form, setForm, handleSubmit, user, isOfficer, isSupervisor
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px', marginBottom: '16px' }}>
             <div className="form-group">
               <label style={{ display: 'block', fontWeight: '500', marginBottom: '4px', fontSize: '14px', color: '#374151' }}>
-                Report Date *
+                {t('report.report_date')} *
               </label>
               <input 
                 type="date" 
@@ -623,8 +635,8 @@ function ReportForm({ form, setForm, handleSubmit, user, isOfficer, isSupervisor
                 marginBottom: '10px'
               }}>
                 {user?.community_id
-                  ? '🔒 Your working area is locked to your assigned community. You cannot change any location field.'
-                  : '🔒 Your working area is locked to your assigned region. You can only change the community.'}
+                  ? `🔒 ${t('report.locked_community')}`
+                  : `🔒 ${t('report.locked_region')}`}
               </div>
             )}
             <LocationCascade
@@ -643,7 +655,7 @@ function ReportForm({ form, setForm, handleSubmit, user, isOfficer, isSupervisor
           {/* GPS Location */}
           <div style={{ marginBottom: '16px' }}>
             <label style={{ display: 'block', fontWeight: '500', marginBottom: '4px', fontSize: '14px', color: '#374151' }}>
-              📍 GPS Location
+              📍 {t('report.gps_location')}
             </label>
             <GpsCapture onCoords={setGps} />
           </div>
@@ -652,7 +664,7 @@ function ReportForm({ form, setForm, handleSubmit, user, isOfficer, isSupervisor
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px', marginBottom: '16px' }}>
             <div className="form-group">
               <label style={{ display: 'block', fontWeight: '500', marginBottom: '4px', fontSize: '14px', color: '#374151' }}>
-                Citizens Registered Today *
+                {t('report.registrations')} *
               </label>
               <input 
                 type="number" 
@@ -679,7 +691,7 @@ function ReportForm({ form, setForm, handleSubmit, user, isOfficer, isSupervisor
             </div>
             <div className="form-group">
               <label style={{ display: 'block', fontWeight: '500', marginBottom: '4px', fontSize: '14px', color: '#374151' }}>
-                Work Hours *
+                {t('report.work_hours')} *
               </label>
               <input 
                 type="number" 
@@ -711,7 +723,7 @@ function ReportForm({ form, setForm, handleSubmit, user, isOfficer, isSupervisor
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px', marginBottom: '16px' }}>
             <div className="form-group">
               <label style={{ display: 'block', fontWeight: '500', marginBottom: '4px', fontSize: '14px', color: '#374151' }}>
-                Operational Status *
+                {t('report.operational_status')} *
               </label>
               <select 
                 name="operationalStatus"
@@ -729,10 +741,10 @@ function ReportForm({ form, setForm, handleSubmit, user, isOfficer, isSupervisor
                   outline: 'none'
                 }}
               >
-                <option value="Active">Active</option>
-                <option value="Delayed">Delayed</option>
-                <option value="Interrupted">Interrupted</option>
-                <option value="Closed">Closed</option>
+                <option value="Active">{t('report.active')}</option>
+                <option value="Delayed">{t('report.delayed')}</option>
+                <option value="Interrupted">{t('report.interrupted')}</option>
+                <option value="Closed">{t('report.closed')}</option>
               </select>
               {touched.operationalStatus && errors.operationalStatus && (
                 <span className="field-error" style={{ color: '#dc2626', fontSize: '13px', display: 'block', marginTop: '4px' }}>
@@ -742,14 +754,14 @@ function ReportForm({ form, setForm, handleSubmit, user, isOfficer, isSupervisor
             </div>
             <div className="form-group">
               <label style={{ display: 'block', fontWeight: '500', marginBottom: '4px', fontSize: '14px', color: '#374151' }}>
-                Activities Performed *
+                {t('report.activities')} *
               </label>
               <textarea 
                 name="activities"
                 value={form.activities} 
                 onChange={handleInputChange}
                 onBlur={handleBlur}
-                placeholder="Describe activities performed today" 
+                placeholder={t('report.place_activities')} 
                 rows="2"
                 required
                 style={{
@@ -776,7 +788,7 @@ function ReportForm({ form, setForm, handleSubmit, user, isOfficer, isSupervisor
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px', marginBottom: '16px' }}>
             <div className="form-group">
               <label style={{ display: 'block', fontWeight: '500', marginBottom: '4px', fontSize: '14px', color: '#374151' }}>
-                Equipment Status *
+                {t('report.equipment_status')} *
               </label>
               <select 
                 name="equipmentStatus"
@@ -794,9 +806,9 @@ function ReportForm({ form, setForm, handleSubmit, user, isOfficer, isSupervisor
                   outline: 'none'
                 }}
               >
-                <option value="operational">Operational</option>
-                <option value="partial">Partially Operational</option>
-                <option value="non_operational">Non-Operational</option>
+                <option value="operational">{t('report.operational')}</option>
+                <option value="partial">{t('report.partial')}</option>
+                <option value="non_operational">{t('report.non_operational')}</option>
               </select>
               {touched.equipmentStatus && errors.equipmentStatus && (
                 <span className="field-error" style={{ color: '#dc2626', fontSize: '13px', display: 'block', marginTop: '4px' }}>
@@ -806,7 +818,7 @@ function ReportForm({ form, setForm, handleSubmit, user, isOfficer, isSupervisor
             </div>
             <div className="form-group">
               <label style={{ display: 'block', fontWeight: '500', marginBottom: '4px', fontSize: '14px', color: '#374151' }}>
-                Materials Used *
+                {t('report.materials_used')} *
               </label>
               <input 
                 type="text" 
@@ -814,7 +826,7 @@ function ReportForm({ form, setForm, handleSubmit, user, isOfficer, isSupervisor
                 value={form.materialsUsed} 
                 onChange={handleInputChange}
                 onBlur={handleBlur}
-                placeholder="Materials consumed"
+                placeholder={t('report.place_materials')}
                 required
                 style={{
                   width: '100%',
@@ -837,7 +849,7 @@ function ReportForm({ form, setForm, handleSubmit, user, isOfficer, isSupervisor
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px', marginBottom: '16px' }}>
             <div className="form-group">
               <label style={{ display: 'block', fontWeight: '500', marginBottom: '4px', fontSize: '14px', color: '#374151' }}>
-                Team Members Present *
+                {t('report.team_members')} *
               </label>
               <input 
                 type="text" 
@@ -845,7 +857,7 @@ function ReportForm({ form, setForm, handleSubmit, user, isOfficer, isSupervisor
                 value={form.teamMembers} 
                 onChange={handleInputChange}
                 onBlur={handleBlur}
-                placeholder="Names of team members"
+                placeholder={t('report.place_team_members')}
                 required
                 style={{
                   width: '100%',
@@ -864,7 +876,7 @@ function ReportForm({ form, setForm, handleSubmit, user, isOfficer, isSupervisor
             </div>
             <div className="form-group">
               <label style={{ display: 'block', fontWeight: '500', marginBottom: '4px', fontSize: '14px', color: '#374151' }}>
-                Weather Conditions *
+                {t('report.weather')} *
               </label>
               <input 
                 type="text" 
@@ -872,7 +884,7 @@ function ReportForm({ form, setForm, handleSubmit, user, isOfficer, isSupervisor
                 value={form.weatherConditions} 
                 onChange={handleInputChange}
                 onBlur={handleBlur}
-                placeholder="Weather conditions"
+                placeholder={t('report.place_weather')}
                 required
                 style={{
                   width: '100%',
@@ -895,7 +907,7 @@ function ReportForm({ form, setForm, handleSubmit, user, isOfficer, isSupervisor
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px', marginBottom: '16px' }}>
             <div className="form-group">
               <label style={{ display: 'block', fontWeight: '500', marginBottom: '4px', fontSize: '14px', color: '#374151' }}>
-                Community Feedback *
+                {t('report.community_feedback')} *
               </label>
               <input 
                 type="text" 
@@ -903,7 +915,7 @@ function ReportForm({ form, setForm, handleSubmit, user, isOfficer, isSupervisor
                 value={form.communityFeedback} 
                 onChange={handleInputChange}
                 onBlur={handleBlur}
-                placeholder="Community feedback received"
+                placeholder={t('report.place_community_feedback')}
                 required
                 style={{
                   width: '100%',
@@ -922,7 +934,7 @@ function ReportForm({ form, setForm, handleSubmit, user, isOfficer, isSupervisor
             </div>
             <div className="form-group">
               <label style={{ display: 'block', fontWeight: '500', marginBottom: '4px', fontSize: '14px', color: '#374151' }}>
-                Challenges Faced *
+                {t('report.challenges_faced')} *
               </label>
               <input 
                 type="text" 
@@ -930,7 +942,7 @@ function ReportForm({ form, setForm, handleSubmit, user, isOfficer, isSupervisor
                 value={form.challenges} 
                 onChange={handleInputChange}
                 onBlur={handleBlur}
-                placeholder="Describe any challenges"
+                placeholder={t('report.place_challenges')}
                 required
                 style={{
                   width: '100%',
@@ -953,7 +965,7 @@ function ReportForm({ form, setForm, handleSubmit, user, isOfficer, isSupervisor
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px', marginBottom: '16px' }}>
             <div className="form-group">
               <label style={{ display: 'block', fontWeight: '500', marginBottom: '4px', fontSize: '14px', color: '#374151' }}>
-                Issues Encountered *
+                {t('report.issues')} *
               </label>
               <input 
                 type="text" 
@@ -961,7 +973,7 @@ function ReportForm({ form, setForm, handleSubmit, user, isOfficer, isSupervisor
                 value={form.issues} 
                 onChange={handleInputChange}
                 onBlur={handleBlur}
-                placeholder="Any issues?"
+                placeholder={t('report.place_issues')}
                 required
                 style={{
                   width: '100%',
@@ -980,7 +992,7 @@ function ReportForm({ form, setForm, handleSubmit, user, isOfficer, isSupervisor
             </div>
             <div className="form-group">
               <label style={{ display: 'block', fontWeight: '500', marginBottom: '4px', fontSize: '14px', color: '#374151' }}>
-                Additional Comments *
+                {t('report.additional_comments')} *
               </label>
               <input 
                 type="text" 
@@ -988,7 +1000,7 @@ function ReportForm({ form, setForm, handleSubmit, user, isOfficer, isSupervisor
                 value={form.comments} 
                 onChange={handleInputChange}
                 onBlur={handleBlur}
-                placeholder="Additional notes"
+                placeholder={t('report.place_comments')}
                 required
                 style={{
                   width: '100%',
@@ -1010,7 +1022,7 @@ function ReportForm({ form, setForm, handleSubmit, user, isOfficer, isSupervisor
           {/* File / Image Attachments */}
           <div style={{ marginBottom: '16px' }}>
             <label style={{ display: 'block', fontWeight: '500', marginBottom: '4px', fontSize: '14px', color: '#374151' }}>
-              📎 Attachments (Images &amp; Files)
+              📎 {t('report.attachments')}
             </label>
             <div style={{
               border: '2px dashed #d1d5db',
@@ -1026,12 +1038,12 @@ function ReportForm({ form, setForm, handleSubmit, user, isOfficer, isSupervisor
               onDragLeave={(e) => { e.currentTarget.style.borderColor = '#d1d5db'; }}
               onDrop={(e) => { e.preventDefault(); e.currentTarget.style.borderColor = '#d1d5db'; handleFileSelect({ target: { files: e.dataTransfer.files } }); }}
             >
-              <div style={{ fontSize: '32px', marginBottom: '8px' }}>📤</div>
+              <div style={{ fontSize: '32px', marginBottom: '8px' }}>📎</div>
               <p style={{ margin: '0 0 4px', fontSize: '14px', color: '#374151', fontWeight: '500' }}>
-                Click to upload or drag and drop
+                {t('report.upload_hint')}
               </p>
               <p style={{ margin: 0, fontSize: '12px', color: '#6b7280' }}>
-                Images (JPEG, PNG, GIF, WebP, HEIC), PDF, Word, Excel, TXT — Max 10 MB each, up to 5 files
+                {t('report.upload_types')}
               </p>
               <input
                 id="report-file-input"
@@ -1105,7 +1117,7 @@ function ReportForm({ form, setForm, handleSubmit, user, isOfficer, isSupervisor
           }}>
             {!isOnline && (
               <span style={{ fontSize: '13px', color: '#92400e' }}>
-                📡 Will sync automatically when online
+                🔄 {t('report.will_sync_auto')}
               </span>
             )}
             <button 
@@ -1141,7 +1153,7 @@ function ReportForm({ form, setForm, handleSubmit, user, isOfficer, isSupervisor
                 }
               }}
             >
-              {isSubmitting ? '⏳ Submitting...' : (!isOnline ? '💾 Save Offline' : '📋 Submit Report')}
+              {isSubmitting ? `🕐 ${t('report.submitting')}` : (!isOnline ? `📴 ${t('report.save_offline')}` : `📤 ${t('report.submit_btn')}`)}
             </button>
           </div>
         </form>
@@ -1151,3 +1163,4 @@ function ReportForm({ form, setForm, handleSubmit, user, isOfficer, isSupervisor
 }
 
 export default ReportForm;
+

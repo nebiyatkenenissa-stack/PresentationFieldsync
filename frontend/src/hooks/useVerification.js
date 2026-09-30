@@ -2,6 +2,7 @@
 // FIRST: 30 seconds → THEN: random 2–8 minutes (unpredictable)
 
 import { useState, useEffect, useCallback, useRef } from 'react';
+import toast from 'react-hot-toast';
 import { db, checkRealInternet, syncQueue, getApiBase } from '../services/database';
 import { uid } from '../utils/helpers';
 
@@ -243,6 +244,17 @@ export function useVerification(officerId, officerName) {
     const updatedScore = Math.round((verificationScore + trustScore) / 2);
     const now = new Date().toISOString();
 
+    // Count consecutive passed verifications (streak) from the most recent record
+    let consecutivePasses = 0;
+    for (const h of updatedHistory) {
+      if (h.success === true) {
+        consecutivePasses += 1;
+      } else {
+        break;
+      }
+    }
+    const reachedMilestone = consecutivePasses === 3;
+
     setVerificationHistory(updatedHistory);
     setVerificationScore(updatedScore);
     setLastVerified(now);
@@ -274,6 +286,15 @@ export function useVerification(officerId, officerName) {
     } else {
       console.log('📡 Offline, queuing verification for later sync');
       syncQueue.add({ type: 'verification', id: historyEntry.id, data: historyEntry });
+    }
+
+    // After 3 consecutive passed verifications: alert the officer and
+    // notify the supervisor so they know the officer is active and reliable.
+    if (reachedMilestone && isMounted.current) {
+      toast.success(`🏆 ${consecutivePasses} consecutive verifications passed! Excellent work, ${officerName}!`);
+      window.dispatchEvent(new CustomEvent('verification-streak-passed', {
+        detail: { officerId, officerName, streak: consecutivePasses }
+      }));
     }
 
     // Schedule next popup with random delay (2–8 min)

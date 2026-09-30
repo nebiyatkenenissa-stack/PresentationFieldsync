@@ -2,6 +2,9 @@
 // FULL – with all card styles, filtering, and synced‑only records
 
 import React, { useState, useMemo, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
+import toast from 'react-hot-toast';
+import { confirmToast } from '../../utils/confirmToast';
 import { db, checkRealInternet, syncQueue, getApiBase } from '../../services/database';
 import UserAvatar from '../common/UserAvatar';
 
@@ -12,6 +15,7 @@ function VerificationPage({
   citizens = [],
   supervisorId = null
 }) {
+  const { t } = useTranslation();
   const [selectedOfficer, setSelectedOfficer] = useState(null);
   const [filter, setFilter] = useState('all');
   const [searchTerm, setSearchTerm] = useState('');
@@ -81,7 +85,11 @@ function VerificationPage({
   // ===== REMOVE A VERIFICATION RECORD =====
   const handleRemoveVerification = async (record, officer) => {
     if (!record || !record.id) return;
-    if (!window.confirm(`Remove this verification record for ${officer.name}?\n\nQuestion: ${record.question || 'Verification check'}\nAnswer: ${record.answer || 'N/A'}`)) return;
+    if (!await confirmToast(t('verification.remove_confirm', {
+      name: officer.name,
+      question: record.question || t('verification.verifying_check'),
+      answer: record.answer || t('verification.n_a')
+    }))) return;
 
     try {
       // 1. Remove from IndexedDB
@@ -122,10 +130,10 @@ function VerificationPage({
       // 4. Refresh the view
       window.dispatchEvent(new CustomEvent('verification-update', { detail: { officerId } }));
       setRefreshKey(prev => prev + 1);
-      alert('🗑️ Verification record removed');
+      toast(t('verification.removed'));
     } catch (error) {
       console.error('Error removing verification record:', error);
-      alert('❌ Error removing verification record: ' + error.message);
+      toast(t('verification.remove_error', { error: error.message }));
     }
   };
 
@@ -211,10 +219,10 @@ function VerificationPage({
 
       return {
         id: officer.id || 'unknown',
-        name: officer.name || 'Unknown',
+        name: officer.name || t('verification.unknown'),
         photo: officer.profilePhoto || null,
-        region: officer.region || 'N/A',
-        employeeId: officer.employeeId || 'N/A',
+        region: officer.region || t('verification.n_a'),
+        employeeId: officer.employeeId || t('verification.n_a'),
         hasHistory: total > 0,
         historyCount: total,
         passed: passed || 0,
@@ -229,11 +237,11 @@ function VerificationPage({
         suspicious,
         consecutiveFailures,
         lastVerified: history.length > 0 ? history[0]?.timestamp : null,
-        lastQuestion: history.length > 0 ? history[0]?.question || 'No history' : 'No history',
+        lastQuestion: history.length > 0 ? history[0]?.question || t('verification.no_history') : t('verification.no_history'),
         lastResult: history.length > 0 ? history[0]?.success : undefined
       };
     });
-  }, [users, liveStatus, allVerificationData, reports, citizens, supervisorId]);
+  }, [users, liveStatus, allVerificationData, reports, citizens, supervisorId, t]);
 
   // ===== FILTER OFFICERS =====
   const filteredOfficers = useMemo(() => {
@@ -264,12 +272,18 @@ function VerificationPage({
     return { total, active, suspicious, notVerified, totalVerifications, totalPassed };
   }, [officersData]);
 
+  const statusText = (status) => {
+    if (status === 'Active') return t('verification.active_label');
+    if (status === 'Suspicious') return t('verification.status_suspicious');
+    return t('verification.not_verified');
+  };
+
   if (loading) {
     return (
       <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '400px' }}>
         <div style={{ textAlign: 'center' }}>
           <div style={{ fontSize: '36px', marginBottom: '12px' }}>⏳</div>
-          <div style={{ color: '#64748b' }}>Loading verification data...</div>
+          <div style={{ color: '#64748b' }}>{t('verification.loading')}</div>
         </div>
       </div>
     );
@@ -279,15 +293,15 @@ function VerificationPage({
     return (
       <div style={{ padding: '40px', textAlign: 'center' }}>
         <div style={{ fontSize: '48px' }}>📋</div>
-        <h3 style={{ color: '#1a202c' }}>No Verification Data Found</h3>
+        <h3 style={{ color: '#1a202c' }}>{t('verification.no_verification_data_found')}</h3>
         <p style={{ color: '#64748b' }}>
           {allVerificationData.length === 0 ? 
-            'No synced verification records yet. Records will appear after they are synced to the server.' :
-            (supervisorId ? 'No field officers are assigned to your team.' : 'No field officers registered in the system.')
+            t('verification.no_synced_records') :
+            (supervisorId ? t('verification.no_officers_team') : t('verification.no_officers_system'))
           }
         </p>
         <p style={{ color: '#94a3b8', fontSize: '13px', marginTop: '8px' }}>
-          Total records in IndexedDB: {allVerificationData.length}
+          {t('verification.total_records_indexeddb', { count: allVerificationData.length })}
         </p>
         <button
           onClick={() => window.dispatchEvent(new Event('force-sync'))}
@@ -302,7 +316,7 @@ function VerificationPage({
             fontSize: '14px'
           }}
         >
-          🔄 Force Sync Now
+          {t('verification.force_sync_now')}
         </button>
       </div>
     );
@@ -329,7 +343,7 @@ function VerificationPage({
       }}>
         <div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '6px', flexWrap: 'wrap' }}>
-            <h2 style={{ fontSize: '24px', fontWeight: '700', margin: 0 }}>🛡️ Officer Verification Dashboard</h2>
+            <h2 style={{ fontSize: '24px', fontWeight: '700', margin: 0 }}>🛡️ {t('verification.title')}</h2>
             <span style={{
               padding: '3px 12px',
               borderRadius: '20px',
@@ -339,11 +353,11 @@ function VerificationPage({
               border: '1px solid rgba(52,211,153,0.5)',
               color: '#ffffff'
             }}>
-              SUPERVISOR
+              {t('verification.supervisor_badge')}
             </span>
           </div>
           <p style={{ fontSize: '14px', opacity: 0.85, margin: 0, maxWidth: '540px' }}>
-            Field officer verification status and time-based compliance monitoring
+            {t('verification.subtitle')}
           </p>
         </div>
         <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
@@ -355,7 +369,7 @@ function VerificationPage({
             fontSize: '13px',
             fontWeight: '600'
           }}>
-            📋 {allVerificationData.length} Records
+            📋 {t('verification.records', { count: allVerificationData.length })}
           </span>
           <span style={{
             background: 'rgba(16,185,129,0.2)',
@@ -365,7 +379,7 @@ function VerificationPage({
             fontSize: '13px',
             fontWeight: '600'
           }}>
-            👥 {summary.total} Officers
+            👥 {t('verification.officers', { count: summary.total })}
           </span>
           <span style={{
             background: 'rgba(251,191,36,0.15)',
@@ -375,7 +389,7 @@ function VerificationPage({
             fontSize: '13px',
             fontWeight: '600'
           }}>
-            ⚡ {summary.active} Active
+            ⚡ {t('verification.active', { count: summary.active })}
           </span>
         </div>
       </div>
@@ -388,23 +402,23 @@ function VerificationPage({
         marginBottom: '28px'
       }}>
         <div style={{ background: 'white', padding: '18px 20px', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
-          <div style={{ fontSize: '13px', color: '#64748b', fontWeight: '500' }}>Total Officers</div>
+          <div style={{ fontSize: '13px', color: '#64748b', fontWeight: '500' }}>{t('verification.total_officers')}</div>
           <div style={{ fontSize: '30px', fontWeight: '700', color: '#0f172a' }}>{summary.total}</div>
         </div>
         <div style={{ background: 'white', padding: '18px 20px', borderRadius: '12px', border: '1px solid #e2e8f0', borderLeft: '4px solid #22c55e' }}>
-          <div style={{ fontSize: '13px', color: '#64748b', fontWeight: '500' }}>Active</div>
+          <div style={{ fontSize: '13px', color: '#64748b', fontWeight: '500' }}>{t('verification.active_label')}</div>
           <div style={{ fontSize: '30px', fontWeight: '700', color: '#16a34a' }}>{summary.active}</div>
         </div>
         <div style={{ background: 'white', padding: '18px 20px', borderRadius: '12px', border: '1px solid #e2e8f0', borderLeft: '4px solid #eab308' }}>
-          <div style={{ fontSize: '13px', color: '#64748b', fontWeight: '500' }}>Suspicious</div>
+          <div style={{ fontSize: '13px', color: '#64748b', fontWeight: '500' }}>{t('verification.suspicious')}</div>
           <div style={{ fontSize: '30px', fontWeight: '700', color: '#ca8a04' }}>{summary.suspicious}</div>
         </div>
         <div style={{ background: 'white', padding: '18px 20px', borderRadius: '12px', border: '1px solid #e2e8f0', borderLeft: '4px solid #94a3b8' }}>
-          <div style={{ fontSize: '13px', color: '#64748b', fontWeight: '500' }}>Not Verified</div>
+          <div style={{ fontSize: '13px', color: '#64748b', fontWeight: '500' }}>{t('verification.not_verified')}</div>
           <div style={{ fontSize: '30px', fontWeight: '700', color: '#64748b' }}>{summary.notVerified}</div>
         </div>
         <div style={{ background: 'white', padding: '18px 20px', borderRadius: '12px', border: '1px solid #e2e8f0', borderLeft: '4px solid #3b82f6' }}>
-          <div style={{ fontSize: '13px', color: '#64748b', fontWeight: '500' }}>Total Verifications</div>
+          <div style={{ fontSize: '13px', color: '#64748b', fontWeight: '500' }}>{t('verification.total_verifications')}</div>
           <div style={{ fontSize: '30px', fontWeight: '700', color: '#2563eb' }}>{summary.totalVerifications}</div>
         </div>
       </div>
@@ -424,7 +438,7 @@ function VerificationPage({
         <div style={{ flex: '1', minWidth: '200px' }}>
           <input
             type="text"
-            placeholder="Search by name, ID or region..."
+            placeholder={t('verification.search_placeholder')}
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             style={{
@@ -438,10 +452,10 @@ function VerificationPage({
           />
         </div>
         <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-          <button onClick={() => setFilter('all')} style={{ padding: '6px 16px', borderRadius: '20px', border: filter === 'all' ? '2px solid #0f172a' : '1px solid #d1d5db', background: filter === 'all' ? '#0f172a' : 'white', color: filter === 'all' ? 'white' : '#475569', cursor: 'pointer', fontSize: '13px', fontWeight: '500' }}>All ({summary.total})</button>
-          <button onClick={() => setFilter('Active')} style={{ padding: '6px 16px', borderRadius: '20px', border: filter === 'Active' ? '2px solid #22c55e' : '1px solid #d1d5db', background: filter === 'Active' ? '#22c55e' : 'white', color: filter === 'Active' ? 'white' : '#475569', cursor: 'pointer', fontSize: '13px', fontWeight: '500' }}>Active ({summary.active})</button>
-          <button onClick={() => setFilter('Suspicious')} style={{ padding: '6px 16px', borderRadius: '20px', border: filter === 'Suspicious' ? '2px solid #eab308' : '1px solid #d1d5db', background: filter === 'Suspicious' ? '#eab308' : 'white', color: filter === 'Suspicious' ? 'white' : '#475569', cursor: 'pointer', fontSize: '13px', fontWeight: '500' }}>Suspicious ({summary.suspicious})</button>
-          <button onClick={() => setFilter('Not Verified')} style={{ padding: '6px 16px', borderRadius: '20px', border: filter === 'Not Verified' ? '2px solid #94a3b8' : '1px solid #d1d5db', background: filter === 'Not Verified' ? '#94a3b8' : 'white', color: filter === 'Not Verified' ? 'white' : '#475569', cursor: 'pointer', fontSize: '13px', fontWeight: '500' }}>Not Verified ({summary.notVerified})</button>
+          <button onClick={() => setFilter('all')} style={{ padding: '6px 16px', borderRadius: '20px', border: filter === 'all' ? '2px solid #0f172a' : '1px solid #d1d5db', background: filter === 'all' ? '#0f172a' : 'white', color: filter === 'all' ? 'white' : '#475569', cursor: 'pointer', fontSize: '13px', fontWeight: '500' }}>{t('verification.all_filters')} ({summary.total})</button>
+          <button onClick={() => setFilter('Active')} style={{ padding: '6px 16px', borderRadius: '20px', border: filter === 'Active' ? '2px solid #22c55e' : '1px solid #d1d5db', background: filter === 'Active' ? '#22c55e' : 'white', color: filter === 'Active' ? 'white' : '#475569', cursor: 'pointer', fontSize: '13px', fontWeight: '500' }}>{t('verification.active_label')} ({summary.active})</button>
+          <button onClick={() => setFilter('Suspicious')} style={{ padding: '6px 16px', borderRadius: '20px', border: filter === 'Suspicious' ? '2px solid #eab308' : '1px solid #d1d5db', background: filter === 'Suspicious' ? '#eab308' : 'white', color: filter === 'Suspicious' ? 'white' : '#475569', cursor: 'pointer', fontSize: '13px', fontWeight: '500' }}>{t('verification.status_suspicious')} ({summary.suspicious})</button>
+          <button onClick={() => setFilter('Not Verified')} style={{ padding: '6px 16px', borderRadius: '20px', border: filter === 'Not Verified' ? '2px solid #94a3b8' : '1px solid #d1d5db', background: filter === 'Not Verified' ? '#94a3b8' : 'white', color: filter === 'Not Verified' ? 'white' : '#475569', cursor: 'pointer', fontSize: '13px', fontWeight: '500' }}>{t('verification.not_verified')} ({summary.notVerified})</button>
         </div>
       </div>
 
@@ -450,7 +464,7 @@ function VerificationPage({
         {filteredOfficers.length === 0 ? (
           <div style={{ textAlign: 'center', padding: '40px', background: 'white', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
             <div style={{ fontSize: '48px' }}>🔍</div>
-            <div style={{ color: '#64748b' }}>No officers match the current filters</div>
+            <div style={{ color: '#64748b' }}>{t('verification.no_officers_match')}</div>
           </div>
         ) : (
           filteredOfficers.map((officer) => {
@@ -498,7 +512,7 @@ function VerificationPage({
                             color: '#dc2626',
                             border: '1px solid #fecaca'
                           }}>
-                            ⚠️ Suspicious
+                            ⚠️ {t('verification.status_suspicious')}
                           </span>
                         )}
                       </div>
@@ -516,10 +530,10 @@ function VerificationPage({
                       background: statusColor + '20',
                       color: statusColor
                     }}>
-                      {officer.status}
+                      {statusText(officer.status)}
                     </span>
                     <span style={{ fontSize: '13px', fontWeight: '600', color: hasHistory ? statusColor : '#94a3b8' }}>
-                      {hasHistory ? `✅ ${officer.historyCount} verification${officer.historyCount === 1 ? '' : 's'}` : '—'}
+                      {hasHistory ? t('verification.verifications_count', { count: officer.historyCount }) : '—'}
                     </span>
                     <span style={{ fontSize: '18px', color: '#94a3b8' }}>
                       {isExpanded ? '▲' : '▼'}
@@ -533,8 +547,8 @@ function VerificationPage({
                     {!hasHistory ? (
                       <div style={{ padding: '20px', textAlign: 'center', color: '#64748b' }}>
                         <div style={{ fontSize: '48px', marginBottom: '8px' }}>📋</div>
-                        <div>No synced verification history for this officer yet.</div>
-                        <div style={{ fontSize: '13px', marginTop: '4px' }}>Records will appear after they are synced to the server.</div>
+                        <div>{t('verification.no_history_yet')}</div>
+                        <div style={{ fontSize: '13px', marginTop: '4px' }}>{t('verification.history_will_appear')}</div>
                       </div>
                     ) : (
                       <>
@@ -550,8 +564,7 @@ function VerificationPage({
                             fontSize: '13px',
                             color: '#991b1b'
                           }}>
-                            ⚠️ <strong>Flagged as suspicious:</strong> {officer.consecutiveFailures} consecutive failed
-                            verification{officer.consecutiveFailures === 1 ? '' : 's'}. Review this officer&apos;s activity.
+                            ⚠️ <strong>{t('verification.flagged_suspicious')}</strong> {t('verification.consecutive_failures', { count: officer.consecutiveFailures })}
                           </div>
                         )}
 
@@ -563,31 +576,31 @@ function VerificationPage({
                           marginTop: '16px'
                         }}>
                           <div style={{ background: '#f8fafc', padding: '12px', borderRadius: '8px', textAlign: 'center' }}>
-                            <div style={{ fontSize: '11px', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Verifications</div>
+                            <div style={{ fontSize: '11px', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>{t('verification.metric_verifications')}</div>
                             <div style={{ fontSize: '22px', fontWeight: '700', color: '#0f172a' }}>{officer.historyCount}</div>
                           </div>
                           <div style={{ background: '#f8fafc', padding: '12px', borderRadius: '8px', textAlign: 'center', borderLeft: '3px solid #22c55e' }}>
-                            <div style={{ fontSize: '11px', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Passed</div>
+                            <div style={{ fontSize: '11px', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>{t('verification.metric_passed')}</div>
                             <div style={{ fontSize: '22px', fontWeight: '700', color: '#16a34a' }}>{officer.passed}</div>
                           </div>
                           <div style={{ background: '#f8fafc', padding: '12px', borderRadius: '8px', textAlign: 'center', borderLeft: '3px solid #ef4444' }}>
-                            <div style={{ fontSize: '11px', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Failed</div>
+                            <div style={{ fontSize: '11px', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>{t('verification.metric_failed')}</div>
                             <div style={{ fontSize: '22px', fontWeight: '700', color: '#dc2626' }}>{officer.failed}</div>
                           </div>
                           <div style={{ background: '#f8fafc', padding: '12px', borderRadius: '8px', textAlign: 'center', borderLeft: '3px solid #eab308' }}>
-                            <div style={{ fontSize: '11px', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Skipped</div>
+                            <div style={{ fontSize: '11px', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>{t('verification.metric_skipped')}</div>
                             <div style={{ fontSize: '22px', fontWeight: '700', color: '#ca8a04' }}>{officer.skipped}</div>
                           </div>
                           <div style={{ background: '#f8fafc', padding: '12px', borderRadius: '8px', textAlign: 'center', borderLeft: '3px solid #3b82f6' }}>
-                            <div style={{ fontSize: '11px', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Avg Response</div>
-                            <div style={{ fontSize: '22px', fontWeight: '700', color: '#2563eb' }}>{officer.avgResponseTime}s</div>
+                            <div style={{ fontSize: '11px', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>{t('verification.metric_avg_response')}</div>
+                            <div style={{ fontSize: '22px', fontWeight: '700', color: '#2563eb' }}>{officer.avgResponseTime}{t('verification.secs', { count: officer.avgResponseTime })}</div>
                           </div>
                           <div style={{ background: '#f8fafc', padding: '12px', borderRadius: '8px', textAlign: 'center', borderLeft: '3px solid #8b5cf6' }}>
-                            <div style={{ fontSize: '11px', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Reports Today</div>
+                            <div style={{ fontSize: '11px', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>{t('verification.metric_reports_today')}</div>
                             <div style={{ fontSize: '22px', fontWeight: '700', color: '#7c3aed' }}>{officer.todayReports}</div>
                           </div>
                           <div style={{ background: '#f8fafc', padding: '12px', borderRadius: '8px', textAlign: 'center', borderLeft: '3px solid #14b8a6' }}>
-                            <div style={{ fontSize: '11px', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Citizens</div>
+                            <div style={{ fontSize: '11px', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>{t('verification.metric_citizens')}</div>
                             <div style={{ fontSize: '22px', fontWeight: '700', color: '#0d9488' }}>{officer.citizenCount}</div>
                           </div>
                         </div>
@@ -607,12 +620,12 @@ function VerificationPage({
                           color: '#475569'
                         }}>
                           <span>
-                            Last Verified: <strong>{officer.lastVerified ? new Date(officer.lastVerified).toLocaleString() : 'Never'}</strong>
+                            {t('verification.last_verified')} <strong>{officer.lastVerified ? new Date(officer.lastVerified).toLocaleString() : t('verification.never')}</strong>
                           </span>
                           <span>
-                            Last Question: <strong>{officer.lastQuestion}</strong>
+                            {t('verification.last_question')} <strong>{officer.lastQuestion}</strong>
                             {officer.lastResult !== undefined && (
-                              <span style={{ marginLeft: '6px' }}>{officer.lastResult ? 'Passed' : 'Failed'}</span>
+                              <span style={{ marginLeft: '6px' }}>{officer.lastResult ? t('verification.passed') : t('verification.failed_result')}</span>
                             )}
                           </span>
                         </div>
@@ -621,7 +634,7 @@ function VerificationPage({
                         {officer.questionHistory.length > 0 && (
                           <div style={{ marginTop: '16px' }}>
                             <h4 style={{ fontSize: '15px', fontWeight: '600', color: '#0f172a', margin: '0 0 10px 0' }}>
-                              Verification History ({officer.questionHistory.length} records)
+                              {t('verification.history_title', { count: officer.questionHistory.length })}
                             </h4>
                             <div style={{ overflowX: 'auto' }}>
                               <table style={{
@@ -634,19 +647,19 @@ function VerificationPage({
                               }}>
                                 <thead>
                                   <tr style={{ background: '#f1f5f9', borderBottom: '2px solid #e2e8f0' }}>
-                                    <th style={{ padding: '10px 14px', textAlign: 'left', fontSize: '12px', fontWeight: '600', color: '#475569', textTransform: 'uppercase', letterSpacing: '0.3px' }}>Timestamp</th>
-                                    <th style={{ padding: '10px 14px', textAlign: 'left', fontSize: '12px', fontWeight: '600', color: '#475569', textTransform: 'uppercase', letterSpacing: '0.3px' }}>Question</th>
-                                    <th style={{ padding: '10px 14px', textAlign: 'left', fontSize: '12px', fontWeight: '600', color: '#475569', textTransform: 'uppercase', letterSpacing: '0.3px' }}>Answer</th>
-                                    <th style={{ padding: '10px 14px', textAlign: 'center', fontSize: '12px', fontWeight: '600', color: '#475569', textTransform: 'uppercase', letterSpacing: '0.3px' }}>Response</th>
-                                    <th style={{ padding: '10px 14px', textAlign: 'center', fontSize: '12px', fontWeight: '600', color: '#475569', textTransform: 'uppercase', letterSpacing: '0.3px' }}>Result</th>
-                                    <th style={{ padding: '10px 14px', textAlign: 'center', fontSize: '12px', fontWeight: '600', color: '#475569', textTransform: 'uppercase', letterSpacing: '0.3px' }}>Actions</th>
+                                    <th style={{ padding: '10px 14px', textAlign: 'left', fontSize: '12px', fontWeight: '600', color: '#475569', textTransform: 'uppercase', letterSpacing: '0.3px' }}>{t('verification.col_timestamp')}</th>
+                                    <th style={{ padding: '10px 14px', textAlign: 'left', fontSize: '12px', fontWeight: '600', color: '#475569', textTransform: 'uppercase', letterSpacing: '0.3px' }}>{t('verification.col_question')}</th>
+                                    <th style={{ padding: '10px 14px', textAlign: 'left', fontSize: '12px', fontWeight: '600', color: '#475569', textTransform: 'uppercase', letterSpacing: '0.3px' }}>{t('verification.col_answer')}</th>
+                                    <th style={{ padding: '10px 14px', textAlign: 'center', fontSize: '12px', fontWeight: '600', color: '#475569', textTransform: 'uppercase', letterSpacing: '0.3px' }}>{t('verification.col_response')}</th>
+                                    <th style={{ padding: '10px 14px', textAlign: 'center', fontSize: '12px', fontWeight: '600', color: '#475569', textTransform: 'uppercase', letterSpacing: '0.3px' }}>{t('verification.col_result')}</th>
+                                    <th style={{ padding: '10px 14px', textAlign: 'center', fontSize: '12px', fontWeight: '600', color: '#475569', textTransform: 'uppercase', letterSpacing: '0.3px' }}>{t('verification.col_actions')}</th>
                                   </tr>
                                 </thead>
                                 <tbody>
                                   {officer.questionHistory.slice(0, 20).map((item, idx) => {
                                     const isSuccess = item.success === true;
                                     const isSkipped = item.message === '⏰ Verification skipped' || item.answer === 'Skipped';
-                                    const resultText = isSuccess ? 'Passed' : isSkipped ? 'Skipped' : 'Failed';
+                                    const resultText = isSuccess ? t('verification.passed') : isSkipped ? t('verification.skipped_result') : t('verification.failed_result');
                                     const resultColor = isSuccess ? '#16a34a' : isSkipped ? '#ca8a04' : '#dc2626';
 
                                     return (
@@ -661,7 +674,7 @@ function VerificationPage({
                                           {item.answer}
                                         </td>
                                         <td style={{ padding: '10px 14px', textAlign: 'center', color: '#475569' }}>
-                                          {item.responseTime ? item.responseTime + 's' : '--'}
+                                          {item.responseTime ? t('verification.secs', { count: item.responseTime }) : '--'}
                                         </td>
                                         <td style={{ padding: '10px 14px', textAlign: 'center' }}>
                                           <span style={{
@@ -678,7 +691,7 @@ function VerificationPage({
                                         <td style={{ padding: '10px 14px', textAlign: 'center' }}>
                                           <button
                                             onClick={(e) => { e.stopPropagation(); handleRemoveVerification(item, officer); }}
-                                            title="Remove verification record"
+                                            title={t('verification.remove_title')}
                                             style={{
                                               background: '#fee2e2',
                                               color: '#991b1b',
@@ -691,7 +704,7 @@ function VerificationPage({
                                               whiteSpace: 'nowrap'
                                             }}
                                           >
-                                            🗑️ Remove
+                                            {t('verification.remove')}
                                           </button>
                                         </td>
                                       </tr>
@@ -701,7 +714,7 @@ function VerificationPage({
                               </table>
                               {officer.questionHistory.length > 20 && (
                                 <div style={{ padding: '10px', textAlign: 'center', color: '#64748b', fontSize: '12px', borderTop: '1px solid #e2e8f0' }}>
-                                  Showing 20 of {officer.questionHistory.length} records
+                                  {t('verification.showing_records', { count: officer.questionHistory.length })}
                                 </div>
                               )}
                             </div>

@@ -1,27 +1,41 @@
 // components/reports/ReportList.js – Enhanced with NEW badge and time display
 
 import React, { useState, useEffect, useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import { syncQueue, checkRealInternet } from '../../services/database';
 import { getRegionOptions, getEmployeeRegionMap } from '../../utils/helpers';
+import useRegions from '../../hooks/useRegions';
+import { regionOfPath } from '../../utils/regions';
 import UserAvatar from '../common/UserAvatar';
 
 function ReportList({ reports, user, users, isOfficer, isSupervisor, addNotification }) {
+  const { t } = useTranslation();
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedRegion, setSelectedRegion] = useState('All');
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   const [pendingCount, setPendingCount] = useState(0);
 
-  const regionOptions = useMemo(() => getRegionOptions(users), [users]);
+  const regions = useRegions();
+  const regionOptions = useMemo(() => getRegionOptions(users, regions), [users, regions]);
   const employeeRegionMap = useMemo(() => getEmployeeRegionMap(users), [users]);
   const userByEmpId = useMemo(() => {
     const map = {};
-    (users || []).forEach(u => { if (u && u.employeeId) map[u.employeeId] = u; });
+    (users || []).forEach(u => {
+      if (!u || !u.employeeId) return;
+      const prev = map[u.employeeId];
+      if (!prev || (u.source === 'server' && prev.source !== 'server')) map[u.employeeId] = u;
+    });
     return map;
   }, [users]);
 
+  // Real region name for a report — never a kebele/woreda/zone name.
   const resolveRegion = (r) => {
-    if (r && r.employeeId && employeeRegionMap[r.employeeId]) return employeeRegionMap[r.employeeId];
-    return r?.region || '';
+    const own = regionOfPath(r?.region, regions);
+    if (own) return own;
+    if (r && r.employeeId && employeeRegionMap[r.employeeId]) {
+      return regionOfPath(employeeRegionMap[r.employeeId], regions) || '';
+    }
+    return '';
   };
 
   // Check online status and pending sync count
@@ -89,7 +103,7 @@ function ReportList({ reports, user, users, isOfficer, isSupervisor, addNotifica
 
   // Helper to format date/time
   const formatDateTime = (dateStr) => {
-    if (!dateStr) return 'N/A';
+    if (!dateStr) return t('reportslist.n_a');
     const date = new Date(dateStr);
     return date.toLocaleString('en-US', {
       month: 'short',
@@ -117,9 +131,9 @@ function ReportList({ reports, user, users, isOfficer, isSupervisor, addNotifica
         gap: '16px'
       }}>
         <div>
-          <h2 style={{ fontSize: '24px', fontWeight: '700', margin: '0 0 6px 0' }}>📋 Reports</h2>
+          <h2 style={{ fontSize: '24px', fontWeight: '700', margin: '0 0 6px 0' }}>📋 {t('reportslist.title')}</h2>
           <p style={{ fontSize: '14px', opacity: 0.85, margin: 0, maxWidth: '540px' }}>
-            {filteredReports.length} reports found
+            {t('reportslist.reports_found', { count: filteredReports.length })}
           </p>
         </div>
         <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'center' }}>
@@ -131,7 +145,7 @@ function ReportList({ reports, user, users, isOfficer, isSupervisor, addNotifica
             fontSize: '13px',
             fontWeight: '600'
           }}>
-            {isOnline ? '✅ Online' : '📡 Offline'}
+            {isOnline ? t('reportslist.online') : t('reportslist.offline')}
           </span>
           {pendingCount > 0 && (
             <span style={{
@@ -142,7 +156,7 @@ function ReportList({ reports, user, users, isOfficer, isSupervisor, addNotifica
               fontSize: '13px',
               fontWeight: '600'
             }}>
-              📡 {pendingCount} Pending Sync
+              📡 {t('reportslist.pending_sync', { count: pendingCount })}
             </span>
           )}
           {pendingCount > 0 && isOnline && (
@@ -159,7 +173,7 @@ function ReportList({ reports, user, users, isOfficer, isSupervisor, addNotifica
                 fontWeight: '600'
               }}
             >
-              🔄 Sync Now
+              🔄 {t('reportslist.sync_now')}
             </button>
           )}
         </div>
@@ -177,7 +191,7 @@ function ReportList({ reports, user, users, isOfficer, isSupervisor, addNotifica
             fontSize: '13px',
             color: '#92400e'
           }}>
-            📡 {pendingCount} report(s) saved offline. Will sync automatically when online.
+            📡 {t('reportslist.offline_banner', { count: pendingCount })}
           </div>
         )}
 
@@ -185,7 +199,7 @@ function ReportList({ reports, user, users, isOfficer, isSupervisor, addNotifica
         <div className="flex gap-2 flex-wrap mb-4">
           <input 
             type="text" 
-            placeholder="🔍 Search reports..." 
+            placeholder={t('reportslist.search_reports')} 
             value={searchTerm} 
             onChange={e => setSearchTerm(e.target.value)} 
             className="px-4 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -195,7 +209,7 @@ function ReportList({ reports, user, users, isOfficer, isSupervisor, addNotifica
             onChange={e => setSelectedRegion(e.target.value)} 
             className="px-4 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
           >
-            <option value="All">All Regions</option>
+            <option value="All">{t('reportslist.all_regions')}</option>
             {regionOptions.filter(r => r !== 'All').map(r => (
               <option key={r} value={r}>{r}</option>
             ))}
@@ -207,14 +221,14 @@ function ReportList({ reports, user, users, isOfficer, isSupervisor, addNotifica
           <table className="w-full">
             <thead>
               <tr className="border-b border-gray-200">
-                <th className="text-left py-3 px-3 text-sm font-medium text-gray-500">Submitted</th>
-                <th className="text-left py-3 px-3 text-sm font-medium text-gray-500">Officer</th>
-                <th className="text-left py-3 px-3 text-sm font-medium text-gray-500">Region</th>
-                <th className="text-left py-3 px-3 text-sm font-medium text-gray-500">Location</th>
-                <th className="text-left py-3 px-3 text-sm font-medium text-gray-500">Citizens</th>
-                <th className="text-left py-3 px-3 text-sm font-medium text-gray-500">Status</th>
-                <th className="text-left py-3 px-3 text-sm font-medium text-gray-500">Sync</th>
-                <th className="text-left py-3 px-3 text-sm font-medium text-gray-500">New</th>
+                <th className="text-left py-3 px-3 text-sm font-medium text-gray-500">{t('reportslist.submitted')}</th>
+                <th className="text-left py-3 px-3 text-sm font-medium text-gray-500">{t('reportslist.officer')}</th>
+                <th className="text-left py-3 px-3 text-sm font-medium text-gray-500">{t('reportslist.region')}</th>
+                <th className="text-left py-3 px-3 text-sm font-medium text-gray-500">{t('reportslist.location')}</th>
+                <th className="text-left py-3 px-3 text-sm font-medium text-gray-500">{t('reportslist.citizens')}</th>
+                <th className="text-left py-3 px-3 text-sm font-medium text-gray-500">{t('reportslist.status')}</th>
+                <th className="text-left py-3 px-3 text-sm font-medium text-gray-500">{t('reportslist.sync')}</th>
+                <th className="text-left py-3 px-3 text-sm font-medium text-gray-500">{t('reportslist.new')}</th>
               </tr>
             </thead>
             <tbody>
@@ -224,10 +238,10 @@ function ReportList({ reports, user, users, isOfficer, isSupervisor, addNotifica
                     {pendingCount > 0 ? (
                       <div>
                         <div style={{ fontSize: '24px', marginBottom: '8px' }}>📡</div>
-                        {pendingCount} report(s) saved offline. Will appear when synced.
+                        {t('reportslist.reports_saved_offline', { count: pendingCount })}
                       </div>
                     ) : (
-                      <div>No reports found</div>
+                      <div>{t('reportslist.no_reports_found')}</div>
                     )}
                   </td>
                 </tr>
@@ -253,20 +267,33 @@ function ReportList({ reports, user, users, isOfficer, isSupervisor, addNotifica
                       </td>
                       <td className="py-3 px-3 text-sm">
                         {r.latitude != null && r.longitude != null ? (
+                          r.gpsNetworkEstimate ? (
+                            <span
+                              style={{
+                                color: '#b91c1c',
+                                fontSize: '12px',
+                                fontWeight: '600'
+                              }}
+                              title={t('reportslist.approx_title', { acc: r.gpsAccuracy || '?' })}
+                            >
+                              {t('reportslist.approx')}
+                            </span>
+                          ) : (
                           <a
                             href={`https://www.google.com/maps?q=${r.latitude},${r.longitude}`}
                             target="_blank"
                             rel="noopener noreferrer"
                             style={{
-                              color: '#0b7e4b',
+                              color: r.gpsLowAccuracy ? '#b45309' : '#0b7e4b',
                               textDecoration: 'none',
                               fontWeight: '500',
                               fontSize: '12px'
                             }}
                             title={`${r.latitude.toFixed(5)}, ${r.longitude.toFixed(5)}${r.gpsAccuracy ? ` (±${r.gpsAccuracy}m)` : ''}`}
                           >
-                            📍 Open Map
+                            {t('reportslist.open_map')}
                           </a>
+                          )
                         ) : (
                           <span style={{ color: '#9ca3af' }}>—</span>
                         )}
@@ -279,7 +306,7 @@ function ReportList({ reports, user, users, isOfficer, isSupervisor, addNotifica
                         <span className={`px-2 py-1 rounded-full text-xs ${
                           r.synced ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'
                         }`}>
-                          {r.synced ? '✅ Synced' : '⏳ Pending'}
+                          {r.synced ? t('reportslist.synced') : t('reportslist.pending')}
                         </span>
                       </td>
                       <td className="py-3 px-3 text-sm">
@@ -293,7 +320,7 @@ function ReportList({ reports, user, users, isOfficer, isSupervisor, addNotifica
                             fontWeight: '700',
                             textTransform: 'uppercase'
                           }}>
-                            NEW
+                            {t('reportslist.new')}
                           </span>
                         )}
                       </td>

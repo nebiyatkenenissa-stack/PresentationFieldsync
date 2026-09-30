@@ -16,4 +16,5 @@ export const config = {
   emailUser: process.env.EMAIL_USER || '',
   emailPass: process.env.EMAIL_PASS || '',
   uploadsDir: path.resolve(__dirname, '../../uploads'),
+  profileBackupsDir: path.resolve(__dirname, '../../uploads/profile-backups'),
 };

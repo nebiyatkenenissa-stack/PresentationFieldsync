@@ -4,6 +4,8 @@ import { pool } from '../config/db.js';
 import { transporter } from '../config/mail.js';
 import { config } from '../config/env.js';
 import { saveBase64Photo, saveReportAttachment } from '../utils/photo.js';
+import { sendCitizenNotification } from '../utils/notifyCitizen.js';
+import { sendMessageEmails } from '../utils/notifyMessage.js';
 
 export async function sync(req: Request, res: Response): Promise<void> {
   try {
@@ -101,6 +103,11 @@ export async function sync(req: Request, res: Response): Promise<void> {
             return;
           }
         }
+        // Track whether this is a brand new registration so the national ID
+        // notification email is only sent once (not on every re-sync).
+        const citizenExistedBefore = (
+          await pool.query('SELECT 1 FROM citizens WHERE national_id = $1', [data.nationalId])
+        ).rows.length > 0;
         result = await pool.query(
           `INSERT INTO citizens (
               national_id, first_name, last_name, grandfather_name, date_of_birth,
@@ -108,12 +115,15 @@ export async function sync(req: Request, res: Response): Promise<void> {
               district, village, occupation, marital_status,
               registration_date, registered_by, registered_by_name,
               id_type, id_number, biometrics, photo,
-              latitude, longitude, gps_accuracy, gps_captured_at
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25)
+              latitude, longitude, gps_accuracy, gps_captured_at,
+              father_name, mother_name, birth_place, birth_certificate_number
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29)
           ON CONFLICT (national_id) DO UPDATE SET
               first_name = EXCLUDED.first_name,
               last_name = EXCLUDED.last_name,
               grandfather_name = EXCLUDED.grandfather_name,
+              father_name = EXCLUDED.father_name,
+              mother_name = EXCLUDED.mother_name,
               phone = EXCLUDED.phone,
               email = EXCLUDED.email,
               photo = EXCLUDED.photo,
@@ -138,8 +148,18 @@ export async function sync(req: Request, res: Response): Promise<void> {
             data.longitude || null,
             data.gpsAccuracy || null,
             data.gpsCapturedAt || null,
+            data.fatherName || null,
+            data.motherName || null,
+            data.birthPlace || null,
+            data.birthCertificateNo || null,
           ]
         );
+        // Notify a newly registered citizen by email with their national ID
+        // and other important details (only when the email looks valid).
+        const insertedCitizen = result?.rows?.[0];
+        if (insertedCitizen && !citizenExistedBefore) {
+          await sendCitizenNotification(insertedCitizen);
+        }
         break;
       }
 
@@ -284,7 +304,7 @@ export async function sync(req: Request, res: Response): Promise<void> {
               phone = EXCLUDED.phone,
               shift = EXCLUDED.shift,
               department = EXCLUDED.department,
-              profile_photo = EXCLUDED.profile_photo,
+              profile_photo = COALESCE(EXCLUDED.profile_photo, users.profile_photo),
               must_change_password = EXCLUDED.must_change_password,
               country_id = EXCLUDED.country_id,
               region_id = EXCLUDED.region_id,
@@ -304,7 +324,13 @@ export async function sync(req: Request, res: Response): Promise<void> {
             data.shift || 'Day',
             data.department || null,
             data.profilePhoto || null,
-            data.mustChangePassword !== undefined ? data.mustChangePassword : true,
+            // Accept either spelling — the local user record carries the
+            // snake_case key. Previously only the camelCase one was read, so a
+            // manager created offline was written as must_change_password=TRUE
+            // while the same manager created online was written as FALSE.
+            data.mustChangePassword !== undefined ? data.mustChangePassword
+              : data.must_change_password !== undefined ? data.must_change_password
+                : true,
             data.country_id || null,
             data.region_id || null,
             data.zone_id || null,
@@ -346,33 +372,80 @@ export async function sync(req: Request, res: Response): Promise<void> {
         );
         break;
 
-      case 'user_update':
-        result = await pool.query(
-          `UPDATE users SET
-              name = $1,
-              email = $2,
-              phone = $3,
-              shift = $4,
-              department = $5,
-              profile_photo = $6,
-              region = $7,
-              location_path = $8,
-              updated_at = CURRENT_TIMESTAMP
-          WHERE id = $9
-          RETURNING *`,
-          [
-            data.name,
-            data.email,
-            data.phone || null,
-            data.shift || 'Day',
-            data.department || null,
-            data.profilePhoto || null,
-            data.region || null,
-            data.locationPath || data.region || '',
-            data.id,
-          ]
-        );
+      case 'user_update': {
+        // Every field uses COALESCE. An offline profile save round-trips
+        // through this handler, and a client that only meant to change one
+        // field can legitimately send null/empty for the rest — a bare
+        // "phone = $3" would then wipe the officer's phone and region on the
+        // server, and the next pull would write those nulls back over the good
+        // local record. COALESCE keeps a field that the server already has.
+        const updates: string[] = [
+          'name = COALESCE($1, name)',
+          'email = COALESCE($2, email)',
+          'phone = COALESCE($3, phone)',
+          'shift = COALESCE($4, shift)',
+          'department = COALESCE($5, department)',
+          'profile_photo = COALESCE($6, profile_photo)',
+          'region = COALESCE($7, region)',
+          'location_path = COALESCE(NULLIF($8, \'\'), location_path)',
+          'updated_at = CURRENT_TIMESTAMP'
+        ];
+        const values: any[] = [
+          data.name || null,
+          data.email || null,
+          data.phone || null,
+          data.shift || null,
+          data.department || null,
+          data.profilePhoto || null,
+          data.region || null,
+          data.locationPath || data.region || null,
+        ];
+        let paramIdx = 9;
+
+        // Handle password change during offline sync.
+        // The password branch is ONLY reachable when the client explicitly
+        // opted in with passwordChange: true. Previously the "no
+        // currentPassword" branch fired for every queued user_update, because
+        // the offline client always spreads the whole user object — including
+        // the plaintext password held locally — into the payload. That
+        // re-hashed and overwrote password_hash on every offline profile save,
+        // with no verification of the old password.
+        if (data.passwordChange === true) {
+          if (data.currentPassword) {
+            try {
+              const userRow = await pool.query('SELECT password_hash FROM users WHERE id = $1', [data.id]);
+              if (userRow.rows[0]) {
+                const pwMatch = await bcrypt.compare(data.currentPassword, userRow.rows[0].password_hash);
+                if (pwMatch) {
+                  const newHash = await bcrypt.hash(data.password, 10);
+                  updates.push(`password_hash = $${paramIdx++}`);
+                  values.push(newHash);
+                  updates.push('must_change_password = false');
+                }
+              }
+            } catch (pwErr) {
+              console.error('Password sync error:', pwErr);
+            }
+          } else if (data.mustChangePassword === true) {
+            // Forced password change (e.g. first login) - set it without
+            // knowing the old one, but only when the user was actually
+            // required to change it.
+            try {
+              const newHash = await bcrypt.hash(data.password, 10);
+              updates.push(`password_hash = $${paramIdx++}`);
+              values.push(newHash);
+              updates.push('must_change_password = false');
+            } catch (pwErr) {
+              console.error('Password hash error:', pwErr);
+            }
+          }
+        }
+
+        values.push(data.id);
+        const query = `UPDATE users SET ${updates.join(', ')} WHERE id = $${paramIdx} RETURNING *`;
+        result = await pool.query(query, values);
         break;
+      }
 
       case 'user_delete':
         result = await pool.query('DELETE FROM users WHERE id = $1 RETURNING *', [
@@ -516,7 +589,7 @@ export async function sync(req: Request, res: Response): Promise<void> {
               target_employee_id = EXCLUDED.target_employee_id,
               target_users = EXCLUDED.target_users,
               sent_by_role = EXCLUDED.sent_by_role
-          RETURNING *`,
+          RETURNING *, (xmax = 0) AS is_inserted`,
           [
             data.id,
             data.title,
@@ -533,6 +606,11 @@ export async function sync(req: Request, res: Response): Promise<void> {
             data.sentByRole || null,
           ]
         );
+        // Email the message to each recipient whose address is valid (only on
+        // the first insert – an offline retry must not send again).
+        if (result?.rows?.[0]?.is_inserted) {
+          void sendMessageEmails(data);
+        }
         break;
 
       case 'alert_read':

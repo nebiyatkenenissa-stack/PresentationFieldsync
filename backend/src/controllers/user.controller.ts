@@ -1,5 +1,7 @@
 import { Request, Response } from 'express';
 import bcrypt from 'bcrypt';
+import fs from 'node:fs';
+import path from 'node:path';
 import * as userModel from '../models/user.model.js';
 import { generateTempPassword } from '../utils/password.js';
 import { transporter } from '../config/mail.js';
@@ -92,18 +94,30 @@ export async function create(req: Request, res: Response): Promise<void> {
   try {
     const data = req.body;
     let plainPassword = data.password;
-    let mustChange = data.mustChangePassword !== undefined ? data.mustChangePassword : false;
+
+    // Accept either spelling. The client has historically sent the snake_case
+    // key while this handler read the camelCase one, so the flag always read
+    // as undefined and silently defaulted to false.
+    const requestedMustChange =
+      data.mustChangePassword !== undefined ? data.mustChangePassword
+        : data.must_change_password !== undefined ? data.must_change_password
+          : undefined;
+
+    // Every new account must set its own password on first login. This used to
+    // be limited to field officers, which left managers and supervisors on a
+    // well-known shared default ('manager123' / 'super123') with no prompt.
+    let mustChange = requestedMustChange !== undefined ? !!requestedMustChange : true;
 
     if (data.role === 'field_officer') {
       plainPassword = generateTempPassword();
       mustChange = true;
-    } else {
-      if (!plainPassword) {
-        if (data.role === 'manager') plainPassword = 'manager123';
-        else if (data.role === 'supervisor') plainPassword = 'super123';
-        else plainPassword = 'officer123';
-      }
-      mustChange = false;
+    } else if (!plainPassword) {
+      // Managers and supervisors have no random password of their own; they
+      // get a documented default so they can sign in the first time. The
+      // must-change flag is what stops that default from sticking around.
+      if (data.role === 'manager') plainPassword = 'manager123';
+      else if (data.role === 'supervisor') plainPassword = 'super123';
+      else plainPassword = 'officer123';
     }
 
     const hashedPassword = await bcrypt.hash(plainPassword, 10);
@@ -190,7 +204,33 @@ export async function uploadPhoto(req: Request, res: Response): Promise<void> {
       res.status(400).json({ error: 'No file uploaded' });
       return;
     }
+
+    // Backup the old photo before replacing
+    const oldPhotoPath = await userModel.getCurrentPhoto(userId);
+    if (oldPhotoPath) {
+      try {
+        const oldFileName = path.basename(oldPhotoPath);
+        const oldFullPath = path.join(config.uploadsDir, oldFileName);
+        if (fs.existsSync(oldFullPath)) {
+          const backupFileName = `${userId}_${Date.now()}_${oldFileName}`;
+          const backupPath = path.join(config.profileBackupsDir, backupFileName);
+          fs.copyFileSync(oldFullPath, backupPath);
+          console.log(`📦 Backed up old photo: ${oldFileName} -> ${backupFileName}`);
+        }
+      } catch (backupErr) {
+        console.error('Warning: Could not backup old photo:', backupErr);
+      }
+    }
+
     const filePath = '/uploads/' + req.file.filename;
+
+    // Verify the new file was written successfully
+    const newFullPath = path.join(config.uploadsDir, req.file.filename);
+    if (!fs.existsSync(newFullPath) || fs.statSync(newFullPath).size === 0) {
+      res.status(500).json({ error: 'Photo file was not saved properly' });
+      return;
+    }
+
     const row = await userModel.updateUserPhoto(userId, filePath);
     if (!row) {
       res.status(404).json({ error: 'User not found' });

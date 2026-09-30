@@ -1,15 +1,12 @@
 // components/common/Sidebar.jsx
 
-import React from 'react';
 import { useTranslation } from 'react-i18next';
-import { getProfilePhotoUrl } from '../../utils/helpers';
 
 function Sidebar({ 
   activeTab, 
   setActiveTab, 
   user, 
   pendingSync, 
-  onLogout,
   onProfileClick
 }) {
   const { t } = useTranslation();
@@ -79,28 +76,6 @@ function Sidebar({
     setActiveTab(id);
   };
 
-  // Helper to get fallback avatar based on role
-  const getDefaultAvatar = () => {
-    if (isManager) return '👤';      // or 👔 for manager
-    if (isSupervisor) return '👨‍💼';
-    if (isOfficer) return '👤';
-    return '👤';
-  };
-
-  const getRoleLabel = () => {
-    const roles = {
-      manager: t('auth.manager'),
-      supervisor: t('auth.supervisor'),
-      field_officer: t('auth.officer')
-    };
-    return roles[user?.role] || user?.role?.replace('_', ' ') || '';
-  };
-
-  // Determine the avatar source
-  const avatarSrc = user?.profilePhoto 
-    ? getProfilePhotoUrl(user.profilePhoto) 
-    : null;
-
   return (
     <div className="sidebar">
       <div className="sidebar-brand">
@@ -116,9 +91,6 @@ function Sidebar({
             onClick={() => handleNavClick(item.id)}
           >
             {item.label}
-            {item.id === 'reports' && pendingSync > 0 && (
-              <span className="nav-badge">{pendingSync}</span>
-            )}
             {item.id === 'all_reports' && (
               <span className="nav-badge">📊</span>
             )}
@@ -128,34 +100,6 @@ function Sidebar({
           </button>
         ))}
       </nav>
-
-      <div className="sidebar-footer">
-        <div className="user-profile">
-          <div className="avatar">
-            {avatarSrc ? (
-              <img 
-                src={avatarSrc} 
-                alt="Profile" 
-                style={{ 
-                  width: '40px', 
-                  height: '40px', 
-                  borderRadius: '50%', 
-                  objectFit: 'cover',
-                  display: 'block'
-                }}
-              />
-            ) : (
-              // Fallback: role-based emoji
-              <span style={{ fontSize: '24px' }}>{getDefaultAvatar()}</span>
-            )}
-          </div>
-          <div className="user-info">
-            <div className="user-name">{user?.name}</div>
-            <div className="user-role">{getRoleLabel()}</div>
-          </div>
-        </div>
-        <button className="logout-btn" onClick={onLogout}>🚪 {t('nav.logout')}</button>
-      </div>
     </div>
   );
 }

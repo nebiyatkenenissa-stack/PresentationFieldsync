@@ -1,9 +1,31 @@
 // components/citizens/CitizensDatabase.js
 
 import React, { useState, useMemo, useEffect, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
+import toast from 'react-hot-toast';
 import { db, checkRealInternet, syncQueue, clearStuckCitizens } from '../../services/database';
-import { exportCSV, exportJSON, getProfilePhotoUrl } from '../../utils/helpers';
+import { exportCSV, exportJSON, getProfilePhotoUrl, getRegionOptions } from '../../utils/helpers';
+import useRegions from '../../hooks/useRegions';
+import { buildRecordLocationPath, regionOfPath } from '../../utils/regions';
 import UserAvatar from '../common/UserAvatar';
+
+// A registration date can be stored as a plain calendar day ("2026-09-28"),
+// which carries no clock time, or as a full timestamp. Parsing a day-only
+// value gives UTC midnight, so it must never be rendered as "12:00:00 AM".
+const hasClockTime = (v) => typeof v === 'string' && /\d{1,2}:\d{2}/.test(v);
+
+// Record timestamp first, then the registration date when it is a real
+// timestamp. Returns null when neither value carries a usable clock time.
+const recordTime = (c) => {
+  const candidates = [c?.createdAt, c?.registrationDate];
+  for (const v of candidates) {
+    if (!v || !hasClockTime(v)) continue;
+    const d = new Date(v);
+    if (isNaN(d.getTime())) continue;
+    return d;
+  }
+  return null;
+};
 
 const formatDate = (v) => {
   if (!v) return '—';
@@ -11,10 +33,8 @@ const formatDate = (v) => {
   return isNaN(d.getTime()) ? '—' : d.toLocaleDateString();
 };
 
-const formatTime = (v) => {
-  if (!v) return '—';
-  const d = new Date(v);
-  return isNaN(d.getTime()) ? '—' : d.toLocaleTimeString();
+const formatTime = (d) => {
+  return d ? d.toLocaleTimeString() : null;
 };
 
 // Some legacy / malformed records store coordinates as strings, so coerce
@@ -28,6 +48,7 @@ const safeCoords = (lat, lng) => {
 };
 
 function CitizensDatabase({ citizens, users }) {
+  const { t } = useTranslation();
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedRegion, setSelectedRegion] = useState('All');
   const [selectedOfficer, setSelectedOfficer] = useState('All');
@@ -38,22 +59,23 @@ function CitizensDatabase({ citizens, users }) {
   const [isLoading, setIsLoading] = useState(true);
   const hasLoadedRef = useRef(false);
 
+  // The REAL region list (Amhara, Oromia, ...) from the backend.
+  const regionList = useRegions();
+
   // Lookup users by employee ID so we can show the registering officer's photo.
   const userByEmpId = useMemo(() => {
     const map = {};
-    (users || []).forEach(u => { if (u && u.employeeId) map[u.employeeId] = u; });
+    (users || []).forEach(u => {
+      if (!u || !u.employeeId) return;
+      const prev = map[u.employeeId];
+      if (!prev || (u.source === 'server' && prev.source !== 'server')) map[u.employeeId] = u;
+    });
     return map;
   }, [users]);
 
-  // Region options built ONLY from the regions listed in the users list
-  const regionOptions = useMemo(() => {
-    const set = new Set();
-    (users || []).forEach(u => {
-      const r = u && u.region;
-      if (r && r !== 'All' && r !== 'all' && r !== '') set.add(r);
-    });
-    return ['All', ...set];
-  }, [users]);
+  // Region options come from the REAL region list (utils/regions.js) plus any
+  // region referenced by a user.
+  const regionOptions = useMemo(() => getRegionOptions(users, regionList), [users, regionList]);
 
   // Officer options built from the users list (only real field officers)
   const officerOptions = useMemo(() => {
@@ -77,9 +99,15 @@ function CitizensDatabase({ citizens, users }) {
     return map;
   }, [users]);
 
+  // Real region for a citizen: their own location, else the registering
+  // officer's region. Never a kebele/woreda/zone name.
   const resolveCitizenRegion = (c) => {
-    if (c && c.registeredBy && employeeRegionMap[c.registeredBy]) return employeeRegionMap[c.registeredBy];
-    return c?.region || '';
+    const own = regionOfPath(buildRecordLocationPath(c), regionList);
+    if (own) return own;
+    if (c && c.registeredBy && employeeRegionMap[c.registeredBy]) {
+      return regionOfPath(employeeRegionMap[c.registeredBy], regionList) || '';
+    }
+    return '';
   };
 
   // ===== LOAD ALL CITIZENS (ONLY SYNCED ONES) =====
@@ -232,7 +260,7 @@ function CitizensDatabase({ citizens, users }) {
   // ===== EXPORT FUNCTIONS =====
   const handleExportCSV = () => {
     if (filteredCitizens.length === 0) {
-      alert('No citizens to export');
+      toast(t('citizens.no_citizens_to_export'));
       return;
     }
     const exportData = filteredCitizens.map(c => ({
@@ -251,7 +279,7 @@ function CitizensDatabase({ citizens, users }) {
 
   const handleExportJSON = () => {
     if (filteredCitizens.length === 0) {
-      alert('No citizens to export');
+      toast(t('citizens.no_citizens_to_export'));
       return;
     }
     exportJSON(filteredCitizens, 'citizens_database');
@@ -269,7 +297,7 @@ function CitizensDatabase({ citizens, users }) {
       }}>
         <div style={{ textAlign: 'center' }}>
           <div style={{ fontSize: '40px', marginBottom: '16px' }}>📋</div>
-          <div>Loading citizens...</div>
+          <div>{t('citizens.loading')}</div>
         </div>
       </div>
     );
@@ -292,9 +320,9 @@ function CitizensDatabase({ citizens, users }) {
         gap: '16px'
       }}>
         <div>
-          <h2 style={{ fontSize: '24px', fontWeight: '700', margin: '0 0 6px 0' }}>🆔 Citizens Database</h2>
+          <h2 style={{ fontSize: '24px', fontWeight: '700', margin: '0 0 6px 0' }}>🆔 {t('citizens.title')}</h2>
           <p style={{ fontSize: '14px', opacity: 0.85, margin: 0, maxWidth: '540px' }}>
-            Complete registry of all registered citizens — searchable, filterable and exportable.
+            {t('citizens.subtitle')}
           </p>
         </div>
         <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
@@ -306,7 +334,7 @@ function CitizensDatabase({ citizens, users }) {
             fontSize: '13px',
             fontWeight: '600'
           }}>
-            🆔 {allCitizens.length} Citizens
+            🆔 {t('citizens.citizens_badge', { count: allCitizens.length })}
           </span>
           <span style={{
             background: 'rgba(16,185,129,0.2)',
@@ -316,7 +344,7 @@ function CitizensDatabase({ citizens, users }) {
             fontSize: '13px',
             fontWeight: '600'
           }}>
-            👥 {officerOptions.length} Officers
+            👥 {t('citizens.officers_badge', { count: officerOptions.length })}
           </span>
           {offlineCount > 0 && (
             <span style={{
@@ -327,7 +355,7 @@ function CitizensDatabase({ citizens, users }) {
               fontSize: '13px',
               fontWeight: '600'
             }}>
-              📡 {offlineCount} Pending Sync
+              📡 {t('citizens.pending_sync_badge', { count: offlineCount })}
             </span>
           )}
         </div>
@@ -347,7 +375,7 @@ function CitizensDatabase({ citizens, users }) {
         gap: '8px'
       }}>
         <span style={{ fontWeight: '500', color: isOnline ? '#065f37' : '#991b1b' }}>
-          {isOnline ? '✅ Online' : '❌ Offline'}
+          {isOnline ? t('citizens.online') : t('citizens.offline')}
         </span>
         <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
           {!isOnline && offlineCount > 0 && (
@@ -359,7 +387,7 @@ function CitizensDatabase({ citizens, users }) {
               fontSize: '12px',
               fontWeight: '500'
             }}>
-              📡 {offlineCount} saved offline
+              📡 {t('citizens.saved_offline', { count: offlineCount })}
             </span>
           )}
         </div>
@@ -378,9 +406,9 @@ function CitizensDatabase({ citizens, users }) {
           alignItems: 'center',
           flexWrap: 'wrap'
         }}>
-          <span>📡 <strong>Offline:</strong> {offlineCount} citizen(s) saved locally. Will appear when online.</span>
+          <span>📡 <strong>{t('citizens.offline_label')}</strong> {t('citizens.offline_banner_rest', { count: offlineCount })}</span>
           <span style={{ fontSize: '12px', color: '#92400e' }}>
-            ⏳ Waiting for connection...
+            ⏳ {t('citizens.waiting_for_connection')}
           </span>
         </div>
       )}
@@ -404,11 +432,11 @@ function CitizensDatabase({ citizens, users }) {
         }}>
           <div>
             <h3 style={{ fontSize: '16px', fontWeight: '600', margin: 0 }}>
-              🆔 Citizens Database
+              🆔 {t('citizens.table_title')}
             </h3>
             <p style={{ fontSize: '13px', color: '#64748b', margin: '4px 0 0 0' }}>
-              {allCitizens.length} total citizens
-              {!isOnline && offlineCount > 0 && ` • ${offlineCount} pending sync`}
+              {t('citizens.total_citizens', { count: allCitizens.length })}
+              {!isOnline && offlineCount > 0 && ` • ${t('citizens.pending_sync', { count: offlineCount })}`}
             </p>
           </div>
           <div className="table-actions" style={{
@@ -419,7 +447,7 @@ function CitizensDatabase({ citizens, users }) {
           }}>
             <input 
               type="text" 
-              placeholder="🔍 Search by name, ID, or officer..." 
+              placeholder={t('citizens.search_placeholder')} 
               value={searchTerm} 
               onChange={e => setSearchTerm(e.target.value)} 
               style={{
@@ -441,7 +469,7 @@ function CitizensDatabase({ citizens, users }) {
                 background: 'white'
               }}
             >
-              <option value="All">All Regions</option>
+              <option value="All">{t('citizens.all_regions')}</option>
               {regionOptions.filter(r => r !== 'All').map(r => (
                 <option key={r} value={r}>{r}</option>
               ))}
@@ -457,7 +485,7 @@ function CitizensDatabase({ citizens, users }) {
                 background: 'white'
               }}
             >
-              <option value="All">All Officers</option>
+              <option value="All">{t('citizens.all_officers')}</option>
               {officerOptions.map(o => (
                 <option key={o.id} value={o.id}>{o.label}</option>
               ))}
@@ -473,8 +501,8 @@ function CitizensDatabase({ citizens, users }) {
                 background: 'white'
               }}
             >
-              <option value="all">All Status</option>
-              <option value="synced">✅ Synced</option>
+              <option value="all">{t('citizens.all_status')}</option>
+              <option value="synced">{t('citizens.synced')}</option>
             </select>
             <button 
               onClick={handleExportCSV}
@@ -512,15 +540,15 @@ function CitizensDatabase({ citizens, users }) {
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '14px' }}>
             <thead>
               <tr style={{ background: '#f8fafc' }}>
-                <th style={{ padding: '12px 16px', textAlign: 'center', fontWeight: '600', color: '#374151', borderBottom: '2px solid #e5e7eb' }}>Photo</th>
-                <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: '600', color: '#374151', borderBottom: '2px solid #e5e7eb' }}>Name</th>
-                <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: '600', color: '#374151', borderBottom: '2px solid #e5e7eb' }}>National ID</th>
-                <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: '600', color: '#374151', borderBottom: '2px solid #e5e7eb' }}>Region</th>
-                <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: '600', color: '#374151', borderBottom: '2px solid #e5e7eb' }}>Location</th>
-                <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: '600', color: '#374151', borderBottom: '2px solid #e5e7eb' }}>Phone</th>
-                <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: '600', color: '#374151', borderBottom: '2px solid #e5e7eb' }}>Registered By</th>
-                <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: '600', color: '#374151', borderBottom: '2px solid #e5e7eb' }}>Date</th>
-                <th style={{ padding: '12px 16px', textAlign: 'center', fontWeight: '600', color: '#374151', borderBottom: '2px solid #e5e7eb' }}>Status</th>
+                <th style={{ padding: '12px 16px', textAlign: 'center', fontWeight: '600', color: '#374151', borderBottom: '2px solid #e5e7eb' }}>{t('citizens.photo')}</th>
+                <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: '600', color: '#374151', borderBottom: '2px solid #e5e7eb' }}>{t('citizens.name')}</th>
+                <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: '600', color: '#374151', borderBottom: '2px solid #e5e7eb' }}>{t('citizens.national_id')}</th>
+                <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: '600', color: '#374151', borderBottom: '2px solid #e5e7eb' }}>{t('citizens.region')}</th>
+                <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: '600', color: '#374151', borderBottom: '2px solid #e5e7eb' }}>{t('citizens.location')}</th>
+                <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: '600', color: '#374151', borderBottom: '2px solid #e5e7eb' }}>{t('citizens.phone')}</th>
+                <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: '600', color: '#374151', borderBottom: '2px solid #e5e7eb' }}>{t('citizens.registered_by')}</th>
+                <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: '600', color: '#374151', borderBottom: '2px solid #e5e7eb' }}>{t('citizens.date')}</th>
+                <th style={{ padding: '12px 16px', textAlign: 'center', fontWeight: '600', color: '#374151', borderBottom: '2px solid #e5e7eb' }}>{t('citizens.status_col')}</th>
               </tr>
             </thead>
             <tbody>
@@ -530,13 +558,13 @@ function CitizensDatabase({ citizens, users }) {
                     <div style={{ fontSize: '48px', marginBottom: '8px' }}>🆔</div>
                     <div>
                       {!isOnline && offlineCount > 0 
-                        ? 'Citizens saved offline. Will appear when online.' 
-                        : 'No citizens found'}
+                        ? t('citizens.citizens_saved_offline') 
+                        : t('citizens.no_citizens_found')}
                     </div>
                     <small style={{ fontSize: '12px' }}>
                       {!isOnline && offlineCount > 0 
-                        ? `📡 ${offlineCount} citizen(s) waiting to sync` 
-                        : 'Try adjusting your filters'}
+                        ? t('citizens.waiting_to_sync', { count: offlineCount }) 
+                        : t('citizens.adjust_filters')}
                     </small>
                   </td>
                 </tr>
@@ -585,20 +613,33 @@ function CitizensDatabase({ citizens, users }) {
                     {(() => {
                       const coords = safeCoords(c.latitude, c.longitude);
                       return coords ? (
+                        c.gpsNetworkEstimate ? (
+                          <span
+                            style={{
+                              color: '#b91c1c',
+                              fontSize: '12px',
+                              fontWeight: '600'
+                            }}
+                            title={t('citizens.approx_title', { acc: c.gpsAccuracy || '?' })}
+                          >
+                            {t('citizens.approx')}
+                          </span>
+                        ) : (
                         <a
                           href={`https://www.google.com/maps?q=${coords.latitude},${coords.longitude}`}
                           target="_blank"
                           rel="noopener noreferrer"
                           style={{
-                            color: '#0b7e4b',
+                            color: c.gpsLowAccuracy ? '#b45309' : '#0b7e4b',
                             textDecoration: 'none',
                             fontWeight: '500',
                             fontSize: '12px'
                           }}
                           title={`${coords.latitude.toFixed(5)}, ${coords.longitude.toFixed(5)}${c.gpsAccuracy ? ` (±${Number(c.gpsAccuracy)}m)` : ''}`}
                         >
-                          📍 Open Map
+                          {t('citizens.open_map')}
                         </a>
+                        )
                       ) : (
                         <span style={{ color: '#9ca3af' }}>—</span>
                       );
@@ -610,7 +651,7 @@ function CitizensDatabase({ citizens, users }) {
                       <UserAvatar user={userByEmpId[c.registeredBy]} name={c.registeredByName || c.registeredBy} size={28} />
                       <div>
                         <div style={{ fontWeight: '500' }}>
-                          {c.registeredByName || c.registeredBy || 'Unknown'}
+                          {c.registeredByName || c.registeredBy || t('citizens.unknown')}
                         </div>
                         {c.registeredBy && c.registeredBy !== 'unknown' && (
                           <div style={{ fontSize: '11px', color: '#64748b' }}>
@@ -622,9 +663,11 @@ function CitizensDatabase({ citizens, users }) {
                   </td>
                   <td style={{ padding: '12px 16px', fontSize: '13px' }}>
                     {formatDate(c.registrationDate || c.createdAt)}
-                    <div style={{ fontSize: '11px', color: '#64748b' }}>
-                      {formatTime(c.registrationDate || c.createdAt)}
-                    </div>
+                    {formatTime(recordTime(c)) && (
+                      <div style={{ fontSize: '11px', color: '#64748b' }}>
+                        {formatTime(recordTime(c))}
+                      </div>
+                    )}
                   </td>
                   <td style={{ padding: '12px 16px', textAlign: 'center' }}>
                     <span style={{
@@ -635,7 +678,7 @@ function CitizensDatabase({ citizens, users }) {
                       background: '#d1fae5',
                       color: '#065f37'
                     }}>
-                      ✅ Synced
+                      {t('citizens.status_synced')}
                     </span>
                   </td>
                 </tr>
@@ -658,15 +701,15 @@ function CitizensDatabase({ citizens, users }) {
           background: '#fafafa'
         }}>
           <span>
-            Showing {filteredCitizens.length} of {allCitizens.length} citizens
-            {!isOnline && offlineCount > 0 && ` (${offlineCount} offline waiting to sync)`}
+            {t('citizens.showing_of', { shown: filteredCitizens.length, total: allCitizens.length })}
+            {!isOnline && offlineCount > 0 && ` ${t('citizens.offline_waiting', { count: offlineCount })}`}
           </span>
           <span>
             {offlineCount === 0 && isOnline && (
-              <span style={{ color: '#065f37' }}>✅ All citizens synced</span>
+              <span style={{ color: '#065f37' }}>{t('citizens.all_synced')}</span>
             )}
             {!isOnline && offlineCount > 0 && (
-              <span style={{ color: '#991b1b' }}>📡 {offlineCount} citizen(s) waiting for connection</span>
+              <span style={{ color: '#991b1b' }}>{t('citizens.waiting_for_connection_count', { count: offlineCount })}</span>
             )}
           </span>
         </div>

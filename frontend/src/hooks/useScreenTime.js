@@ -80,20 +80,31 @@ export function useScreenTime(user) {
   // ===== PUSH CURRENT SESSION TO SERVER =====
   // The running totals are pushed periodically (and on page hide) so the
   // server always has the latest screen time even if this device's
-  // IndexedDB is ever cleared by the browser.
+  // IndexedDB is ever cleared by the browser. When the push cannot happen
+  // (offline, or the request fails) the current totals are queued so the
+  // session is not silently lost — without this a session that starts online
+  // and then loses connectivity has nothing pending and never reaches the
+  // server at all.
   const syncSessionToServer = useCallback(async () => {
     const session = sessionRef.current;
     if (!session) return;
-    const online = await checkRealInternet();
-    if (!online) return;
     const fullRecord = await db.screen_time.get(session.id);
     if (!fullRecord) return;
+
+    const online = await checkRealInternet();
+    if (!online) {
+      await db.screen_time.update(session.id, { synced: false });
+      syncQueue.add({ type: 'screen_time', id: session.id, data: fullRecord });
+      return;
+    }
+
     try {
       await sendScreenTimeToServer(fullRecord);
       await db.screen_time.update(session.id, { synced: true });
     } catch (error) {
-      // Best effort – the final stop sync will retry if needed.
       console.warn('⚠️ Periodic screen time sync failed:', error);
+      await db.screen_time.update(session.id, { synced: false });
+      syncQueue.add({ type: 'screen_time', id: session.id, data: fullRecord });
     }
   }, []);
 

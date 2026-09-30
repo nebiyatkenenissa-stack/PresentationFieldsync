@@ -43,10 +43,38 @@ export function saveBase64Photo(dataUrl?: string | null): string | null {
   return '/uploads/' + filename;
 }
 
+// Builds an inline (CID) email attachment from a stored photo value, which may
+// be a public URL path (/uploads/citizen_x.jpg) or a legacy base64 data URL.
+// Returns null when there is no usable photo, so the email still sends.
+export function buildPhotoAttachment(photo?: string | null): { filename: string; content: Buffer; cid: string } | null {
+  const cid = 'citizen-photo';
+  if (!photo || typeof photo !== 'string') return null;
+
+  if (photo.startsWith('data:')) {
+    const match = photo.match(/^data:([^;]+);base64,(.+)$/);
+    if (!match) return null;
+    const ext = MIME_EXT[match[1].split(';')[0]] || '.jpg';
+    return {
+      filename: `citizen_photo${ext}`,
+      content: Buffer.from(match[2], 'base64'),
+      cid,
+    };
+  }
+
+  // Stored as a URL path — read it back from the uploads directory. basename()
+  // keeps a malicious "../../etc/passwd" value from escaping the directory.
+  const filename = path.basename(photo);
+  if (!filename) return null;
+  const filePath = path.join(config.uploadsDir, filename);
+  if (!fs.existsSync(filePath)) return null;
+
+  return { filename, content: fs.readFileSync(filePath), cid };
+}
+
 // Save a base64 report attachment to disk and return { name, type, size, url }.
 // If the attachment already has a url (from a previous sync) it is returned unchanged.
 export function saveReportAttachment(att: { name: string; type: string; size: number; data?: string; url?: string }): { name: string; type: string; size: number; url: string } {
-  if (att.url) return att;
+  if (att.url) return { name: att.name, type: att.type, size: att.size, url: att.url };
   if (!att.data || !att.data.startsWith('data:')) return { name: att.name, type: att.type, size: att.size, url: '' };
 
   const match = att.data.match(/^data:([^;]+);base64,(.+)$/);

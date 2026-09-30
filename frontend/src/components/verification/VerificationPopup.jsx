@@ -2,12 +2,15 @@
 // FIRST: 30 seconds → THEN: random 2–15 minutes (unpredictable)
 
 import React, { useState, useEffect, useRef } from 'react';
+import toast from 'react-hot-toast';
+import { useTranslation } from 'react-i18next';
 
 function VerificationPopup({ officerId, officerName, onAnswer, onClose }) {
+  const { t } = useTranslation();
   const [selectedAnswer, setSelectedAnswer] = useState('');
   const [question, setQuestion] = useState({
-    question: 'What is your current location?',
-    options: ['Office', 'Field', 'Home', 'Other']
+    question: t('verificationpopup.q1'),
+    options: t('verificationpopup.o1').split(',')
   });
   const [isVisible, setIsVisible] = useState(false);
   const [appearTime, setAppearTime] = useState(null);
@@ -66,11 +69,11 @@ function VerificationPopup({ officerId, officerName, onAnswer, onClose }) {
     setAppearTime(startTime);
 
     const questions = [
-      { question: 'What is your current location?', options: ['Office', 'Field', 'Home', 'Other'] },
-      { question: 'How many citizens did you register today?', options: ['0-5', '6-10', '11-15', '16+'] },
-      { question: 'What is your current task?', options: ['Field Visit', 'Report Writing', 'Data Entry', 'Meeting'] },
-      { question: 'How many reports did you submit today?', options: ['0-2', '3-5', '6-8', '9+'] },
-      { question: 'What is your estimated work completion?', options: ['0-25%', '26-50%', '51-75%', '76-100%'] }
+      { question: t('verificationpopup.q1'), options: t('verificationpopup.o1').split(',') },
+      { question: t('verificationpopup.q2'), options: t('verificationpopup.o2').split(',') },
+      { question: t('verificationpopup.q3'), options: t('verificationpopup.o3').split(',') },
+      { question: t('verificationpopup.q4'), options: t('verificationpopup.o4').split(',') },
+      { question: t('verificationpopup.q5'), options: t('verificationpopup.o5').split(',') }
     ];
     const randomIndex = Math.floor(Math.random() * questions.length);
     const selectedQ = questions[randomIndex];
@@ -92,12 +95,12 @@ function VerificationPopup({ officerId, officerName, onAnswer, onClose }) {
       const result = {
         success: false,
         question: selectedQ.question,
-        answer: 'Timeout',
+        answer: t('verificationpopup.timeout_answer'),
         responseTime: responseTime,
         officerId,
         officerName,
         score: 0,
-        message: '⏰ No response within 30 seconds - warning sent to supervisor'
+        message: t('verificationpopup.timeout_message')
       };
       isAnsweredRef.current = true;
       setIsVisible(false);
@@ -124,7 +127,7 @@ function VerificationPopup({ officerId, officerName, onAnswer, onClose }) {
   // ============================================================
   const handleSubmit = () => {
     if (!selectedAnswer) {
-      alert('Please select an answer');
+      toast(t('verificationpopup.please_select'));
       return;
     }
     if (isAnsweredRef.current) return;
@@ -140,7 +143,7 @@ function VerificationPopup({ officerId, officerName, onAnswer, onClose }) {
       responseTime: responseTime,
       officerId,
       officerName,
-      message: '✅ Verification passed!'
+      message: t('verificationpopup.passed_message')
     };
 
     isAnsweredRef.current = true;
@@ -169,7 +172,7 @@ function VerificationPopup({ officerId, officerName, onAnswer, onClose }) {
       officerId,
       officerName,
       score: 0,
-      message: '⚠️ Verification skipped - warning sent to supervisor'
+      message: t('verificationpopup.skipped_message')
     };
 
     isAnsweredRef.current = true;
@@ -192,9 +195,9 @@ function VerificationPopup({ officerId, officerName, onAnswer, onClose }) {
             <div className="verification-popup-header">
               <div className="verification-popup-title">
                 <span className="verification-icon">🔍</span>
-                <span>Verification Required</span>
+                <span>{t('verificationpopup.required')}</span>
               </div>
-              <div className="verification-badge">⚡ Random Check</div>
+              <div className="verification-badge">{t('verificationpopup.random_check')}</div>
             </div>
 
             <div className="verification-popup-body">
@@ -202,7 +205,7 @@ function VerificationPopup({ officerId, officerName, onAnswer, onClose }) {
               <p className="verification-question">{question.question}</p>
 
               <div className="verification-timer">
-                <span className="verification-timer-label">⏱️ Answer within:</span>
+                <span className="verification-timer-label">{t('verificationpopup.answer_within')}</span>
                 <span className="verification-timer-value">{popupCountdown}s</span>
                 <div className="verification-timer-bar">
                   <div
@@ -230,7 +233,7 @@ function VerificationPopup({ officerId, officerName, onAnswer, onClose }) {
 
             <div className="verification-popup-footer">
               <button className="verification-btn skip" onClick={handleSkip}>
-                ⏭️ Skip
+                {t('verificationpopup.skip')}
               </button>
               <button
                 className="verification-btn submit"
@@ -241,7 +244,7 @@ function VerificationPopup({ officerId, officerName, onAnswer, onClose }) {
                   cursor: !selectedAnswer ? 'not-allowed' : 'pointer'
                 }}
               >
-                ✅ Submit
+                {t('verificationpopup.submit')}
               </button>
             </div>
           </div>

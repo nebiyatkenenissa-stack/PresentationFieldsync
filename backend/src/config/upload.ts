@@ -7,6 +7,11 @@ if (!fs.existsSync(config.uploadsDir)) {
   fs.mkdirSync(config.uploadsDir, { recursive: true });
 }
 
+// Backup directory for old profile photos before they are replaced.
+if (!fs.existsSync(config.profileBackupsDir)) {
+  fs.mkdirSync(config.profileBackupsDir, { recursive: true });
+}
+
 const storage = multer.diskStorage({
   destination: (_req, _file, cb) => cb(null, config.uploadsDir),
   filename: (_req, file, cb) => {
