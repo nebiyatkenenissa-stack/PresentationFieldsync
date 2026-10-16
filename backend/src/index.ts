@@ -70,6 +70,16 @@ app.get('/api/test', (_req, res) => {
   res.json({ message: 'API is working!' });
 });
 
+// Reports which build is actually serving traffic. The commit is baked in at
+// image build time, so comparing it with git log proves whether a deploy
+// reached the running instance (Render can silently roll back to an older one).
+app.get('/api/version', (_req, res) => {
+  res.json({
+    commit: process.env.RENDER_GIT_COMMIT || 'unknown',
+    startedAt: new Date(startedAt).toISOString(),
+  });
+});
+
 app.get('/api/health', async (_req, res) => {
   try {
     await pingDatabase();
@@ -86,6 +96,8 @@ app.get('/api/health', async (_req, res) => {
     });
   }
 });
+
+const startedAt = Date.now();
 
 pool.connect(async (err) => {
   if (err) {
