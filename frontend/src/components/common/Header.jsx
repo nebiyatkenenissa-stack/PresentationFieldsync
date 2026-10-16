@@ -38,7 +38,10 @@ function Header({
 
   const cachedPhotoUrl = user?.profilePhotoCache ? getProfilePhotoUrl(user.profilePhotoCache) : null;
   const currentPhoto = user?.profilePhoto || user?.profile_photo || null;
-  const headerPhotoUrl = profilePhotoFailed && cachedPhotoUrl
+  // A failed load with no cached copy falls back to the initials avatar rather
+  // than leaving a broken image: uploaded files do not survive a cold start on
+  // the free Render instance.
+  const headerPhotoUrl = profilePhotoFailed
     ? cachedPhotoUrl
     : (currentPhoto ? getProfilePhotoUrl(currentPhoto) : null);
 
