@@ -12,16 +12,14 @@ services:
     plan: free
     region: frankfurt
     buildCommand: |
-      cd frontend && npm ci && npm run build
-      cd ../backend && npm ci && npm run build
+      cd frontend && npm ci --include=dev && npm run build
+      cd ../backend && npm ci --include=dev && npm run build
     startCommand: node backend/dist/index.js
     healthCheckPath: /api/health
     autoDeploy: true
     envVars:
       - key: NODE_VERSION
         value: "22"
-      - key: NODE_ENV
-        value: production
       # Neon connection string. Paste the pooled URL from the Neon console.
       - key: DATABASE_URL
         sync: false
