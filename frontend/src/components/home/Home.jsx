@@ -88,12 +88,12 @@ function Home({ onLogin, isOnline }) {
   }, []);
 
   const features = [
-    { icon: '📡', title: t('home.feat_1_title'), desc: t('home.feat_1_desc') },
-    { icon: '🔄', title: t('home.feat_2_title'), desc: t('home.feat_2_desc') },
-    { icon: '🆔', title: t('home.feat_3_title'), desc: t('home.feat_3_desc') },
-    { icon: '📋', title: t('home.feat_4_title'), desc: t('home.feat_4_desc') },
-    { icon: '🛡️', title: t('home.feat_5_title'), desc: t('home.feat_5_desc') },
-    { icon: '📊', title: t('home.feat_6_title'), desc: t('home.feat_6_desc') },
+    { icon: '📡', art: 'ill-offline.svg', title: t('home.feat_1_title'), desc: t('home.feat_1_desc') },
+    { icon: '🔄', art: 'ill-sync.svg', title: t('home.feat_2_title'), desc: t('home.feat_2_desc') },
+    { icon: '🆔', art: null, title: t('home.feat_3_title'), desc: t('home.feat_3_desc') },
+    { icon: '📋', art: 'ill-report.svg', title: t('home.feat_4_title'), desc: t('home.feat_4_desc') },
+    { icon: '🛡️', art: null, title: t('home.feat_5_title'), desc: t('home.feat_5_desc') },
+    { icon: '📊', art: null, title: t('home.feat_6_title'), desc: t('home.feat_6_desc') },
   ];
 
   const steps = [
@@ -160,11 +160,11 @@ function Home({ onLogin, isOnline }) {
           display: flex; align-items: center; justify-content: center;
           color: var(--navy-dark); font-size: 18px; font-weight: 800; letter-spacing: 0.5px;
         }
-        .home-nav-name { font-size: 19px; font-weight: 700; color: #fff; letter-spacing: 0.3px; }
-        .home-nav-sub { font-size: 10px; color: rgba(255,255,255,0.6); letter-spacing: 1.4px; text-transform: uppercase; }
+        .home-nav-name { font-size: 22px; font-weight: 800; color: #fff; letter-spacing: 0.3px; }
+        .home-nav-sub { font-size: 11.5px; font-weight: 600; color: rgba(255,255,255,0.68); letter-spacing: 1.4px; text-transform: uppercase; }
         .home-nav-links { display: flex; align-items: center; gap: 22px; }
         .home-nav-links a {
-          text-decoration: none; color: rgba(255,255,255,0.75); font-size: 14px; font-weight: 600;
+          text-decoration: none; color: rgba(255,255,255,0.78); font-size: 16px; font-weight: 700;
           position: relative; transition: color 0.25s ease;
         }
         .home-nav-links a::after {
@@ -180,8 +180,8 @@ function Home({ onLogin, isOnline }) {
         .home-btn {
           position: relative; overflow: hidden;
           display: inline-flex; align-items: center; gap: 8px;
-          padding: 11px 26px; border: none; border-radius: 8px;
-          font-size: 15px; font-weight: 600; cursor: pointer;
+          padding: 13px 30px; border: none; border-radius: 8px;
+          font-size: 17px; font-weight: 700; cursor: pointer;
           transition: all 0.25s ease; text-decoration: none;
         }
         .home-btn::after {
@@ -212,9 +212,15 @@ function Home({ onLogin, isOnline }) {
           position: absolute; inset: 0; width: 100%; height: 100%;
           object-fit: cover; object-position: center; display: block;
         }
+        /* Scrim over the photograph. The radial pool holds full contrast exactly
+           where the headline sits, while the linear pass stays light through the
+           middle so the landscape itself remains readable. Kept asymmetric on
+           purpose: heavy at top and bottom, open across the centre band. */
         .home-hero-shade {
           position: absolute; inset: 0;
-          background: linear-gradient(180deg, rgba(16,28,51,0.6) 0%, rgba(16,28,51,0.3) 40%, rgba(16,28,51,0.35) 60%, rgba(16,28,51,0.72) 100%);
+          background:
+            radial-gradient(ellipse 64% 54% at 50% 46%, rgba(8,15,28,0.78) 0%, rgba(8,15,28,0.42) 60%, rgba(8,15,28,0.08) 100%),
+            linear-gradient(180deg, rgba(16,28,51,0.54) 0%, rgba(16,28,51,0.22) 36%, rgba(16,28,51,0.26) 60%, rgba(16,28,51,0.66) 100%);
           pointer-events: none;
         }
         .home-hero-inner {
@@ -231,7 +237,7 @@ function Home({ onLogin, isOnline }) {
           padding: 6px 16px; border-radius: 999px;
           background: rgba(16,28,51,0.55);
           border: 1px solid rgba(255,255,255,0.25);
-          font-size: 12px; font-weight: 600; letter-spacing: 0.8px; text-transform: uppercase;
+          font-size: 13px; font-weight: 700; letter-spacing: 0.8px; text-transform: uppercase;
           color: ${isOnline ? '#a7f3d0' : '#fecaca'};
         }
         .home-hero-eyebrow-dot {
@@ -240,18 +246,23 @@ function Home({ onLogin, isOnline }) {
         }
         @keyframes home-pulse { 0%,100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.35; transform: scale(0.75); } }
         .home-hero h1 {
-          font-size: 46px; line-height: 1.18; font-weight: 800; color: #fff;
-          letter-spacing: -0.5px; margin: 22px 0 0;
+          font-size: 54px; line-height: 1.12; font-weight: 800; color: #fff;
+          letter-spacing: -0.8px; margin: 22px 0 0;
           font-family: 'Montserrat', 'Segoe UI', sans-serif;
           text-shadow: 0 2px 24px rgba(10,18,34,0.55);
+          /* "Offline-First Reporting System" is two long words: balance the
+             wrap so a stray single word never sits on its own line. */
+          text-wrap: balance;
+          max-width: 16ch;
+          margin-left: auto; margin-right: auto;
         }
         .home-hero h1 .gold {
           color: #e6c15a;
           text-shadow: 0 2px 24px rgba(10,18,34,0.6);
         }
         .home-hero .lead {
-          margin: 20px auto 32px; font-size: 17px; color: rgba(255,255,255,0.88);
-          max-width: 680px; line-height: 1.7; font-weight: 400;
+          margin: 22px auto 34px; font-size: 19.5px; color: rgba(255,255,255,0.92);
+          max-width: 760px; line-height: 1.7; font-weight: 500;
           text-shadow: 0 1px 18px rgba(10,18,34,0.6);
         }
         .home-hero-actions { display: flex; gap: 14px; justify-content: center; flex-wrap: wrap; }
@@ -269,8 +280,8 @@ function Home({ onLogin, isOnline }) {
           max-width: 1200px; margin: 0 auto;
           display: flex; align-items: center; justify-content: center; gap: 40px; flex-wrap: wrap;
         }
-        .home-strip-item { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 13px; font-weight: 600; }
-        .home-strip-item span { color: var(--gold); font-size: 16px; }
+        .home-strip-item { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 15px; font-weight: 700; }
+        .home-strip-item span { color: var(--gold); font-size: 18px; }
 
         /* ===== STATS ===== */
         .home-stats {
@@ -278,15 +289,15 @@ function Home({ onLogin, isOnline }) {
           padding: 52px 40px; display: grid; grid-template-columns: repeat(4, 1fr); gap: 24px;
         }
         .home-stat { text-align: center; color: #fff; padding: 8px; }
-        .home-stat .num { font-size: 40px; font-weight: 800; color: #e6c15a; font-family: 'Montserrat', 'Segoe UI', sans-serif; }
-        .home-stat .lbl { font-size: 13px; color: #cbd5e1; margin-top: 6px; letter-spacing: 0.6px; text-transform: uppercase; }
+        .home-stat .num { font-size: 46px; font-weight: 800; color: #e6c15a; font-family: 'Montserrat', 'Segoe UI', sans-serif; }
+        .home-stat .lbl { font-size: 14px; font-weight: 600; color: #cbd5e1; margin-top: 6px; letter-spacing: 0.6px; text-transform: uppercase; }
 
         /* ===== SECTIONS ===== */
         .home-section { max-width: 1200px; margin: 0 auto; padding: 84px 40px; scroll-margin-top: 80px; }
-        .home-section h2 { font-size: 34px; font-weight: 800; color: var(--navy); text-align: center; font-family: 'Montserrat', 'Segoe UI', sans-serif; letter-spacing: -0.3px; }
-        .home-section .sub { text-align: center; color: var(--muted); margin: 12px auto 48px; max-width: 640px; font-size: 15px; line-height: 1.6; }
+        .home-section h2 { font-size: 40px; font-weight: 800; color: var(--navy); text-align: center; font-family: 'Montserrat', 'Segoe UI', sans-serif; letter-spacing: -0.5px; }
+        .home-section .sub { text-align: center; color: var(--muted); margin: 14px auto 48px; max-width: 700px; font-size: 17.5px; line-height: 1.65; font-weight: 500; }
         .home-overline {
-          text-align: center; color: var(--gold); font-size: 12px; font-weight: 700;
+          text-align: center; color: var(--gold); font-size: 13px; font-weight: 800;
           letter-spacing: 2px; text-transform: uppercase; margin-bottom: 8px;
         }
         .reveal { opacity: 0; transform: translateY(30px); transition: opacity 0.7s cubic-bezier(0.22,1,0.36,1), transform 0.7s cubic-bezier(0.22,1,0.36,1); }
@@ -311,8 +322,21 @@ function Home({ onLogin, isOnline }) {
           display: flex; align-items: center; justify-content: center;
           font-size: 26px; margin-bottom: 16px;
         }
-        .home-feature h4 { font-size: 16px; font-weight: 700; color: var(--navy); margin: 0 0 8px; }
-        .home-feature p { font-size: 14px; color: var(--muted); line-height: 1.65; margin: 0; }
+        /* Illustration band sits above the icon; it carries the offline-first
+           story, the emoji stays as a redundant label for screen readers. */
+        .home-feature-art {
+          display: block; width: 100%; height: auto;
+          margin: -6px 0 14px;
+          border-radius: 8px;
+          background: linear-gradient(160deg, #f2f6fb 0%, #e6edf5 100%);
+          border: 1px solid var(--border);
+        }
+        [data-theme='dark'] .home-feature-art {
+          background: linear-gradient(160deg, #16203a 0%, #101a2e 100%);
+          border-color: var(--border);
+        }
+        .home-feature h4 { font-size: 19px; font-weight: 800; color: var(--navy); margin: 0 0 8px; }
+        .home-feature p { font-size: 16px; color: var(--muted); line-height: 1.65; margin: 0; font-weight: 500; }
 
         /* ===== STEPS ===== */
         .home-steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; counter-reset: step; }
@@ -326,12 +350,34 @@ function Home({ onLogin, isOnline }) {
           display: flex; align-items: center; justify-content: center; border-radius: 10px;
           border: 1px solid rgba(201,162,39,0.3);
         }
-        .home-step h4 { font-size: 16px; font-weight: 700; color: var(--navy); margin: 14px 0 8px; }
-        .home-step p { font-size: 14px; color: var(--muted); line-height: 1.65; margin: 0; }
+        .home-step h4 { font-size: 19px; font-weight: 800; color: var(--navy); margin: 14px 0 8px; }
+        .home-step p { font-size: 16px; color: var(--muted); line-height: 1.65; margin: 0; font-weight: 500; }
         .home-step:hover { transform: translateY(-5px); box-shadow: 0 16px 36px rgba(20,33,61,0.1); }
 
         /* ===== ABOUT ===== */
         .home-about { display: grid; grid-template-columns: 1fr 1fr; gap: 48px; align-items: start; }
+        /* Second photograph on the page. Displayed at roughly 560px wide, which
+           the 728px source covers comfortably. */
+        .home-about-media {
+          position: relative;
+          border-radius: 12px; overflow: hidden;
+          border: 1px solid var(--border);
+          margin-bottom: 18px;
+          aspect-ratio: 16 / 10;
+          background: var(--surface-soft);
+        }
+        .home-about-media img {
+          width: 100%; height: 100%; object-fit: cover; display: block;
+          transition: transform 0.5s ease;
+        }
+        .home-about-media:hover img { transform: scale(1.04); }
+        .home-about-media figcaption {
+          position: absolute; left: 0; right: 0; bottom: 0;
+          padding: 22px 18px 12px;
+          background: linear-gradient(180deg, rgba(10,18,34,0) 0%, rgba(10,18,34,0.82) 70%);
+          color: #fff; font-size: 14px; font-weight: 600; line-height: 1.45;
+        }
+        [data-theme='dark'] .home-about-media { border-color: var(--border); }
         .home-about-card {
           background: linear-gradient(145deg, var(--navy-dark), var(--navy));
           border-radius: 14px; padding: 36px; color: #fff; position: relative; overflow: hidden;
@@ -340,13 +386,13 @@ function Home({ onLogin, isOnline }) {
           content: ''; position: absolute; top: -40%; right: -30%; width: 260px; height: 260px;
           border-radius: 50%; background: rgba(201,162,39,0.18); filter: blur(30px);
         }
-        .home-about-card h3 { font-size: 20px; font-weight: 800; color: #e6c15a; margin-bottom: 14px; font-family: 'Montserrat', 'Segoe UI', sans-serif; }
-        .home-about-card p { font-size: 14px; line-height: 1.75; color: #e2e8f0; margin: 0; }
+        .home-about-card h3 { font-size: 24px; font-weight: 800; color: #e6c15a; margin-bottom: 14px; font-family: 'Montserrat', 'Segoe UI', sans-serif; }
+        .home-about-card p { font-size: 16px; line-height: 1.75; color: #e2e8f0; margin: 0; font-weight: 500; }
         .home-about-card .badge {
           display: inline-flex; align-items: center; gap: 8px; margin-top: 18px;
-          padding: 6px 16px; border-radius: 999px; background: rgba(230,193,90,0.16);
+          padding: 7px 18px; border-radius: 999px; background: rgba(230,193,90,0.16);
           border: 1px solid rgba(230,193,90,0.35);
-          color: #e6c15a; font-size: 13px; font-weight: 600;
+          color: #e6c15a; font-size: 14px; font-weight: 700;
         }
         .home-values { display: grid; gap: 16px; }
         .home-value {
@@ -355,8 +401,8 @@ function Home({ onLogin, isOnline }) {
         }
         .home-value:hover { transform: translateX(8px); border-color: var(--gold); box-shadow: 0 8px 20px rgba(201,162,39,0.12); }
         .home-value .vic { width: 44px; height: 44px; border-radius: 10px; background: rgba(201,162,39,0.12); display: flex; align-items: center; justify-content: center; font-size: 22px; flex-shrink: 0; }
-        .home-value h4 { font-size: 15px; font-weight: 700; color: var(--navy); margin: 0 0 4px; }
-        .home-value p { font-size: 13px; color: var(--muted); line-height: 1.6; margin: 0; }
+        .home-value h4 { font-size: 18px; font-weight: 800; color: var(--navy); margin: 0 0 4px; }
+        .home-value p { font-size: 15px; color: var(--muted); line-height: 1.6; margin: 0; font-weight: 500; }
 
         /* ===== CONTACT ===== */
         .home-contact-grid { display: grid; grid-template-columns: 1fr 1.2fr; gap: 36px; }
@@ -372,26 +418,26 @@ function Home({ onLogin, isOnline }) {
           background: linear-gradient(145deg, var(--navy), #4fc3f7);
           color: #fff; display: flex; align-items: center; justify-content: center; font-size: 20px;
         }
-        .home-contact-card h4 { font-size: 14px; font-weight: 700; color: var(--navy); margin: 0; }
-        .home-contact-card p { font-size: 13px; color: var(--muted); margin: 2px 0 0; }
+        .home-contact-card h4 { font-size: 17px; font-weight: 800; color: var(--navy); margin: 0; }
+        .home-contact-card p { font-size: 15px; color: var(--muted); margin: 2px 0 0; font-weight: 500; }
         .home-contact-form {
           background: var(--surface); border: 1px solid var(--border); border-radius: 14px;
           padding: 30px; box-shadow: 0 10px 30px rgba(20,33,61,0.06);
         }
-        .home-contact-form h3 { font-size: 18px; font-weight: 800; color: var(--navy); margin: 0 0 4px; font-family: 'Montserrat', 'Segoe UI', sans-serif; }
-        .home-contact-form .fs { font-size: 13px; color: var(--muted); margin: 0 0 20px; }
+        .home-contact-form h3 { font-size: 22px; font-weight: 800; color: var(--navy); margin: 0 0 4px; font-family: 'Montserrat', 'Segoe UI', sans-serif; }
+        .home-contact-form .fs { font-size: 15px; color: var(--muted); margin: 0 0 20px; font-weight: 500; }
         .home-social-card {
           background: var(--surface); border: 1px solid var(--border); border-radius: 14px;
           padding: 30px; box-shadow: 0 10px 30px rgba(20,33,61,0.06);
         }
-        .home-social-card h3 { font-size: 18px; font-weight: 800; color: var(--navy); margin: 0 0 4px; font-family: 'Montserrat', 'Segoe UI', sans-serif; }
-        .home-social-card .fs { font-size: 13px; color: var(--muted); margin: 0 0 20px; }
+        .home-social-card h3 { font-size: 22px; font-weight: 800; color: var(--navy); margin: 0 0 4px; font-family: 'Montserrat', 'Segoe UI', sans-serif; }
+        .home-social-card .fs { font-size: 15px; color: var(--muted); margin: 0 0 20px; font-weight: 500; }
         .home-social-row { display: flex; gap: 12px; }
         .home-social-btn {
           flex: 1; min-width: 0; display: flex; align-items: center; justify-content: center; gap: 8px;
-          padding: 12px; border: 1px solid var(--border); border-radius: 10px;
+          padding: 13px; border: 1px solid var(--border); border-radius: 10px;
           background: var(--surface-soft); color: var(--navy); text-decoration: none;
-          font-size: 13px; font-weight: 600; transition: all 0.25s ease;
+          font-size: 15px; font-weight: 700; transition: all 0.25s ease;
         }
         .home-social-btn svg { flex-shrink: 0; }
         .home-social-btn:hover { transform: translateY(-3px); box-shadow: 0 10px 22px rgba(20,33,61,0.12); }
@@ -399,12 +445,12 @@ function Home({ onLogin, isOnline }) {
         .home-social-btn.facebook:hover { background: #1877f2; color: #fff; border-color: #1877f2; }
         .home-social-btn.twitter:hover { background: #1da1f2; color: #fff; border-color: #1da1f2; }
         .home-social-address { margin-top: 20px; padding-top: 20px; border-top: 1px solid var(--border); }
-        .home-social-address h4 { font-size: 14px; font-weight: 700; color: var(--navy); margin: 0 0 6px; }
-        .home-social-address p { font-size: 13px; color: var(--muted); line-height: 1.6; margin: 0; }
+        .home-social-address h4 { font-size: 17px; font-weight: 800; color: var(--navy); margin: 0 0 6px; }
+        .home-social-address p { font-size: 15px; color: var(--muted); line-height: 1.6; margin: 0; font-weight: 500; }
         .home-form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
         .home-input {
-          width: 100%; padding: 12px 14px; border: 1.5px solid var(--border); border-radius: 8px;
-          font-size: 14px; font-family: inherit; box-sizing: border-box; background: var(--fs-input-bg);
+          width: 100%; padding: 13px 15px; border: 1.5px solid var(--border); border-radius: 8px;
+          font-size: 16px; font-weight: 500; font-family: inherit; box-sizing: border-box; background: var(--fs-input-bg);
           color: var(--fs-ink);
           transition: border-color 0.2s ease, box-shadow 0.2s ease; margin-bottom: 14px;
         }
@@ -428,14 +474,14 @@ function Home({ onLogin, isOnline }) {
           transform: rotate(15deg); animation: cta-sweep 7s ease-in-out infinite;
         }
         @keyframes cta-sweep { 0%,100% { left: -30%; } 50% { left: 130%; } }
-        .home-cta h3 { font-size: 28px; font-weight: 800; position: relative; font-family: 'Montserrat', 'Segoe UI', sans-serif; }
-        .home-cta p { color: #cbd5e1; margin: 12px 0 26px; font-size: 15px; position: relative; }
+        .home-cta h3 { font-size: 34px; font-weight: 800; position: relative; font-family: 'Montserrat', 'Segoe UI', sans-serif; }
+        .home-cta p { color: #cbd5e1; margin: 14px auto 28px; font-size: 18px; font-weight: 500; position: relative; max-width: 640px; line-height: 1.65; }
 
         /* ===== FOOTER ===== */
         .home-footer { background: var(--navy-dark); color: #cbd5e1; padding: 32px 40px; }
         .home-footer-inner { max-width: 1200px; margin: 0 auto; display: flex; justify-content: space-between; align-items: center; gap: 20px; flex-wrap: wrap; }
         .home-footer-links { display: flex; gap: 18px; }
-        .home-footer-links a { color: #cbd5e1; text-decoration: none; font-size: 13px; transition: color 0.2s ease; }
+        .home-footer-links a { color: #cbd5e1; text-decoration: none; font-size: 15px; font-weight: 600; transition: color 0.2s ease; }
         .home-footer-links a:hover { color: #e6c15a; }
         .home-footer strong { color: #fff; }
 
@@ -470,8 +516,41 @@ function Home({ onLogin, isOnline }) {
           .home-nav-links { gap: 14px; flex-wrap: wrap; }
           .home-section { padding: 56px 24px; }
           .home-hero-inner { padding: 80px 24px; min-height: 100vh; }
-          .home-hero h1 { font-size: 32px; }
+          .home-hero h1 { font-size: 40px; max-width: 18ch; }
+          .home-hero .lead { font-size: 18px; }
+          .home-section h2 { font-size: 32px; }
+          .home-section .sub { font-size: 16px; }
           .home-form-row { grid-template-columns: 1fr; }
+        }
+
+        @media (max-width: 480px) {
+          .home-section { padding: 44px 16px; }
+          .home-section h2 { font-size: 27px; }
+          .home-section .sub { margin-bottom: 32px; font-size: 15.5px; }
+          .home-stats { padding: 36px 16px; gap: 16px; }
+          .home-stat .num { font-size: 34px; }
+          .home-stat .lbl { font-size: 12.5px; }
+          .home-hero-inner { padding: 60px 16px; }
+          .home-nav { padding: 12px 16px; }
+          .home-nav-name { font-size: 19px; }
+          .home-nav-sub { font-size: 10px; }
+          .home-hero h1 { font-size: 29px; max-width: 20ch; }
+          .home-hero .lead { font-size: 16px; }
+          .home-hero-actions .home-btn { width: 100%; justify-content: center; }
+          .home-feature h4, .home-step h4, .home-value h4 { font-size: 17px; }
+          .home-feature p, .home-step p { font-size: 15px; }
+          .home-cta h3 { font-size: 26px; }
+          .home-cta p { font-size: 16px; }
+          .home-footer-links a { font-size: 14px; }
+        }
+
+        /* Very short viewports (landscape phones) cannot afford a full screen
+           of hero, so the illustration recedes and the text stays reachable. */
+        @media (max-height: 520px) and (orientation: landscape) {
+          .home-hero, .home-hero-inner { min-height: auto; }
+          .home-hero-inner { padding: 72px 24px; }
+          .home-hero h1 { font-size: 30px; }
+          .home-hero .lead { margin-bottom: 20px; font-size: 16px; }
         }
       `}</style>
 
@@ -481,7 +560,7 @@ function Home({ onLogin, isOnline }) {
           <div className="home-nav-logo">FS</div>
           <div>
             <div className="home-nav-name">FieldSync</div>
-            <div className="home-nav-sub">Field Operations &amp; National ID</div>
+            <div className="home-nav-sub">Offline-First Reporting System</div>
           </div>
         </a>
         <div className="home-nav-links">
@@ -564,6 +643,17 @@ function Home({ onLogin, isOnline }) {
         <div className="home-features">
           {features.map((f, i) => (
             <div className="home-feature reveal" key={i} style={{ transitionDelay: `${i * 80}ms` }}>
+              {f.art && (
+                <img
+                  className="home-feature-art"
+                  src={`${import.meta.env.BASE_URL}images/${f.art}`}
+                  alt=""
+                  aria-hidden="true"
+                  loading="lazy"
+                  width="240"
+                  height="180"
+                />
+              )}
               <div className="ic">{f.icon}</div>
               <h4>{f.title}</h4>
               <p>{f.desc}</p>
@@ -594,13 +684,27 @@ function Home({ onLogin, isOnline }) {
         <h2 className="reveal">{t('home.about_title')}</h2>
         <p className="sub reveal">{t('home.about_sub')}</p>
         <div className="home-about">
-          <div className="home-about-card reveal">
-            <h3>{t('home.mission_title')}</h3>
-            <p>{t('home.mission_p1')}</p>
-            <p style={{ marginTop: 12 }}>{t('home.mission_p2')}</p>
-            <div className="badge">
-              <span className="home-hero-eyebrow-dot"></span>
-              {t('home.trusted_badge')}
+          <div className="home-about-lead reveal">
+            <figure className="home-about-media">
+              <img
+                src={`${import.meta.env.BASE_URL}images/hero.jpg`}
+                alt="Field officers on location collecting the data that is stored on the device before it is synchronised"
+                loading="lazy"
+                width="728"
+                height="420"
+              />
+              <figcaption>
+                Reports are captured on the device first, then reconciled with the central register once a connection is available.
+              </figcaption>
+            </figure>
+            <div className="home-about-card">
+              <h3>{t('home.mission_title')}</h3>
+              <p>{t('home.mission_p1')}</p>
+              <p style={{ marginTop: 12 }}>{t('home.mission_p2')}</p>
+              <div className="badge">
+                <span className="home-hero-eyebrow-dot"></span>
+                {t('home.trusted_badge')}
+              </div>
             </div>
           </div>
           <div className="home-values">

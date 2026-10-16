@@ -2,11 +2,20 @@ import { Pool, types } from 'pg';
 import { config } from './env.js';
 
 export const pool = new Pool({
-  user: config.dbUser,
-  host: config.dbHost,
-  database: config.dbName,
-  password: config.dbPassword,
-  port: config.dbPort,
+  ...(config.dbUrl
+    ? { connectionString: config.dbUrl }
+    : {
+        user: config.dbUser,
+        host: config.dbHost,
+        database: config.dbName,
+        password: config.dbPassword,
+        port: config.dbPort,
+      }),
+  ssl: config.dbSsl,
+  // Render hands the process to a proxy; the socket can sit idle between users
+  // (free tier sleeps after 15 min) and Postgres would otherwise drop it.
+  idleTimeoutMillis: 30_000,
+  connectionTimeoutMillis: 10_000,
 });
 
 // The app always writes timestamps as UTC ISO strings (new Date().toISOString()),

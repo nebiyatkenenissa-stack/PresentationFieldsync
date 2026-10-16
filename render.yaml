@@ -1,0 +1,42 @@
+# Render blueprint: one free web service that serves the API and the built
+# frontend from the same origin, backed by Neon Postgres.
+#
+# Usage: push this repo to GitHub -> Render -> New > Blueprint -> pick the repo.
+# Set DATABASE_URL in the Render dashboard to your Neon pooled connection string
+# (it is left manual so the blueprint never embeds a database credential).
+
+services:
+  - type: web
+    name: fieldsync
+    runtime: node
+    plan: free
+    region: frankfurt
+    buildCommand: |
+      cd frontend && npm ci && npm run build
+      cd ../backend && npm ci && npm run build
+    startCommand: node backend/dist/index.js
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: NODE_ENV
+        value: production
+      # Neon connection string. Paste the pooled URL from the Neon console.
+      - key: DATABASE_URL
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true
+      - key: ADMIN_EMAIL
+        value: admin@fieldsync.com
+      - key: ADMIN_PASSWORD
+        generateValue: true
+      - key: ADMIN_NAME
+        value: System Administrator
+      - key: ADMIN_EMPLOYEE_ID
+        value: ADM001
+      # Required only if you want password-reset emails to work.
+      - key: EMAIL_USER
+        sync: false
+      - key: EMAIL_PASS
+        sync: false
