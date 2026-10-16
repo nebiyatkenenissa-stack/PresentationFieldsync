@@ -636,7 +636,7 @@ function VerificationPage({
                             <h4 style={{ fontSize: '15px', fontWeight: '600', color: '#0f172a', margin: '0 0 10px 0' }}>
                               {t('verification.history_title', { count: officer.questionHistory.length })}
                             </h4>
-                            <div style={{ overflowX: 'auto' }}>
+                            <div className="table-wrapper" style={{ overflowX: 'auto' }}>
                               <table style={{
                                 width: '100%',
                                 borderCollapse: 'collapse',

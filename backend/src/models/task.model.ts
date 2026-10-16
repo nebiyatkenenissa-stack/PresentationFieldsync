@@ -18,8 +18,8 @@ export async function create(data: any): Promise<any> {
     `INSERT INTO tasks (
         id, employee_id, assigned_by, assigned_by_name,
         title, description, deadline, priority, status,
-        created_at, updated_at, completed_at
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+        created_at, updated_at, completed_at, target_role
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
     RETURNING *`,
     [
       data.id, data.employeeId, data.assignedBy, data.assignedByName,
@@ -28,6 +28,7 @@ export async function create(data: any): Promise<any> {
       data.createdAt || new Date().toISOString(),
       data.updatedAt || new Date().toISOString(),
       data.completedAt || null,
+      data.targetRole || null,
     ]
   );
   return result.rows[0];

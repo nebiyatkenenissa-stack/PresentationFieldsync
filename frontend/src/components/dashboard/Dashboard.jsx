@@ -69,6 +69,27 @@ function Dashboard({
   const realSupervisors = useMemo(() => (users || []).filter(u => u.role === 'supervisor').length, [users]);
   const realFieldOfficers = useMemo(() => (users || []).filter(u => u.role === 'field_officer').length, [users]);
 
+  // ----- DEMOGRAPHICS (real gender split of registered citizens & staff users) -----
+  const GENDER_FILL = { Male: '#2563eb', Female: '#db2777', Other: '#0b7e4b', unspecified: '#94a3b8' };
+
+  const genderSplit = useCallback((list) => {
+    const counts = { Male: 0, Female: 0, Other: 0, unspecified: 0 };
+    (list || []).forEach(item => {
+      const g = String(item.gender || '').trim();
+      counts[g === 'Male' || g === 'Female' || g === 'Other' ? g : 'unspecified'] += 1;
+    });
+    const data = [
+      { key: 'Male', name: t('register.male'), value: counts.Male },
+      { key: 'Female', name: t('register.female'), value: counts.Female },
+      { key: 'Other', name: t('register.other'), value: counts.Other },
+      { key: 'unspecified', name: t('dashboard.not_specified'), value: counts.unspecified }
+    ].filter(d => d.value > 0);
+    return { data, total: counts.Male + counts.Female + counts.Other + counts.unspecified };
+  }, [t]);
+
+  const citizensGender = useMemo(() => genderSplit(citizens), [genderSplit, citizens]);
+  const staffGender = useMemo(() => genderSplit(users), [genderSplit, users]);
+
   // ----- REGIONAL HIERARCHY (Country > Region > Zone > Woreda > Kebele > Community) -----
   // Shared parser from utils/regions.js (single source of truth).
   const parseHierarchy = useCallback((path) => parseLocationHierarchy(path), []);
@@ -584,6 +605,34 @@ function Dashboard({
     }
   }, [loading, LoadingBar, isMobile, t]);
 
+  const renderGenderPie = useCallback((split) => {
+    if (!split || split.total === 0) {
+      return <div style={{ textAlign: 'center', padding: '40px', color: colors.textSecondary, fontSize: '14px' }}>{t('dashboard.no_data_available')}</div>;
+    }
+    return (
+      <ResponsiveContainer width="100%" height={isMobile ? 210 : 260}>
+        <PieChart>
+          <Pie
+            data={split.data}
+            dataKey="value"
+            nameKey="name"
+            cx="50%"
+            cy="50%"
+            outerRadius={isMobile ? 62 : 85}
+            labelLine={false}
+            label={({ percent }) => (percent > 0.06 ? `${Math.round(percent * 100)}%` : '')}
+          >
+            {split.data.map((entry) => (
+              <Cell key={entry.key} fill={GENDER_FILL[entry.key]} />
+            ))}
+          </Pie>
+          <Tooltip content={<CustomTooltip />} />
+          <Legend wrapperStyle={{ fontSize: '12px', color: colors.textSecondary }} />
+        </PieChart>
+      </ResponsiveContainer>
+    );
+  }, [isMobile, t, colors.textSecondary, CustomTooltip]);
+
   const ChartWrapper = useCallback(({ children, title, subtitle }) => (
     <div style={{
       background: colors.cardBg,
@@ -603,28 +652,30 @@ function Dashboard({
 
   const StatsCard = useCallback(({ label, value, color, icon, detail }) => (
     <div style={{
-      background: `linear-gradient(135deg, ${color}, ${color}dd)`,
+      background: 'var(--fs-surface)',
+      border: '1px solid var(--fs-border)',
+      borderLeft: `3px solid ${color}`,
       padding: isMobile ? '14px' : '20px',
       borderRadius: '8px',
-      color: 'white',
-      boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
+      color: 'var(--fs-ink)',
+      boxShadow: colors.shadow,
       transition: 'all 0.2s ease',
       cursor: detail ? 'pointer' : 'default'
     }}
       onClick={() => { if (detail) setActiveCard({ label, icon, color, value, render: detail }); }}
       onMouseEnter={(e) => {
         e.currentTarget.style.transform = 'translateY(-3px)';
-        e.currentTarget.style.boxShadow = '0 6px 20px rgba(0,0,0,0.15)';
+        e.currentTarget.style.boxShadow = '0 6px 16px rgba(17,28,46,0.14)';
       }}
       onMouseLeave={(e) => {
         e.currentTarget.style.transform = 'translateY(0)';
-        e.currentTarget.style.boxShadow = '0 2px 8px rgba(0,0,0,0.1)';
+        e.currentTarget.style.boxShadow = colors.shadow;
       }}>
-      <div style={{ fontSize: isMobile ? '20px' : '26px', fontWeight: '700' }}>{value}</div>
-      <div style={{ fontSize: isMobile ? '11px' : '13px', opacity: 0.85, marginTop: '4px' }}>{icon} {label}</div>
-      {detail && <div style={{ fontSize: '11px', opacity: 0.75, marginTop: '6px' }}>{t('dashboard.click_to_view_details')}</div>}
+      <div style={{ fontSize: isMobile ? '20px' : '26px', fontWeight: '700', color: 'var(--fs-ink)' }}>{value}</div>
+      <div style={{ fontSize: isMobile ? '11px' : '13px', color: 'var(--fs-muted)', marginTop: '4px' }}>{icon} {label}</div>
+      {detail && <div style={{ fontSize: '11px', color: 'var(--fs-muted-2)', marginTop: '6px' }}>{t('dashboard.click_to_view_details')}</div>}
     </div>
-  ), [setActiveCard, isMobile, t]);
+  ), [setActiveCard, isMobile, t, colors.shadow]);
 
   // ============================================================
   // CARD DETAIL DATA (used inside the detail box)
@@ -1194,6 +1245,22 @@ function Dashboard({
             </ChartWrapper>
           </div>
 
+          {/* ===== DEMOGRAPHIC PIE CHARTS (real gender data) ===== */}
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: isMobile ? '1fr' : 'repeat(auto-fit, minmax(340px, 1fr))',
+            gap: '20px',
+            marginBottom: '24px',
+            padding: isMobile ? '0 10px' : '0 16px'
+          }}>
+            <ChartWrapper title={`📊 ${t('dashboard.citizens_by_gender')}`} subtitle={`${realTotalCitizens} · ${t('dashboard.citizens_registered')}`}>
+              {renderGenderPie(citizensGender)}
+            </ChartWrapper>
+            <ChartWrapper title={`📊 ${t('dashboard.users_by_gender')}`} subtitle={`${(users || []).length} · ${t('dashboard.total_users')}`}>
+              {renderGenderPie(staffGender)}
+            </ChartWrapper>
+          </div>
+
           {/* ===== REGIONAL HIERARCHY CHARTS (real data) ===== */}
           <div style={{
             display: 'grid',
@@ -1254,7 +1321,7 @@ function Dashboard({
                 {t('dashboard.described_by_region')}
               </span>
             </div>
-            <div style={{ overflowX: 'auto' }}>
+            <div className="table-wrapper" style={{ overflowX: 'auto' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
                 <thead>
                   <tr style={{ borderBottom: `2px solid ${colors.cardBorder}`, color: colors.textSecondary, textAlign: 'left' }}>

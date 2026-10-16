@@ -6,6 +6,7 @@ import { db, syncQueue, checkRealInternet, getApiBase } from '../../services/dat
 import { useUserLanguage } from '../context/UserLanguageContext';
 import UserLanguageSelector from './UserLanguageSelector';
 import LocationSelect from '../common/LocationSelect';
+import LocationCascade from '../common/LocationCascade';
 import UserAvatar from '../common/UserAvatar';
 
 const fieldStyle = {
@@ -84,6 +85,34 @@ function UserManagement({
   const maxLevelIdx = Math.max(0, LOCATION_LEVELS.indexOf(ROLE_MAX_LEVEL[newUser.role] || 'community'));
   const requiredLevel = ROLE_REQUIRED_LEVEL[newUser.role];
 
+  // Same depth rules as the create form, but for the user being edited.
+  const editMaxLevelIdx = Math.max(0, LOCATION_LEVELS.indexOf(ROLE_MAX_LEVEL[editForm.role] || 'community'));
+  const editRequiredLevel = ROLE_REQUIRED_LEVEL[editForm.role];
+
+  // Builds the "A > B > C" display path from a cascade selection, stopping at
+  // the level this role is allowed to hold so a manager is never given a path
+  // deeper than their role supports.
+  const buildEditLocationPath = (sel, role) => {
+    const stopAt = LOCATION_LEVELS.indexOf(ROLE_MAX_LEVEL[role] || 'community');
+    const parts = [];
+    for (let i = 0; i <= stopAt; i++) {
+      const level = LOCATION_LEVELS[i];
+      const picked = sel?.[level];
+      if (!picked) break;          // a gap ends the path
+      if (!picked.name) continue;  // id known, name not resolved yet
+      parts.push(picked.name);
+    }
+    return parts.length ? parts.join(' > ') : '';
+  };
+
+  const handleEditLocationChange = (sel) => {
+    setEditForm(prev => ({
+      ...prev,
+      locationSel: sel,
+      locationPath: buildEditLocationPath(sel, prev.role)
+    }));
+  };
+
   // ===== RESET PASSWORD (reset + email new password to the user) =====
   const resendCredentials = async (u) => {
     const online = await checkRealInternet();
@@ -119,7 +148,14 @@ function UserManagement({
       if (response.ok && tempPassword) {
         await db.users.update(u.id, { password: tempPassword, synced: true, must_change_password: true });
         setUsers(prev => prev.map(x => x.id === u.id ? { ...x, password: tempPassword, synced: true, must_change_password: true } : x));
-        toast(`🔑 Password reset and sent to ${u.email}.\n\nNew password: ${tempPassword}\n\nShare this with the user (they will be asked to change it on first login).`);
+        // The backend deliberately skips the email for managers and hands the
+        // password back here instead. Saying "sent to <email>" for that case
+        // was misleading - it looks like a delivery failure when nothing was
+        // ever attempted.
+        const emailed = !/no email sent/i.test(result.note || '');
+        toast(emailed
+          ? `🔑 Password reset and sent to ${u.email}.\n\nNew password: ${tempPassword}\n\nShare this with the user (they will be asked to change it on first login).`
+          : `🔑 Password reset for ${u.email} (no email sent for this role).\n\nNew password: ${tempPassword}\n\nShare this with the user (they will be asked to change it on first login).`);
         if (addNotification) {
           addNotification(u.id, '🔑 Credentials Reset', `Your FieldSync password was reset. Check ${u.email} for the new password.`, 'info', '/profile');
         }
@@ -179,8 +215,20 @@ function UserManagement({
       employeeId: u.employeeId || '',
       role: u.role || 'field_officer',
       status: u.status || 'active',
+      gender: u.gender || '',
       supervisorId: u.supervisorId || '',
-      assignedSites: u.assignedSites || ''
+      assignedSites: u.assignedSites || '',
+      // Seed the cascade from the ids already on the user. `name` is left null
+      // so LocationCascade resolves the labels from the option lists itself.
+      locationSel: {
+        country: u.country_id ? { id: u.country_id, name: null } : null,
+        region: u.region_id ? { id: u.region_id, name: null } : null,
+        zone: u.zone_id ? { id: u.zone_id, name: null } : null,
+        woreda: u.woreda_id ? { id: u.woreda_id, name: null } : null,
+        kebele: u.kebele_id ? { id: u.kebele_id, name: null } : null,
+        community: u.community_id ? { id: u.community_id, name: null } : null
+      },
+      locationPath: u.locationPath || u.region || ''
     });
     setEditErrors({ name: '', phone: '', employeeId: '' });
   };
@@ -222,9 +270,18 @@ function UserManagement({
       toast('Please select a Supervisor for the Field Officer.');
       return;
     }
+    // A user must sit inside the area their role is defined over, otherwise
+    // supervisor-by-woreda lookups and team filtering silently miss them.
+    const sel = editForm.locationSel || {};
+    if (!sel[editRequiredLevel]) {
+      toast(`Please select an assigned ${editRequiredLevel} for this user.`);
+      return;
+    }
 
-    // Name, email and phone are read-only here; only role, status,
-    // supervisor, assigned sites and the employee ID may be edited.
+    const locationPath = editForm.locationPath || buildEditLocationPath(sel, editForm.role);
+
+    // Name, email and phone are read-only here; role, status, supervisor,
+    // assigned sites, employee ID and the assigned area may be edited.
     const updatedUser = {
       ...editingUser,
       name: editingUser.name,
@@ -233,8 +290,20 @@ function UserManagement({
       employeeId: String(editForm.employeeId || '').trim().toUpperCase(),
       role: editForm.role,
       status: editForm.status,
+      gender: editForm.gender || '',
       supervisorId: editForm.role === 'field_officer' ? editForm.supervisorId : null,
-      assignedSites: editForm.role === 'field_officer' ? editForm.assignedSites : undefined
+      assignedSites: editForm.role === 'field_officer' ? editForm.assignedSites : undefined,
+      // The API expects these as snake_case; locationPath is camelCase there
+      // (see updateUserProfile) while `region` carries the same string for the
+      // legacy display path.
+      country_id: sel.country?.id ?? null,
+      region_id: sel.region?.id ?? null,
+      zone_id: sel.zone?.id ?? null,
+      woreda_id: sel.woreda?.id ?? null,
+      kebele_id: sel.kebele?.id ?? null,
+      community_id: sel.community?.id ?? null,
+      locationPath,
+      region: locationPath
     };
 
     setIsSavingEdit(true);
@@ -512,6 +581,20 @@ function UserManagement({
               )}
               <small style={{ color: '#64748b', fontSize: '11px', marginTop: '4px' }}>e.g., +251912345678</small>
             </div>
+            <div style={{ display: 'flex', flexDirection: 'column' }}>
+              <label style={labelStyle}>{userT('userManagement.gender')}</label>
+              <select
+                name="gender"
+                value={newUser.gender || ''}
+                onChange={handleChange}
+                style={fieldStyle}
+              >
+                <option value="">{userT('userManagement.selectGender')}</option>
+                <option value="Male">{userT('userManagement.male')}</option>
+                <option value="Female">{userT('userManagement.female')}</option>
+                <option value="Other">{userT('userManagement.other')}</option>
+              </select>
+            </div>
           </div>
 
           {/* ===== LOCATION HIERARCHY (role-based depth) ===== */}
@@ -652,7 +735,7 @@ function UserManagement({
           </div>
         </div>
 
-        <div style={{ overflowX: 'auto' }}>
+        <div className="table-wrapper" style={{ overflowX: 'auto' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '14px' }}>
             <thead>
               <tr style={{ background: '#f8fafc' }}>
@@ -898,6 +981,20 @@ function UserManagement({
                     <option value="inactive">{userT('userManagement.inactive')}</option>
                   </select>
                 </div>
+                <div style={{ display: 'flex', flexDirection: 'column' }}>
+                  <label style={{ ...labelStyle, color: '#374151' }}>{userT('userManagement.gender')}</label>
+                  <select
+                    name="gender"
+                    value={editForm.gender || ''}
+                    onChange={handleEditChange}
+                    style={fieldStyle}
+                  >
+                    <option value="">{userT('userManagement.selectGender')}</option>
+                    <option value="Male">{userT('userManagement.male')}</option>
+                    <option value="Female">{userT('userManagement.female')}</option>
+                    <option value="Other">{userT('userManagement.other')}</option>
+                  </select>
+                </div>
               </div>
 
               {editForm.role === 'field_officer' && (
@@ -926,6 +1023,23 @@ function UserManagement({
                   📍 {editingUser.locationPath}
                 </div>
               )}
+
+              {/* ===== ASSIGNED AREA (editable) =====
+                  Only the levels this role is defined over are offered, so a
+                  manager cannot assign a deeper area than the role supports. */}
+              <div style={{ marginTop: '16px' }}>
+                <label style={labelStyle}>📍 Assigned Location Area *</label>
+                <LocationCascade
+                  initial={editForm.locationSel || {}}
+                  onChange={handleEditLocationChange}
+                  requiredLevels={[editRequiredLevel]}
+                  labels={{}}
+                />
+                <div style={{ fontSize: '12px', color: '#64748b', marginTop: '6px' }}>
+                  Required down to <strong>{editRequiredLevel}</strong> for this role.
+                  {editForm.locationPath ? ` Currently: ${editForm.locationPath}` : ''}
+                </div>
+              </div>
 
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '24px', paddingTop: '16px', borderTop: '1px solid #e2e8f0' }}>
                 <button

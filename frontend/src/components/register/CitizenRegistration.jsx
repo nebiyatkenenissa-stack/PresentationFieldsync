@@ -440,7 +440,6 @@ function CitizenRegistration({ user, citizens, setCitizens, addNotification }) {
   const [touched, setTouched] = useState({});
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isOnline, setIsOnline] = useState(navigator.onLine);
-  const [pendingCount, setPendingCount] = useState(0);
   const [successMessage, setSuccessMessage] = useState('');
   const [showSuccess, setShowSuccess] = useState(false);
   const [gps, setGps] = useState(null);
@@ -776,14 +775,12 @@ function CitizenRegistration({ user, citizens, setCitizens, addNotification }) {
     const checkNetwork = async () => {
       const online = await checkRealInternet();
       setIsOnline(online);
-      setPendingCount(syncQueue.count());
     };
 
     checkNetwork();
     const interval = setInterval(checkNetwork, 5000);
 
     const handleQueueUpdate = () => {
-      setPendingCount(syncQueue.count());
     };
 
     window.addEventListener('sync-queue-updated', handleQueueUpdate);
@@ -792,7 +789,7 @@ function CitizenRegistration({ user, citizens, setCitizens, addNotification }) {
     // Clean up permanently stuck citizens (mid-sync, overdue, too many
     // failures, or orphaned) once on page load so they stop cluttering the
     // officer's registration screen.
-    clearStuckCitizens().then(() => setPendingCount(syncQueue.count()));
+    clearStuckCitizens();
 
     return () => {
       clearInterval(interval);
@@ -808,7 +805,6 @@ function CitizenRegistration({ user, citizens, setCitizens, addNotification }) {
     if (!await confirmToast(t.clearStuckConfirm)) return;
     try {
       const result = await clearStuckCitizens();
-      setPendingCount(syncQueue.count());
       if (result.queue + result.store > 0) {
         setStuckInfo({
           type: 'success',
@@ -985,7 +981,6 @@ function CitizenRegistration({ user, citizens, setCitizens, addNotification }) {
             id: newCitizen.id,
             data: newCitizen
           });
-          setPendingCount(syncQueue.count());
           setSuccessMessage(`${t.offlineSuccess}\n\n${newCitizen.firstName} ${newCitizen.lastName}\n🆔 ${nationalId}`);
           if (addNotification) {
             await addNotification(
@@ -1008,7 +1003,6 @@ function CitizenRegistration({ user, citizens, setCitizens, addNotification }) {
           id: newCitizen.id,
           data: newCitizen
         });
-        setPendingCount(syncQueue.count());
         setSuccessMessage(`${t.offlineSuccess}\n\n${newCitizen.firstName} ${newCitizen.lastName}\n🆔 ${nationalId}`);
         if (addNotification) {
           await addNotification(
@@ -1131,18 +1125,6 @@ function CitizenRegistration({ user, citizens, setCitizens, addNotification }) {
           }}>
             {isOnline ? `✅ ${t.online}` : `❌ ${t.offline}`}
           </span>
-          {pendingCount > 0 && (
-            <span style={{
-              background: 'rgba(251,191,36,0.15)',
-              border: '1px solid rgba(252,211,77,0.4)',
-              padding: '6px 14px',
-              borderRadius: '24px',
-              fontSize: '13px',
-              fontWeight: '600'
-            }}>
-              ⏳ {pendingCount} {t.pendingSync}
-            </span>
-          )}
           <span style={{
             background: 'rgba(96,165,250,0.2)',
             border: '1px solid rgba(147,197,253,0.5)',
@@ -1182,37 +1164,6 @@ function CitizenRegistration({ user, citizens, setCitizens, addNotification }) {
           </span>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
-          {pendingCount > 0 && (
-            <span style={{
-              background: '#f59e0b',
-              color: 'white',
-              padding: '2px 14px',
-              borderRadius: '20px',
-              fontSize: '12px',
-              fontWeight: '600'
-            }}>
-              ⏳ {pendingCount} {t.pendingSync}
-            </span>
-          )}
-          {pendingCount > 0 && (
-            <button
-              type="button"
-              onClick={handleClearStuck}
-              style={{
-                background: '#fee2e2',
-                color: '#991b1b',
-                border: '1px solid #fca5a5',
-                padding: '4px 14px',
-                borderRadius: '20px',
-                fontSize: '12px',
-                fontWeight: '600',
-                cursor: 'pointer',
-                outline: 'none'
-              }}
-            >
-              🗑️ {t.clearStuck}
-            </button>
-          )}
           <span style={{
             background: '#e0f2fe',
             color: '#0369a1',

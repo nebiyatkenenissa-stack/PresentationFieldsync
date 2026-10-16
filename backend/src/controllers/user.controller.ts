@@ -93,6 +93,16 @@ export async function resendCredentials(req: Request, res: Response): Promise<vo
 export async function create(req: Request, res: Response): Promise<void> {
   try {
     const data = req.body;
+    const callerRole = (req as any).user?.role;
+
+    // Managers may create staff accounts, but only an admin may mint another
+    // admin. Without this, `role` in the request body would be self-service
+    // privilege escalation for anyone who can reach POST /api/users.
+    if (data.role === 'admin' && callerRole !== 'admin') {
+      res.status(403).json({ error: 'Only an administrator can create another administrator.' });
+      return;
+    }
+
     let plainPassword = data.password;
 
     // Accept either spelling. The client has historically sent the snake_case
@@ -117,6 +127,7 @@ export async function create(req: Request, res: Response): Promise<void> {
       // must-change flag is what stops that default from sticking around.
       if (data.role === 'manager') plainPassword = 'manager123';
       else if (data.role === 'supervisor') plainPassword = 'super123';
+      else if (data.role === 'admin') plainPassword = 'admin123';
       else plainPassword = 'officer123';
     }
 
@@ -165,6 +176,28 @@ export async function create(req: Request, res: Response): Promise<void> {
 export async function update(req: Request, res: Response): Promise<void> {
   try {
     const id = String(req.params.id);
+    const callerRole = (req as any).user?.role;
+    const requestedRole = req.body?.role;
+
+    // Same rule as create: granting or revoking the admin role is an
+    // admin-only action, so a manager cannot promote a supervisor to admin or
+    // demote the last administrator.
+    if (requestedRole !== undefined && requestedRole !== 'admin') {
+      const target = await userModel.getUserById(id);
+      if (target?.role === 'admin' && callerRole !== 'admin') {
+        res.status(403).json({ error: 'Only an administrator can change another administrator.' });
+        return;
+      }
+      if (target?.role === 'admin' && target.id === (req as any).user?.id) {
+        res.status(400).json({ error: 'You cannot change your own role.' });
+        return;
+      }
+    }
+    if (requestedRole === 'admin' && callerRole !== 'admin') {
+      res.status(403).json({ error: 'Only an administrator can grant the admin role.' });
+      return;
+    }
+
     const row = await userModel.updateUserProfile(id, req.body);
     if (!row) {
       res.status(404).json({ error: 'User not found' });
@@ -185,6 +218,29 @@ export async function update(req: Request, res: Response): Promise<void> {
 export async function remove(req: Request, res: Response): Promise<void> {
   try {
     const id = String(req.params.id);
+    const callerRole = (req as any).user?.role;
+    const callerId = (req as any).user?.id;
+
+    if (id === callerId) {
+      res.status(400).json({ error: 'You cannot delete your own account.' });
+      return;
+    }
+
+    // Deleting an administrator is destructive and unrecoverable from the UI,
+    // so it is restricted to admins and blocked while only one remains.
+    const target = await userModel.getUserById(id);
+    if (target?.role === 'admin' && callerRole !== 'admin') {
+      res.status(403).json({ error: 'Only an administrator can delete another administrator.' });
+      return;
+    }
+    if (target?.role === 'admin') {
+      const remaining = await userModel.getAllUsers();
+      if (remaining.filter(u => u.role === 'admin').length <= 1) {
+        res.status(400).json({ error: 'Cannot delete the last remaining administrator.' });
+        return;
+      }
+    }
+
     const row = await userModel.deleteUser(id);
     if (!row) {
       res.status(404).json({ error: 'User not found' });

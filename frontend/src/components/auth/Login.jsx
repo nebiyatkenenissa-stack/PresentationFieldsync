@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 
-function Login({ onLogin, loginError, isOnline, onBack }) {
+function Login({ onLogin, loginError, isOnline, onBack, onForgot }) {
   const { t } = useTranslation();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -303,6 +303,26 @@ function Login({ onLogin, loginError, isOnline, onBack }) {
               ) : t('auth.login_btn')}
             </button>
           </form>
+
+          <div style={{ textAlign: 'center', marginTop: '16px' }}>
+            <button
+              type="button"
+              onClick={() => {
+                if (onForgot) onForgot();
+                else window.location.hash = 'forgot-password';
+              }}
+              style={{
+                background: 'none',
+                border: 'none',
+                color: '#1e3a5f',
+                fontSize: '14px',
+                cursor: 'pointer',
+                textDecoration: 'underline',
+              }}
+            >
+              Forgot Password?
+            </button>
+          </div>
 
           <div className="login-status-full">
             <span className={`status-dot-full ${isOnline ? 'online' : 'offline'}`}></span>

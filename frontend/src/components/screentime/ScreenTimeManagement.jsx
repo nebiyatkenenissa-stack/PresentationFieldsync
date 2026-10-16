@@ -19,7 +19,6 @@ function ScreenTimeManagement({
   const [selectedDate, setSelectedDate] = useState('');
   const [selectedEmployee, setSelectedEmployee] = useState('all');
   const [isOnline, setIsOnline] = useState(navigator.onLine);
-  const [pendingCount, setPendingCount] = useState(0);
   // Live copy of screen time records so a running session's exact total
   // and idle time keeps updating on screen without a page reload.
   const [liveScreenTime, setLiveScreenTime] = useState(screenTime);
@@ -51,14 +50,12 @@ function ScreenTimeManagement({
     const checkNetwork = async () => {
       const online = await checkRealInternet();
       setIsOnline(online);
-      setPendingCount(syncQueue.countByTypes(['screen_time', 'screen_time_update', 'screen_time_delete']));
     };
 
     checkNetwork();
     const interval = setInterval(checkNetwork, 5000);
 
     const handleQueueUpdate = () => {
-      setPendingCount(syncQueue.countByTypes(['screen_time', 'screen_time_update', 'screen_time_delete']));
     };
 
     window.addEventListener('sync-queue-updated', handleQueueUpdate);
@@ -379,18 +376,6 @@ function ScreenTimeManagement({
           }}>
             📊 {stats.total} {t('screentime.total')}
           </span>
-          {pendingCount > 0 && (
-            <span style={{
-              background: 'rgba(251,191,36,0.15)',
-              border: '1px solid rgba(252,211,77,0.4)',
-              padding: '6px 14px',
-              borderRadius: '24px',
-              fontSize: '13px',
-              fontWeight: '600'
-            }}>
-              📡 {t('screentime.pending_sync_count', { count: pendingCount })}
-            </span>
-          )}
         </div>
       </div>
 
@@ -410,17 +395,6 @@ function ScreenTimeManagement({
         <span style={{ fontWeight: '500', color: isOnline ? '#065f37' : '#991b1b' }}>
           {isOnline ? `✅ ${t('header.online')}` : `❌ ${t('header.offline')}`}
         </span>
-        {pendingCount > 0 && (
-          <span style={{
-            background: '#f59e0b',
-            color: 'white',
-            padding: '2px 12px',
-            borderRadius: '12px',
-            fontSize: '12px'
-          }}>
-            ⏳ {t('screentime.pending_sync', { count: pendingCount })}
-          </span>
-        )}
       </div>
 
       {/* Offline Banner */}
@@ -437,17 +411,6 @@ function ScreenTimeManagement({
           flexWrap: 'wrap'
         }}>
           <span>📡 {t('screentime.offline_banner')}</span>
-          {pendingCount > 0 && (
-            <span style={{
-              background: '#f59e0b',
-              color: 'white',
-              padding: '2px 12px',
-              borderRadius: '12px',
-              fontSize: '12px'
-            }}>
-              {t('screentime.pending_sync', { count: pendingCount })}
-            </span>
-          )}
         </div>
       )}
 
@@ -587,26 +550,6 @@ function ScreenTimeManagement({
             </span>
           </div>
 
-          {isOnline && pendingCount > 0 && (
-            <div className="filter-group" style={{ display: 'flex', flexDirection: 'column', gap: '4px', justifyContent: 'flex-end' }}>
-              <button
-                onClick={() => window.dispatchEvent(new Event('force-sync'))}
-                style={{
-                  background: '#0b7e4b',
-                  color: 'white',
-                  border: 'none',
-                  padding: '6px 14px',
-                  borderRadius: '6px',
-                  cursor: 'pointer',
-                  fontSize: '13px',
-                  fontWeight: '500'
-                }}
-              >
-                🔄 {t('screentime.sync_now')}
-              </button>
-            </div>
-          )}
-
           {filteredScreenTime.length > 0 && (
             <div className="filter-group" style={{ display: 'flex', flexDirection: 'column', gap: '4px', justifyContent: 'flex-end' }}>
               <button
@@ -634,36 +577,6 @@ function ScreenTimeManagement({
         {renderScreenTimeTable()}
 
         {/* Footer pending count */}
-        {pendingCount > 0 && (
-          <div style={{
-            padding: '12px 24px',
-            borderTop: '1px solid #e5e7eb',
-            background: '#fef3c7',
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            fontSize: '13px',
-            color: '#92400e'
-          }}>
-            <span>⏳ {t('screentime.updates_pending_sync', { count: pendingCount })}</span>
-            {isOnline && (
-              <button
-                onClick={() => window.dispatchEvent(new Event('force-sync'))}
-                style={{
-                  background: '#0b7e4b',
-                  color: 'white',
-                  border: 'none',
-                  padding: '4px 12px',
-                  borderRadius: '4px',
-                  cursor: 'pointer',
-                  fontSize: '12px'
-                }}
-              >
-                🔄 {t('screentime.sync_now')}
-              </button>
-            )}
-          </div>
-        )}
       </div>
     </div>
   );

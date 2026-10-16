@@ -98,7 +98,6 @@ const db = new Dexie('FieldSyncDB');
 db.version(5).stores({
   users: 'id, employeeId, email, role, region, status, pin',
   reports: 'id, reportId, employeeId, region, reportDate, synced',
-  attendance: 'id, employeeId, date, status, region, synced',
   citizens: 'id, nationalId, firstName, lastName, region, phone, synced',
   audit: 'id, userId, action, timestamp',
   supervisor_reports: 'id, supervisorId, officerId, reportDate, synced',
@@ -124,7 +123,27 @@ db.version(6).stores({
   screen_time: 'id, employeeId, date, trustScore, synced'
 });
 
+// Version 7 – the attendance module was removed. Declaring the store as null
+// deletes the table and every row it holds, which is the purge we want: no
+// attendance records survive in IndexedDB on any device that runs this upgrade.
+db.version(7).stores({
+  attendance: null
+});
+
 export { db };
+
+// If another tab/window upgrades the database to a newer schema, this
+// connection is closed by IndexedDB and every subsequent Dexie call fails
+// with DatabaseClosedError ("AbortError: The connection was closed"). Without
+// a reload the failures repeat forever, so reload once to reconnect on the
+// current schema.
+if (typeof window !== 'undefined') {
+  db.on('versionchange', () => {
+    console.warn('⚠️ IndexedDB upgraded in another tab – reloading to reconnect');
+    db.close();
+    window.location.reload();
+  });
+}
 
 // ============================================================
 // OFFLINE SYNC QUEUE
@@ -198,18 +217,25 @@ export const syncQueue = {
     });
   },
   
-  remove: (id) => {
+  remove: (id, type) => {
     // Remove by id, but also drop legacy items that were queued without an id
     // (e.g. user_delete / user_status_update keyed only under data.userId).
     // Without this those items could never be cleared and would show as
-    // "pending" forever.
+    // "pending" forever. When a type is given, only items of that type are
+    // considered: ids are reused across types (leave vs leave_update share the
+    // same id), so removing "the first item with this id" would delete a
+    // different record and strand it as pending forever.
     syncQueue.pending = syncQueue.pending.filter(item => {
+      if (type && item.type !== type) return true;
+      if (id === undefined || id === null) {
+        return !(item.id === undefined || item.id === null);
+      }
       if (item.id === id) return false;
       if ((item.id === undefined || item.id === null) && item.data?.userId === id) return false;
       return true;
     });
     syncQueue.save();
-    console.log(`✅ Removed from sync queue: ${id} (Remaining: ${syncQueue.pending.length})`);
+    console.log(`✅ Removed from sync queue: ${id}${type ? ` (${type})` : ''} (Remaining: ${syncQueue.pending.length})`);
   },
   
   clear: () => {
@@ -356,6 +382,61 @@ export const isOnline = async () => {
 };
 
 // ============================================================
+// RE-QUEUE STRANDED RECORDS
+// A record that fails past the retry limit used to be dropped from the queue
+// while its local row kept `synced: false`. Nothing ever re-queued it, so it
+// was counted as "pending" forever and could never reach the server again.
+// This puts those records back into the queue (they then sync with the normal
+// backoff), so the pending badge always reflects real, retryable work.
+// ============================================================
+const STORE_TO_QUEUE_TYPE = {
+  reports: 'report',
+  supervisor_reports: 'supervisor_report',
+  citizens: 'citizen',
+  tasks: 'task',
+  leaves: 'leave',
+  permissions: 'permission',
+  alerts: 'alert',
+  screen_time: 'screen_time',
+  audit: 'audit',
+  verification_history: 'verification'
+};
+
+export const requeueOrphanedRecords = async () => {
+  let requeued = 0;
+  try {
+    // Ids are checked across every queued type: a row can already be on its way
+    // to the server under a different type (a leave approval queues as
+    // leave_update with the leave's id), and queueing it twice would only send
+    // the same payload twice.
+    const queuedIds = new Set(syncQueue.pending.map(q => q.id));
+
+    for (const [storeName, type] of Object.entries(STORE_TO_QUEUE_TYPE)) {
+      const store = db[storeName];
+      if (!store) continue;
+
+      const rows = await store.toArray();
+      for (const row of rows) {
+        if (row.synced !== false) continue;                 // only stranded rows
+        if (row.id === undefined || row.id === null) continue;
+        if (queuedIds.has(row.id)) continue;                // already queued
+
+        syncQueue.add({ type, id: row.id, data: row });
+        queuedIds.add(row.id);
+        requeued++;
+      }
+    }
+
+    if (requeued > 0) {
+      console.log(`🔁 Re-queued ${requeued} stranded record(s) that were stuck as pending`);
+    }
+  } catch (error) {
+    console.error('Error re-queueing stranded records:', error);
+  }
+  return requeued;
+};
+
+// ============================================================
 // CLEAR STUCK SYNC ITEMS (updated with verification_history)
 // ============================================================
 export const clearStuckSyncItems = async () => {
@@ -363,7 +444,7 @@ export const clearStuckSyncItems = async () => {
     console.log('🧹 Clearing stuck sync operations...');
     
     const storesToCheck = [
-      'reports', 'attendance', 'citizens', 'tasks',
+      'reports', 'citizens', 'tasks',
       'leaves', 'permissions', 'supervisor_reports', 'verification_history',
       'screen_time'
     ];
@@ -401,19 +482,30 @@ export const clearStuckSyncItems = async () => {
     const pending = syncQueue.getAll();
     let queueCleared = 0;
 
+    // Queued items are never dropped for failing: they back off (see
+    // processSyncQueue) and are retried until they sync. Dropping them used to
+    // strand the local record at synced:false with no way back into the queue,
+    // so the "pending" badge could never reach zero again.
+    //
+    // The one case that is still cleaned up is an item whose local record is
+    // gone AND whose payload can no longer be rebuilt – but since a queued item
+    // carries its own snapshot payload it can sync on its own, so even those
+    // are left to the queue. All we do here is rescue rows stuck mid-sync.
     for (const item of pending) {
-      // Reports, citizens and screen time are critical data and must never be
-      // dropped from the queue — they are retried until they sync.
-      const isCritical = item.type === 'report' || item.type === 'citizen' ||
-        item.type === 'screen_time' || item.type === 'screen_time_update';
-      if (!isCritical && item.attempts >= item.maxRetries) {
-        syncQueue.remove(item.id);
+      if (item.attempts >= item.maxRetries) {
+        // Give a exhausted item a fresh cycle so the retry counter does not
+        // spin; the backoff on the item itself controls how soon it runs.
+        item.attempts = 0;
         queueCleared++;
-        console.log(`✅ Removed stuck queue item: ${item.type} - ${item.id}`);
       }
     }
-    
-    console.log(`✅ Cleared ${clearedCount} stuck store items and ${queueCleared} stuck queue items`);
+    if (queueCleared > 0) syncQueue.save();
+
+    // Records that fell out of the queue (older builds dropped them) are put
+    // back so they show up as real, retryable work instead of a stuck count.
+    const requeued = await requeueOrphanedRecords();
+
+    console.log(`✅ Cleared ${clearedCount} stuck store items, reset ${queueCleared} exhausted queue items, re-queued ${requeued} stranded records`);
     
     return { clearedStore: clearedCount, clearedQueue: queueCleared };
     
@@ -493,6 +585,13 @@ export const clearStuckCitizens = async () => {
 // ============================================================
 // PROCESS SYNC QUEUE (REAL API CALLS)
 // ============================================================
+// Exponential backoff for a failing sync item: 30s, 1m, 2m, 4m ... capped at
+// 15 minutes. The item stays queued (so it can still reach the server and the
+// pending count stays truthful) without being retried every 2 seconds, which
+// used to keep pages in a permanent reload/sync loop.
+const syncBackoffMs = (attempts) =>
+  Math.min(30000 * Math.pow(2, Math.max((attempts || 1) - 1, 0)), 15 * 60 * 1000);
+
 export const processSyncQueue = async (isOnline) => {
   if (!isOnline) {
     console.log('📡 Offline - Cannot process sync queue');
@@ -512,12 +611,19 @@ export const processSyncQueue = async (isOnline) => {
   const MAX_RETRIES = 3;
 
   for (const item of pending) {
+    // Honour the failure backoff: a record that keeps failing is retried after
+    // a delay instead of every 2 seconds. Paused items are left untouched (no
+    // queue write, no 'sync-queue-updated' event) so pages are not reloaded in
+    // a loop while they wait.
+    if (item.pausedUntil && Date.now() < item.pausedUntil) {
+      continue;
+    }
+
     try {
       // Store map – includes all types including 'verification'
       const storeMap = {
         'citizen': 'citizens',
         'report': 'reports',
-        'attendance': 'attendance',
         'task': 'tasks',
         'leave_request': 'leaves',
         'leave': 'leaves',
@@ -553,7 +659,7 @@ export const processSyncQueue = async (isOnline) => {
         try {
           const { userId, photoBase64 } = item.data || {};
           if (!userId || !photoBase64) {
-            syncQueue.remove(item.id);
+            syncQueue.remove(item.id, item.type);
             synced++;
             continue;
           }
@@ -579,7 +685,7 @@ export const processSyncQueue = async (isOnline) => {
               const updated = { ...localUser, profilePhoto: result.profilePhoto };
               await db.users.update(userId, updated);
             }
-            syncQueue.remove(item.id);
+            syncQueue.remove(item.id, item.type);
             synced++;
             console.log(`✅ Synced queued photo upload for user ${userId}`);
             // Let every open page refresh so the new photo appears instantly.
@@ -592,17 +698,21 @@ export const processSyncQueue = async (isOnline) => {
         } catch (photoErr) {
           console.error(`❌ Failed to sync queued photo:`, photoErr.message);
           item.attempts = (item.attempts || 0) + 1;
-          if (item.attempts > 3) {
-            syncQueue.remove(item.id);
-            failed++;
+          item.lastError = photoErr.message;
+          if (item.attempts > 5) {
+            // A photo upload has no local row to fall back on, so after enough
+            // retries it is dropped – the profile keeps its local photo.
+            console.warn(`⚠️ Giving up on queued photo upload for ${item.data?.userId} after ${item.attempts} attempts`);
+            syncQueue.remove(item.id, item.type);
           } else {
-            const idx = syncQueue.pending.findIndex(q => q.id === item.id);
+            item.pausedUntil = Date.now() + syncBackoffMs(item.attempts);
+            const idx = syncQueue.pending.findIndex(q => q.id === item.id && q.type === item.type);
             if (idx !== -1) {
               syncQueue.pending[idx] = item;
               syncQueue.save();
             }
-            failed++;
           }
+          failed++;
         }
         continue;
       }
@@ -617,7 +727,7 @@ export const processSyncQueue = async (isOnline) => {
           body: JSON.stringify({ type: item.type, data: item.data })
         });
         if (response.ok) {
-          syncQueue.remove(recordId);
+          syncQueue.remove(recordId, item.type);
           synced++;
           console.log(`✅ Deleted screen time on server: ${recordId}`);
         } else {
@@ -653,6 +763,16 @@ export const processSyncQueue = async (isOnline) => {
           if (live) payload = live;
         }
 
+        // The live row carries the client-only sentinel synced: 'syncing'
+        // written above. Server columns are typed boolean, so translate the
+        // sentinel (and any other string form) before the payload is sent.
+        if (payload && typeof payload.synced === 'string') {
+          payload = {
+            ...payload,
+            synced: payload.synced === 'syncing' || payload.synced === 'true'
+          };
+        }
+
         // Send to /api/sync
         const response = await fetch(`${getApiBase()}/sync`, {
           method: 'POST',
@@ -669,6 +789,7 @@ export const processSyncQueue = async (isOnline) => {
               synced: true,
               syncedAt: new Date().toISOString(),
               serverId: result.data?.id || `server-${Date.now()}`,
+              syncError: null,
               pending: false
             });
           }
@@ -694,7 +815,7 @@ export const processSyncQueue = async (isOnline) => {
             }
           }
           
-          syncQueue.remove(recordId);
+          syncQueue.remove(recordId, item.type);
           synced++;
           console.log(`✅ Synced to PostgreSQL: ${item.type} - ${recordId}`);
 
@@ -711,7 +832,7 @@ export const processSyncQueue = async (isOnline) => {
         
       } else {
         // If store not found, just remove from queue to avoid infinite loop
-        syncQueue.remove(item.id);
+        syncQueue.remove(item.id, item.type);
         synced++;
       }
     } catch (error) {
@@ -722,7 +843,6 @@ export const processSyncQueue = async (isOnline) => {
       const storeMap = {
         'citizen': 'citizens',
         'report': 'reports',
-        'attendance': 'attendance',
         'task': 'tasks',
         'leave_request': 'leaves',
         'leave': 'leaves',
@@ -764,38 +884,33 @@ export const processSyncQueue = async (isOnline) => {
         }
       }
       
+      // Back off before the next attempt: 30s, 1m, 2m ... capped at 15 minutes.
+      item.lastError = error.message;
+      item.pausedUntil = Date.now() + syncBackoffMs(item.attempts);
+
       if (item.attempts > MAX_RETRIES) {
-        // Screen time is a running tally of the officer's workday. Dropping it
-        // after a few failures would erase hours of tracked time for good, so
-        // it stays queued (and keeps its latest totals) and is retried on the
-        // next sync pass. Every other type stops after the retry limit: the
-        // local record is KEPT (synced: false, still visible as "pending") so
-        // no data is lost and the officer can retry manually with the sync
-        // button. Without this, a permanently failing record (e.g. rejected by
-        // the server) stays in the queue forever, firing 'sync-queue-updated'
-        // every few seconds and keeping pages in a perpetual reload/sync loop.
-        if (item.type === 'screen_time' || item.type === 'screen_time_update') {
-          item.attempts = 0;
-          const keepIndex = syncQueue.pending.findIndex(q => q.id === item.id && q.type === item.type);
-          if (keepIndex !== -1) {
-            syncQueue.pending[keepIndex] = item;
-            syncQueue.save();
-          }
-          console.warn(`⚠️ Sync still failing for ${item.type} - ${item.id}, keeping it queued for retry`);
-        } else {
-          console.warn(`⚠️ Max attempts (${MAX_RETRIES}) reached for ${item.type} - ${item.id}, pausing auto-retry`);
-          syncQueue.remove(recordId);
-        }
-        failed++;
-      } else {
-        // Update the item in the queue for retry
-        const index = syncQueue.pending.findIndex(q => q.id === item.id);
-        if (index !== -1) {
-          syncQueue.pending[index] = item;
-          syncQueue.save();
-        }
-        failed++;
+        // Never drop the item. Dropping it left the local record at
+        // synced:false with no way back into the queue, so the "pending" badge
+        // could never reach zero and the data could never reach the server.
+        // Screen time in particular would erase tracked hours. Instead the
+        // retry cycle restarts at the longest backoff, so a failing record
+        // retries every 15 minutes instead of every 2 seconds (which used to
+        // put pages in a perpetual reload/sync loop).
+        item.attempts = 0;
+        item.pausedUntil = Date.now() + 15 * 60 * 1000;
+        console.warn(`⚠️ ${MAX_RETRIES} sync attempts failed for ${item.type} - ${item.id} (${error.message}); retrying in 15 minutes`);
       }
+
+      // Update the item in the queue for retry. Match on type AND id: ids are
+      // reused across types (a leave and its leave_update share an id), and
+      // writing to the first id match destroyed the other entry, stranding its
+      // record as pending forever.
+      const index = syncQueue.pending.findIndex(q => q.id === item.id && q.type === item.type);
+      if (index !== -1) {
+        syncQueue.pending[index] = item;
+        syncQueue.save();
+      }
+      failed++;
     }
   }
 
@@ -833,11 +948,35 @@ export const syncPendingData = async (isOnline) => {
 if (typeof window !== 'undefined') {
   let isSyncing = false;
   
+  let lastRequeueAt = 0;
+  const REQUEUE_INTERVAL_MS = 15000;
+
+  // Rescan the local stores for records stranded at synced:false (dropped from
+  // the queue by older builds) and put them back so they can sync. Throttled
+  // because it walks every store; returns how many were re-queued.
+  const maybeRequeueStranded = async (force = false) => {
+    if (!force && Date.now() - lastRequeueAt < REQUEUE_INTERVAL_MS) return 0;
+    lastRequeueAt = Date.now();
+    try {
+      return await requeueOrphanedRecords();
+    } catch (error) {
+      console.error('Re-queue stranded records error:', error);
+      return 0;
+    }
+  };
+
   const checkAndSync = async () => {
     const online = await checkRealInternet();
     _networkOnline = online;
     
     if (online && !isSyncing) {
+      // An empty queue does not always mean there is nothing to sync: records
+      // abandoned by an older build are still marked synced:false. Re-queue
+      // them (throttled) so the pending badge can actually reach zero.
+      if (syncQueue.count() === 0) {
+        await maybeRequeueStranded();
+      }
+
       const count = syncQueue.count();
       if (count > 0) {
         console.log(`🔄 Auto-syncing ${count} items to PostgreSQL...`);
@@ -867,7 +1006,24 @@ if (typeof window !== 'undefined') {
   
   setTimeout(checkAndSync, 1000);
   
-  window.addEventListener('force-sync', checkAndSync);
+  // A manual sync ignores the failure backoff: paused items are un-paused and
+  // stranded records are re-queued, so the sync button always does something.
+  window.addEventListener('force-sync', async () => {
+    let unpaused = 0;
+    syncQueue.pending = syncQueue.pending.map(item => {
+      if (item.pausedUntil) {
+        unpaused++;
+        return { ...item, pausedUntil: 0 };
+      }
+      return item;
+    });
+    if (unpaused > 0) {
+      syncQueue.save();
+      console.log(`⏩ Manual sync: retrying ${unpaused} paused item(s) now`);
+    }
+    await maybeRequeueStranded(true);
+    checkAndSync();
+  });
   
   setInterval(async () => {
     const online = await checkRealInternet();
@@ -1401,26 +1557,6 @@ export const initializeAllData = async () => {
     await db.users.bulkAdd(usersWithPin);
 
     const fieldOfficers = usersWithPin.filter(u => u.role === 'field_officer');
-    
-    const attendance = fieldOfficers.map(o => ({
-      id: uid(),
-      employeeId: o.employeeId,
-      employeeName: o.name,
-      date: today,
-      status: 'present',
-      checkIn: '08:00',
-      checkOut: '17:00',
-      workHours: 8,
-      region: o.region,
-      supervisorId: o.supervisorId,
-      notes: '',
-      approved: true,
-      updatedBy: 'system',
-      overtime: 0,
-      submittedToManager: true,
-      synced: true
-    }));
-    await db.attendance.bulkAdd(attendance);
 
     const officers = usersWithPin.filter(u => u.role === 'field_officer' || u.role === 'supervisor');
     const status = officers.map(o => ({

@@ -44,13 +44,11 @@ function ReportList({ reports, user, users, isOfficer, isSupervisor, addNotifica
       const online = await checkRealInternet();
       setIsOnline(online);
       const count = syncQueue.count();
-      setPendingCount(count);
     };
     checkStatus();
     const interval = setInterval(checkStatus, 3000);
 
     const handleQueueUpdate = () => {
-      setPendingCount(syncQueue.count());
     };
     window.addEventListener('sync-queue-updated', handleQueueUpdate);
 
@@ -147,54 +145,10 @@ function ReportList({ reports, user, users, isOfficer, isSupervisor, addNotifica
           }}>
             {isOnline ? t('reportslist.online') : t('reportslist.offline')}
           </span>
-          {pendingCount > 0 && (
-            <span style={{
-              background: 'rgba(251,191,36,0.15)',
-              border: '1px solid rgba(252,211,77,0.4)',
-              padding: '6px 14px',
-              borderRadius: '24px',
-              fontSize: '13px',
-              fontWeight: '600'
-            }}>
-              📡 {t('reportslist.pending_sync', { count: pendingCount })}
-            </span>
-          )}
-          {pendingCount > 0 && isOnline && (
-            <button
-              onClick={() => window.dispatchEvent(new Event('force-sync'))}
-              style={{
-                background: '#0b7e4b',
-                color: 'white',
-                border: 'none',
-                padding: '7px 14px',
-                borderRadius: '24px',
-                cursor: 'pointer',
-                fontSize: '13px',
-                fontWeight: '600'
-              }}
-            >
-              🔄 {t('reportslist.sync_now')}
-            </button>
-          )}
         </div>
       </div>
 
       <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
-        {/* Offline Banner */}
-        {!isOnline && pendingCount > 0 && (
-          <div style={{
-            background: '#fef3c7',
-            border: '1px solid #f59e0b',
-            padding: '8px 12px',
-            borderRadius: '6px',
-            marginBottom: '12px',
-            fontSize: '13px',
-            color: '#92400e'
-          }}>
-            📡 {t('reportslist.offline_banner', { count: pendingCount })}
-          </div>
-        )}
-
         {/* Filters */}
         <div className="flex gap-2 flex-wrap mb-4">
           <input 
@@ -217,7 +171,7 @@ function ReportList({ reports, user, users, isOfficer, isSupervisor, addNotifica
         </div>
 
         {/* Table */}
-        <div className="overflow-x-auto">
+        <div className="table-wrapper overflow-x-auto">
           <table className="w-full">
             <thead>
               <tr className="border-b border-gray-200">
@@ -234,16 +188,9 @@ function ReportList({ reports, user, users, isOfficer, isSupervisor, addNotifica
             <tbody>
               {filteredReports.length === 0 ? (
                 <tr>
-                  <td colSpan="8" className="text-center py-8 text-gray-400">
-                    {pendingCount > 0 ? (
-                      <div>
-                        <div style={{ fontSize: '24px', marginBottom: '8px' }}>📡</div>
-                        {t('reportslist.reports_saved_offline', { count: pendingCount })}
-                      </div>
-                    ) : (
+<td colSpan="8" className="text-center py-8 text-gray-400">
                       <div>{t('reportslist.no_reports_found')}</div>
-                    )}
-                  </td>
+                    </td>
                 </tr>
               ) : (
                 filteredReports.map(r => {

@@ -83,6 +83,13 @@ export default defineConfig({
   ],
   server: {
     host: '0.0.0.0',
-    port: 3000
+    port: 3000,
+    // Mirrors the nginx reverse proxy in nginx.conf so the app is same-origin
+    // in dev too. Without this, `getServerBase()` returning '' would send
+    // /api requests to the vite dev server, which would 404.
+    proxy: {
+      '/api': { target: 'http://localhost:5001', changeOrigin: true },
+      '/uploads': { target: 'http://localhost:5001', changeOrigin: true }
+    }
   }
 });

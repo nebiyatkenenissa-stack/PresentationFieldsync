@@ -1,4 +1,4 @@
-﻿// translations/pages.js
+// translations/pages.js
 // Page-level translations (Analytics, Citizens, Reports, Verification, Audit,
 // Alerts, Team, Profile, Chart). Each language object maps namespace -> keys.
 // They are merged into the i18n 'translation' namespace by utils/i18n.js so
@@ -43,7 +43,7 @@ export const pageTranslations = {
       unnamed_supervisor: 'Unnamed Supervisor',
       no_registration_data: 'No registration data available',
       no_data_available: 'No data available',
-      close: 'Close'
+      close: 'Close',
     },
     citizens: {
       title: 'Citizens Database',
@@ -78,6 +78,7 @@ export const pageTranslations = {
       region: 'Region',
       location: 'Location',
       phone: 'Phone',
+      gender: 'Gender',
       registered_by: 'Registered By',
       date: 'Date',
       status_col: 'Status',
@@ -90,7 +91,7 @@ export const pageTranslations = {
       offline_waiting: '({{count}} offline waiting to sync)',
       all_synced: '✅ All citizens synced',
       waiting_for_connection_count: '📡 {{count}} citizen(s) waiting for connection',
-      no_citizens_to_export: 'No citizens to export'
+      no_citizens_to_export: 'No citizens to export',
     },
     reportslist: {
       title: 'Reports',
@@ -117,7 +118,7 @@ export const pageTranslations = {
       open_map: '📍 Open Map',
       synced: '✅ Synced',
       pending: '⏳ Pending',
-      n_a: 'N/A'
+      n_a: 'N/A',
     },
     verification: {
       loading: 'Loading verification data...',
@@ -178,7 +179,7 @@ export const pageTranslations = {
       no_history_yet: 'No synced verification history for this officer yet.',
       history_will_appear: 'Records will appear after they are synced to the server.',
       secs: '{{count}}s',
-      next_verification_in: 'Next verification in:'
+      next_verification_in: 'Next verification in:',
     },
     verificationpopup: {
       required: 'Verification Required',
@@ -200,7 +201,7 @@ export const pageTranslations = {
       q4: 'How many reports did you submit today?',
       o4: '0-2,3-5,6-8,9+',
       q5: 'What is your estimated work completion?',
-      o5: '0-25%,26-50%,51-75%,76-100%'
+      o5: '0-25%,26-50%,51-75%,76-100%',
     },
     audit: {
       title: '📜 Audit Log',
@@ -278,7 +279,7 @@ export const pageTranslations = {
       detail_filename: 'File name',
       view_detail: 'View detail',
       delete_title: 'Delete this record',
-      close_title: 'Close'
+      close_title: 'Close',
     },
     alerts: {
       title: '✉️ Text Messages',
@@ -351,7 +352,7 @@ export const pageTranslations = {
       bottleneck_only: 'BOTTLENECK',
       new_badge: 'NEW',
       read_yes: 'Yes',
-      read_no: 'No'
+      read_no: 'No',
     },
     team: {
       title: '👥 Team Management',
@@ -398,7 +399,7 @@ export const pageTranslations = {
       of_total: '{{filtered}} of {{total}}',
       role_field_officer: 'Field Officer',
       role_supervisor: 'Supervisor',
-      role_manager: 'Manager'
+      role_manager: 'Manager',
     },
     profile: {
       my_profile: 'My Profile',
@@ -442,10 +443,10 @@ export const pageTranslations = {
       photo_saved_local: '✅ Photo saved locally. Will upload when online.',
       profile_updated: '✅ Profile updated successfully!',
       consecutive_failures: '{{count}} consecutive failed verifications. Your account has been flagged as suspicious and your supervisor has been notified.',
-      profile_alt: 'Profile'
+      profile_alt: 'Profile',
     },
     chart: {
-      daily_registrations: '📊 Daily Registrations'
+      daily_registrations: '📊 Daily Registrations',
     }
   },
 
@@ -487,7 +488,7 @@ export const pageTranslations = {
       unnamed_supervisor: 'ስም የሌለው ተቆጣጣሪ',
       no_registration_data: 'የምዝገባ መረጃ አይገኝም',
       no_data_available: 'መረጃ አይገኝም',
-      close: 'ዝጋ'
+      close: 'ዝጋ',
     },
     citizens: {
       title: 'የዜጎች ዳታቤዝ',
@@ -522,6 +523,7 @@ export const pageTranslations = {
       region: 'ክልል',
       location: 'ቦታ',
       phone: 'ስልክ',
+      gender: 'ጾታ',
       registered_by: 'የተመዘገበው በ',
       date: 'ቀን',
       status_col: 'ሁኔታ',
@@ -534,7 +536,7 @@ export const pageTranslations = {
       offline_waiting: '({{count}} ከመስመር ውጭ ለማመሳሰል በመጠባበቅ ላይ)',
       all_synced: '✅ ሁሉም ዜጎች ተመስሰዋል',
       waiting_for_connection_count: '📡 {{count}} ዜጋ(ዎች) ግንኙነትን በመጠባበቅ ላይ',
-      no_citizens_to_export: 'ለመውጣት ዜጎች የሉም'
+      no_citizens_to_export: 'ለመውጣት ዜጎች የሉም',
     },
     reportslist: {
       title: 'ሪፖርቶች',
@@ -561,7 +563,7 @@ export const pageTranslations = {
       open_map: '📍 ካርታ ክፈት',
       synced: '✅ የተመሳሰለ',
       pending: '⏳ በመጠባበቅ ላይ',
-      n_a: 'N/A'
+      n_a: 'N/A',
     },
     verification: {
       loading: 'የማረጋገጫ መረጃን በመጫን ላይ...',
@@ -622,7 +624,7 @@ export const pageTranslations = {
       no_history_yet: 'ለዚህ ኦፊሰር እስካሁን የተመሳሰለ የማረጋገጫ ታሪክ የለም።',
       history_will_appear: 'መዝገቦች ወደ ሰርቨር ከተመሳሰሉ በኋላ ይታያሉ።',
       secs: '{{count}}ሰ',
-      next_verification_in: 'ቀጣይ ማረጋገጫ ውስጥ:'
+      next_verification_in: 'ቀጣይ ማረጋገጫ ውስጥ:',
     },
     verificationpopup: {
       required: 'ማረጋገጫ ያስፈልጋል',
@@ -644,7 +646,7 @@ export const pageTranslations = {
       q4: 'ዛሬ ስንት ሪፖርቶች አቅርበዋል?',
       o4: '0-2,3-5,6-8,9+',
       q5: 'የስራዎ ግምታዊ ማጠናቀቂያ ስንት ነው?',
-      o5: '0-25%,26-50%,51-75%,76-100%'
+      o5: '0-25%,26-50%,51-75%,76-100%',
     },
     audit: {
       title: '📜 የኦዲት ምዝግብ ማስታወሻ',
@@ -722,7 +724,7 @@ export const pageTranslations = {
       detail_filename: 'የፋይል ስም',
       view_detail: 'ዝርዝር ለማየት',
       delete_title: 'ይህን መዝገብ ሰርዝ',
-      close_title: 'ዝጋ'
+      close_title: 'ዝጋ',
     },
     alerts: {
       title: '✉️ የጽሑፍ መልዕክቶች',
@@ -795,7 +797,7 @@ export const pageTranslations = {
       bottleneck_only: 'መሰናክል',
       new_badge: 'አዲስ',
       read_yes: 'አዎ',
-      read_no: 'አይ'
+      read_no: 'አይ',
     },
     team: {
       title: '👥 የቡድን አስተዳደር',
@@ -842,7 +844,7 @@ export const pageTranslations = {
       of_total: '{{total}} ውስጥ {{filtered}}',
       role_field_officer: 'የመስክ ኦፊሰር',
       role_supervisor: 'ተቆጣጣሪ',
-      role_manager: 'ስራ አስኪያጅ'
+      role_manager: 'ስራ አስኪያጅ',
     },
     profile: {
       my_profile: 'የእኔ መገለጫ',
@@ -886,10 +888,10 @@ export const pageTranslations = {
       photo_saved_local: '✅ ፎቶ በአካባቢው ተቀምጧል። በመስመር ላይ ሲሆኑ ይሰቀላል።',
       profile_updated: '✅ መገለጫ በተሳካ ሁኔታ ተሻሽሏል!',
       consecutive_failures: '{{count}} ተከታታይ ያልተሳኩ ማረጋገጫዎች። መለያዎ እንደ አጠራጣሪ ምልክት ተደርጓል እና ለተቆጣጣሪዎ ተነግሯል።',
-      profile_alt: 'መገለጫ'
+      profile_alt: 'መገለጫ',
     },
     chart: {
-      daily_registrations: '📊 ዕለታዊ ምዝገባዎች'
+      daily_registrations: '📊 ዕለታዊ ምዝገባዎች',
     }
   },
 
@@ -931,7 +933,7 @@ export const pageTranslations = {
       unnamed_supervisor: 'Dursituu maqaa hin qabne',
       no_registration_data: 'Odeeffannoo galmeessa hin jiru',
       no_data_available: 'Odeeffannoon hin jiru',
-      close: 'Cufi'
+      close: 'Cufi',
     },
     citizens: {
       title: 'Gabatee Bu\'uuraa Lammii',
@@ -966,6 +968,7 @@ export const pageTranslations = {
       region: 'Naannoo',
       location: 'Iddoo',
       phone: 'Bilbila',
+      gender: 'Akumaaraa',
       registered_by: 'Kan galmeesse',
       date: 'Guyyaa',
       status_col: 'Haala',
@@ -978,7 +981,7 @@ export const pageTranslations = {
       offline_waiting: '({{count}} offlaayiidhaan synkiif eeggachaa jira)',
       all_synced: '✅ Lammiileen hundi synkroonizeefaman',
       waiting_for_connection_count: '📡 lammii(ww) {{count}} walqabatee eeggachaa jira',
-      no_citizens_to_export: 'Baafachuuf lammiin hin jiru'
+      no_citizens_to_export: 'Baafachuuf lammiin hin jiru',
     },
     reportslist: {
       title: 'Gabaasa',
@@ -1005,7 +1008,7 @@ export const pageTranslations = {
       open_map: '📍 Maapa bani',
       synced: '✅ Synkroonizee',
       pending: '⏳ Eegaa jira',
-      n_a: 'N/A'
+      n_a: 'N/A',
     },
     verification: {
       loading: 'Odeeffannoo mirkannoo fe\'achaa jira...',
@@ -1066,7 +1069,7 @@ export const pageTranslations = {
       no_history_yet: 'Mulee kanaaf galmee mirkannoo synkroonizeefame hin jiru.',
       history_will_appear: 'Galmeen yeroo serveryootti synkroonizeeffaman ni mul\'ata.',
       secs: '{{count}}s',
-      next_verification_in: 'Mirkannoo itti aanu keessatti:'
+      next_verification_in: 'Mirkannoo itti aanu keessatti:',
     },
     verificationpopup: {
       required: 'Mirkannoo Barbaachisa',
@@ -1088,7 +1091,7 @@ export const pageTranslations = {
       q4: 'Har\'a gabaasa meeqa dhiyeessite?',
       o4: '0-2,3-5,6-8,9+',
       q5: 'Xumura hojii keettii tilmaama meeqa?',
-      o5: '0-25%,26-50%,51-75%,76-100%'
+      o5: '0-25%,26-50%,51-75%,76-100%',
     },
     audit: {
       title: '📜 Galmee Ofii Mirkaneessuu',
@@ -1166,7 +1169,7 @@ export const pageTranslations = {
       detail_filename: 'Maqaa faayilaa',
       view_detail: 'Ilaali',
       delete_title: 'Galmee kana haqi',
-      close_title: 'Cufi'
+      close_title: 'Cufi',
     },
     alerts: {
       title: '✉️ Ergaa Galmee',
@@ -1239,7 +1242,7 @@ export const pageTranslations = {
       bottleneck_only: 'TUFFATII',
       new_badge: 'Haaraa',
       read_yes: 'Eeyyee',
-      read_no: 'Lakki'
+      read_no: 'Lakki',
     },
     team: {
       title: '👥 Bulchiinsa Garee',
@@ -1286,7 +1289,7 @@ export const pageTranslations = {
       of_total: '{{total}} keessaa {{filtered}}',
       role_field_officer: 'Mulee',
       role_supervisor: 'Dursituu',
-      role_manager: 'Matima'
+      role_manager: 'Matima',
     },
     profile: {
       my_profile: 'Ibsa Koo',
@@ -1330,10 +1333,10 @@ export const pageTranslations = {
       photo_saved_local: '✅ Suuraan naannootiin kuufame. Yeroo onlaayi taatu ni ol baa\'a.',
       profile_updated: '✅ Ibsi milkaa\'inaan haaromfame!',
       consecutive_failures: 'Mirkannoon(ww) {{count}} walitti aansuun hin milkoofne. Herregan kee akka shakkii mallatteeffame, dursituun kees ni beekama.',
-      profile_alt: 'Ibsa'
+      profile_alt: 'Ibsa',
     },
     chart: {
-      daily_registrations: '📊 Galmeessa Guyyaa Guyyaa'
+      daily_registrations: '📊 Galmeessa Guyyaa Guyyaa',
     }
   },
 
@@ -1375,7 +1378,7 @@ export const pageTranslations = {
       unnamed_supervisor: 'መሸም ዘይብሉ ኮንትሮላ',
       no_registration_data: 'ሓበሬታ መዝገብ የለን',
       no_data_available: 'ሓበሬታ የለን',
-      close: 'ዕጾ'
+      close: 'ዕጾ',
     },
     citizens: {
       title: 'መሸጎጫ ሓበሬታ ዜጋታት',
@@ -1410,6 +1413,7 @@ export const pageTranslations = {
       region: 'ክልሊ',
       location: 'ቦታ',
       phone: 'ስልኪ',
+      gender: 'ጾታ',
       registered_by: 'እተመዘገበ ብ',
       date: 'መዓልቲ',
       status_col: 'ኩነታት',
@@ -1422,7 +1426,7 @@ export const pageTranslations = {
       offline_waiting: '({{count}} ኦፍላይን ንሲንክ ይጽበዩ ኣለዉ)',
       all_synced: '✅ ኩሎም ዜጋታት ተመሳሲሎም',
       waiting_for_connection_count: '📡 {{count}} ዜጋታት ርክብ ይጽበዩ ኣለዉ',
-      no_citizens_to_export: 'ንውጻእ ዜጋታት የለዉን'
+      no_citizens_to_export: 'ንውጻእ ዜጋታት የለዉን',
     },
     reportslist: {
       title: 'ሪፖርታት',
@@ -1449,7 +1453,7 @@ export const pageTranslations = {
       open_map: '📍 ካርታ ክፈት',
       synced: '✅ ተመሳሲሉ',
       pending: '⏳ ዝጽበይ ኣሎ',
-      n_a: 'N/A'
+      n_a: 'N/A',
     },
     verification: {
       loading: 'ሓበሬታ መረጋገጺ እናጽዕነ ኣለኹ...',
@@ -1510,7 +1514,7 @@ export const pageTranslations = {
       no_history_yet: 'ንዚ ኣፈትራር ገና ዝተመሳሰለ ታሪኽ መረጋገጺ የለን።',
       history_will_appear: 'መዝገባት ናብ ሰርቨር ምስ ሰንኹ ክርአዩ እዮም።',
       secs: '{{count}}ሰ',
-      next_verification_in: 'ኣብ ዝቕጽል መረጋገጺ:'
+      next_verification_in: 'ኣብ ዝቕጽል መረጋገጺ:',
     },
     verificationpopup: {
       required: 'መረጋገጺ ኣድላዪ',
@@ -1532,7 +1536,7 @@ export const pageTranslations = {
       q4: 'ሎሚ ክንደይ ሪፖርታት ኣቕሪብካ?',
       o4: '0-2,3-5,6-8,9+',
       q5: 'ግምታዊ ኣገባብ ስራሕካ ክንደይ እዩ?',
-      o5: '0-25%,26-50%,51-75%,76-100%'
+      o5: '0-25%,26-50%,51-75%,76-100%',
     },
     audit: {
       title: '📜 መዝገብ ኦዲት',
@@ -1610,7 +1614,7 @@ export const pageTranslations = {
       detail_filename: 'ስም ፋይል',
       view_detail: 'ዝርዝር ብርምር',
       delete_title: 'ይህን መዝገብ አጥፋ',
-      close_title: 'ዝጋ'
+      close_title: 'ዝጋ',
     },
     alerts: {
       title: '✉️ መልእኽትታት ጽሑፍ',
@@ -1683,7 +1687,7 @@ export const pageTranslations = {
       bottleneck_only: 'ጉድጉድ',
       new_badge: 'አዲስ',
       read_yes: 'አዎ',
-      read_no: 'አይደለም'
+      read_no: 'አይደለም',
     },
     team: {
       title: '👥 ኣመሓዳሪ ቡድን',
@@ -1730,7 +1734,7 @@ export const pageTranslations = {
       of_total: '{{total}} ውስጥ {{filtered}}',
       role_field_officer: 'ኣፈትራር',
       role_supervisor: 'ኮንትሮላ',
-      role_manager: 'መዓረግ'
+      role_manager: 'መዓረግ',
     },
     profile: {
       my_profile: 'መግለጺ ናይ',
@@ -1774,10 +1778,10 @@ export const pageTranslations = {
       photo_saved_local: '✅ ስእሊ ኣብቲ ቦታ ተዓቚበ። ኦንላይን ምስ ውስቱ ይስቐል እዩ።',
       profile_updated: '✅ መግለጺ ብትኽክል ተሓዲሱ!',
       consecutive_failures: '{{count}} ተኸታታሊ ዝፈሸሉ መረጋገጺታት። መለለዪ-ገጽካ ከም ጥርጥር ተለዊጡ፣ ኮንትሮላኻ ድማ ተፈሊጡ።',
-      profile_alt: 'መግለጺ'
+      profile_alt: 'መግለጺ',
     },
     chart: {
-      daily_registrations: '📊 መዓልታዊ መዝገባታት'
+      daily_registrations: '📊 መዓልታዊ መዝገባታት',
     }
   }
 };

@@ -55,31 +55,6 @@ export async function sync(req: Request, res: Response): Promise<void> {
         );
         break;
 
-      case 'attendance':
-        result = await pool.query(
-          `INSERT INTO attendance (
-              employee_id, employee_name, date, status,
-              check_in, check_out, work_hours, region,
-              supervisor_id, supervisor_name, notes,
-              submitted_to_manager, submitted_at
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
-          ON CONFLICT (id) DO UPDATE SET
-              status = EXCLUDED.status,
-              check_in = EXCLUDED.check_in,
-              check_out = EXCLUDED.check_out,
-              work_hours = EXCLUDED.work_hours
-          RETURNING *`,
-          [
-            data.employeeId, data.employeeName, data.date,
-            data.status, data.checkIn, data.checkOut,
-            data.workHours, data.region, data.supervisorId,
-            data.supervisorName, data.notes,
-            data.submittedToManager || false,
-            data.submittedAt || new Date().toISOString(),
-          ]
-        );
-        break;
-
       case 'citizen': {
         // Business rule: the same first + last name is allowed, but only when
         // the grandfather name is different. An exact match on all three means
@@ -167,8 +142,8 @@ export async function sync(req: Request, res: Response): Promise<void> {
         result = await pool.query(
           `INSERT INTO leaves (
               id, employee_id, employee_name, start_date, end_date,
-              reason, type, status, created_at, approved_by, approved_at, synced
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+              reason, type, duration, status, created_at, approved_by, approved_at, synced
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
           ON CONFLICT (id) DO UPDATE SET
               employee_id = EXCLUDED.employee_id,
               employee_name = EXCLUDED.employee_name,
@@ -176,6 +151,7 @@ export async function sync(req: Request, res: Response): Promise<void> {
               end_date = EXCLUDED.end_date,
               reason = EXCLUDED.reason,
               type = EXCLUDED.type,
+              duration = EXCLUDED.duration,
               status = EXCLUDED.status,
               approved_by = EXCLUDED.approved_by,
               approved_at = EXCLUDED.approved_at,
@@ -190,11 +166,15 @@ export async function sync(req: Request, res: Response): Promise<void> {
             data.endDate,
             data.reason,
             data.type,
+            data.duration || 'daily',
             data.status || 'pending',
             data.createdAt || new Date().toISOString(),
             data.approvedBy || null,
             data.approvedAt || null,
-            data.synced || false,
+            // The offline queue sends the local row while it is marked with
+            // the sentinel synced: 'syncing' – a string the boolean column
+            // cannot parse. Anything non-boolean is resolved here.
+            data.synced === true || data.synced === 'true' || data.synced === 'syncing',
           ]
         );
         break;
@@ -221,15 +201,21 @@ export async function sync(req: Request, res: Response): Promise<void> {
         result = await pool.query(
           `INSERT INTO permissions (
               id, employee_id, employee_name, permission_type,
-              start_date, end_date, reason, status, requested_at,
+              start_date, end_date, shift, time_slot, start_time, end_time, hours,
+              reason, status, requested_at,
               approved_by, approved_at, synced, reject_reason
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
           ON CONFLICT (id) DO UPDATE SET
               employee_id = EXCLUDED.employee_id,
               employee_name = EXCLUDED.employee_name,
               permission_type = EXCLUDED.permission_type,
               start_date = EXCLUDED.start_date,
               end_date = EXCLUDED.end_date,
+              shift = EXCLUDED.shift,
+              time_slot = EXCLUDED.time_slot,
+              start_time = EXCLUDED.start_time,
+              end_time = EXCLUDED.end_time,
+              hours = EXCLUDED.hours,
               reason = EXCLUDED.reason,
               status = EXCLUDED.status,
               approved_by = EXCLUDED.approved_by,
@@ -245,12 +231,18 @@ export async function sync(req: Request, res: Response): Promise<void> {
             data.permissionType,
             data.startDate,
             data.endDate,
+            data.shift || 'morning',
+            data.timeSlot || null,
+            data.startTime || null,
+            data.endTime || null,
+            data.hours != null ? Number(data.hours) : null,
             data.reason,
             data.status || 'pending',
             data.requestedAt || new Date().toISOString(),
             data.approvedBy || null,
             data.approvedAt || null,
-            data.synced || false,
+            // Same as 'leave': the payload may hold the 'syncing' sentinel.
+            data.synced === true || data.synced === 'true' || data.synced === 'syncing',
             data.rejectReason || null,
           ]
         );
@@ -290,10 +282,10 @@ export async function sync(req: Request, res: Response): Promise<void> {
           `INSERT INTO users (
               id, employee_id, name, email, password_hash,
               role, region, supervisor_id, status, created_at,
-              phone, shift, department, profile_photo, must_change_password,
+              phone, gender, shift, department, profile_photo, must_change_password,
               country_id, region_id, zone_id, woreda_id, kebele_id, community_id,
               location_path
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23)
           ON CONFLICT (email) DO UPDATE SET
               employee_id = EXCLUDED.employee_id,
               name = EXCLUDED.name,
@@ -302,6 +294,7 @@ export async function sync(req: Request, res: Response): Promise<void> {
               supervisor_id = EXCLUDED.supervisor_id,
               status = EXCLUDED.status,
               phone = EXCLUDED.phone,
+              gender = EXCLUDED.gender,
               shift = EXCLUDED.shift,
               department = EXCLUDED.department,
               profile_photo = COALESCE(EXCLUDED.profile_photo, users.profile_photo),
@@ -321,6 +314,7 @@ export async function sync(req: Request, res: Response): Promise<void> {
             data.role, data.region || null, data.supervisorId || null,
             data.status || 'active', data.createdAt || new Date().toISOString(),
             data.phone || null,
+            data.gender || null,
             data.shift || 'Day',
             data.department || null,
             data.profilePhoto || null,
@@ -383,24 +377,42 @@ export async function sync(req: Request, res: Response): Promise<void> {
           'name = COALESCE($1, name)',
           'email = COALESCE($2, email)',
           'phone = COALESCE($3, phone)',
-          'shift = COALESCE($4, shift)',
-          'department = COALESCE($5, department)',
-          'profile_photo = COALESCE($6, profile_photo)',
-          'region = COALESCE($7, region)',
-          'location_path = COALESCE(NULLIF($8, \'\'), location_path)',
+          'gender = COALESCE($4, gender)',
+          'shift = COALESCE($5, shift)',
+          'department = COALESCE($6, department)',
+          'profile_photo = COALESCE($7, profile_photo)',
+          'region = COALESCE($8, region)',
+          'location_path = COALESCE(NULLIF($9, \'\'), location_path)',
+          // A manager can reassign someone's area while offline. The ids were
+          // previously dropped here, which left location_path updated but the
+          // cascade columns stale -- so supervisor-by-woreda lookups kept
+          // matching the old area.
+          'country_id = COALESCE($10, country_id)',
+          'region_id = COALESCE($11, region_id)',
+          'zone_id = COALESCE($12, zone_id)',
+          'woreda_id = COALESCE($13, woreda_id)',
+          'kebele_id = COALESCE($14, kebele_id)',
+          'community_id = COALESCE($15, community_id)',
           'updated_at = CURRENT_TIMESTAMP'
         ];
         const values: any[] = [
           data.name || null,
           data.email || null,
           data.phone || null,
+          data.gender ?? null,
           data.shift || null,
           data.department || null,
           data.profilePhoto || null,
           data.region || null,
           data.locationPath || data.region || null,
+          data.country_id ?? null,
+          data.region_id ?? null,
+          data.zone_id ?? null,
+          data.woreda_id ?? null,
+          data.kebele_id ?? null,
+          data.community_id ?? null,
         ];
-        let paramIdx = 9;
+        let paramIdx = 16;
 
         // Handle password change during offline sync.
         // The password branch is ONLY reachable when the client explicitly
@@ -458,8 +470,8 @@ export async function sync(req: Request, res: Response): Promise<void> {
           `INSERT INTO tasks (
               id, employee_id, assigned_by, assigned_by_name,
               title, description, deadline, priority, status,
-              created_at, updated_at, completed_at
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+              created_at, updated_at, completed_at, target_role
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NULL)
           ON CONFLICT (id) DO UPDATE SET
               title = EXCLUDED.title,
               description = EXCLUDED.description,

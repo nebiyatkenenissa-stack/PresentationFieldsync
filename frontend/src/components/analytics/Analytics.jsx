@@ -425,11 +425,13 @@ function Analytics({
         marginBottom: '24px'
       }}>
         <div style={{
-          background: 'linear-gradient(135deg, #2563eb, #1d4ed8)',
+          background: 'var(--fs-surface)',
+          border: '1px solid var(--fs-border)',
+          borderLeft: '3px solid #2563eb',
           padding: '20px',
-          borderRadius: '12px',
-          color: 'white',
-          boxShadow: '0 4px 12px rgba(37, 99, 235, 0.25)',
+          borderRadius: '8px',
+          color: 'var(--fs-ink)',
+          boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
           transition: 'all 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94)',
           cursor: 'pointer'
         }}
@@ -442,22 +444,24 @@ function Analytics({
         })}
         onMouseEnter={(e) => {
           e.currentTarget.style.transform = 'translateY(-4px) scale(1.02)';
-          e.currentTarget.style.boxShadow = '0 8px 25px rgba(37, 99, 235, 0.4)';
+          e.currentTarget.style.boxShadow = '0 6px 16px rgba(17,28,46,0.14)';
         }}
         onMouseLeave={(e) => {
           e.currentTarget.style.transform = 'translateY(0) scale(1)';
-          e.currentTarget.style.boxShadow = '0 4px 12px rgba(37, 99, 235, 0.25)';
+          e.currentTarget.style.boxShadow = '0 1px 3px rgba(0,0,0,0.08)';
         }}>
-          <div style={{ fontSize: '32px', fontWeight: '700' }}>{totalOfficers}</div>
-          <div style={{ fontSize: '14px', opacity: 0.85 }}>👥 {t('analytics.field_officers')}</div>
-          <div style={{ fontSize: '11px', opacity: 0.75, marginTop: '6px' }}>{t('analytics.click_view_team')}</div>
+          <div style={{ fontSize: '32px', fontWeight: '700', color: 'var(--fs-ink)' }}>{totalOfficers}</div>
+          <div style={{ fontSize: '14px', color: 'var(--fs-muted)' }}>👥 {t('analytics.field_officers')}</div>
+          <div style={{ fontSize: '11px', color: 'var(--fs-muted-2)', marginTop: '6px' }}>{t('analytics.click_view_team')}</div>
         </div>
         <div style={{
-          background: 'linear-gradient(135deg, #7c3aed, #6d28d9)',
+          background: 'var(--fs-surface)',
+          border: '1px solid var(--fs-border)',
+          borderLeft: '3px solid #7c3aed',
           padding: '20px',
-          borderRadius: '12px',
-          color: 'white',
-          boxShadow: '0 4px 12px rgba(124, 58, 237, 0.25)',
+          borderRadius: '8px',
+          color: 'var(--fs-ink)',
+          boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
           transition: 'all 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94)',
           cursor: 'pointer'
         }}
@@ -470,22 +474,24 @@ function Analytics({
         })}
         onMouseEnter={(e) => {
           e.currentTarget.style.transform = 'translateY(-4px) scale(1.02)';
-          e.currentTarget.style.boxShadow = '0 8px 25px rgba(124, 58, 237, 0.4)';
+          e.currentTarget.style.boxShadow = '0 6px 16px rgba(17,28,46,0.14)';
         }}
         onMouseLeave={(e) => {
           e.currentTarget.style.transform = 'translateY(0) scale(1)';
-          e.currentTarget.style.boxShadow = '0 4px 12px rgba(124, 58, 237, 0.25)';
+          e.currentTarget.style.boxShadow = '0 1px 3px rgba(0,0,0,0.08)';
         }}>
-          <div style={{ fontSize: '32px', fontWeight: '700' }}>{totalSupervisors}</div>
-          <div style={{ fontSize: '14px', opacity: 0.85 }}>👤 {t('analytics.supervisors')}</div>
-          <div style={{ fontSize: '11px', opacity: 0.75, marginTop: '6px' }}>{t('analytics.click_view_team')}</div>
+          <div style={{ fontSize: '32px', fontWeight: '700', color: 'var(--fs-ink)' }}>{totalSupervisors}</div>
+          <div style={{ fontSize: '14px', color: 'var(--fs-muted)' }}>👤 {t('analytics.supervisors')}</div>
+          <div style={{ fontSize: '11px', color: 'var(--fs-muted-2)', marginTop: '6px' }}>{t('analytics.click_view_team')}</div>
         </div>
         <div style={{
-          background: 'linear-gradient(135deg, #0b7e4b, #065f37)',
+          background: 'var(--fs-surface)',
+          border: '1px solid var(--fs-border)',
+          borderLeft: '3px solid #0b7e4b',
           padding: '20px',
-          borderRadius: '12px',
-          color: 'white',
-          boxShadow: '0 4px 12px rgba(11, 126, 75, 0.25)',
+          borderRadius: '8px',
+          color: 'var(--fs-ink)',
+          boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
           transition: 'all 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94)',
           cursor: 'pointer'
         }}
@@ -498,15 +504,15 @@ function Analytics({
         })}
         onMouseEnter={(e) => {
           e.currentTarget.style.transform = 'translateY(-4px) scale(1.02)';
-          e.currentTarget.style.boxShadow = '0 8px 25px rgba(11, 126, 75, 0.4)';
+          e.currentTarget.style.boxShadow = '0 6px 16px rgba(17,28,46,0.14)';
         }}
         onMouseLeave={(e) => {
           e.currentTarget.style.transform = 'translateY(0) scale(1)';
-          e.currentTarget.style.boxShadow = '0 4px 12px rgba(11, 126, 75, 0.25)';
+          e.currentTarget.style.boxShadow = '0 1px 3px rgba(0,0,0,0.08)';
         }}>
-          <div style={{ fontSize: '32px', fontWeight: '700' }}>{dailyAvg}</div>
-          <div style={{ fontSize: '14px', opacity: 0.85 }}>📈 {t('analytics.daily_avg_registrations')}</div>
-          <div style={{ fontSize: '11px', opacity: 0.75, marginTop: '6px' }}>{t('analytics.click_view_trend')}</div>
+          <div style={{ fontSize: '32px', fontWeight: '700', color: 'var(--fs-ink)' }}>{dailyAvg}</div>
+          <div style={{ fontSize: '14px', color: 'var(--fs-muted)' }}>📈 {t('analytics.daily_avg_registrations')}</div>
+          <div style={{ fontSize: '11px', color: 'var(--fs-muted-2)', marginTop: '6px' }}>{t('analytics.click_view_trend')}</div>
         </div>
       </div>
 

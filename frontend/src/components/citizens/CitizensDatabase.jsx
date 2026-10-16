@@ -236,6 +236,7 @@ function CitizensDatabase({ citizens, users }) {
         c.grandfatherName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
         c.nationalId?.toLowerCase().includes(searchTerm.toLowerCase()) ||
         c.phone?.includes(searchTerm) ||
+        c.gender?.toLowerCase().includes(searchTerm.toLowerCase()) ||
         c.registeredByName?.toLowerCase().includes(searchTerm.toLowerCase())
       );
     }
@@ -269,6 +270,7 @@ function CitizensDatabase({ citizens, users }) {
       'National ID': c.nationalId,
       'Region': resolveCitizenRegion(c),
       'Phone': c.phone,
+      'Gender': c.gender || '',
       'Email': c.email || '',
       'Registered By': c.registeredByName || c.registeredBy || '',
       'Registration Date': new Date(c.registrationDate || c.createdAt).toLocaleString(),
@@ -346,18 +348,6 @@ function CitizensDatabase({ citizens, users }) {
           }}>
             👥 {t('citizens.officers_badge', { count: officerOptions.length })}
           </span>
-          {offlineCount > 0 && (
-            <span style={{
-              background: 'rgba(251,191,36,0.15)',
-              border: '1px solid rgba(252,211,77,0.4)',
-              padding: '6px 14px',
-              borderRadius: '24px',
-              fontSize: '13px',
-              fontWeight: '600'
-            }}>
-              📡 {t('citizens.pending_sync_badge', { count: offlineCount })}
-            </span>
-          )}
         </div>
       </div>
 
@@ -436,7 +426,6 @@ function CitizensDatabase({ citizens, users }) {
             </h3>
             <p style={{ fontSize: '13px', color: '#64748b', margin: '4px 0 0 0' }}>
               {t('citizens.total_citizens', { count: allCitizens.length })}
-              {!isOnline && offlineCount > 0 && ` • ${t('citizens.pending_sync', { count: offlineCount })}`}
             </p>
           </div>
           <div className="table-actions" style={{
@@ -546,6 +535,7 @@ function CitizensDatabase({ citizens, users }) {
                 <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: '600', color: '#374151', borderBottom: '2px solid #e5e7eb' }}>{t('citizens.region')}</th>
                 <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: '600', color: '#374151', borderBottom: '2px solid #e5e7eb' }}>{t('citizens.location')}</th>
                 <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: '600', color: '#374151', borderBottom: '2px solid #e5e7eb' }}>{t('citizens.phone')}</th>
+                <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: '600', color: '#374151', borderBottom: '2px solid #e5e7eb' }}>{t('citizens.gender')}</th>
                 <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: '600', color: '#374151', borderBottom: '2px solid #e5e7eb' }}>{t('citizens.registered_by')}</th>
                 <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: '600', color: '#374151', borderBottom: '2px solid #e5e7eb' }}>{t('citizens.date')}</th>
                 <th style={{ padding: '12px 16px', textAlign: 'center', fontWeight: '600', color: '#374151', borderBottom: '2px solid #e5e7eb' }}>{t('citizens.status_col')}</th>
@@ -554,7 +544,7 @@ function CitizensDatabase({ citizens, users }) {
             <tbody>
               {filteredCitizens.length === 0 && (
                 <tr>
-                  <td colSpan="9" style={{ textAlign: 'center', padding: '40px 20px', color: '#64748b' }}>
+                  <td colSpan="10" style={{ textAlign: 'center', padding: '40px 20px', color: '#64748b' }}>
                     <div style={{ fontSize: '48px', marginBottom: '8px' }}>🆔</div>
                     <div>
                       {!isOnline && offlineCount > 0 
@@ -646,6 +636,15 @@ function CitizensDatabase({ citizens, users }) {
                     })()}
                   </td>
                   <td style={{ padding: '12px 16px' }}>{c.phone}</td>
+                  <td style={{ padding: '12px 16px' }}>
+                    {c.gender ? (
+                      <span style={{ display: 'inline-block', padding: '3px 10px', borderRadius: '999px', fontSize: '12px', fontWeight: '500', color: '#475569', background: '#f1f5f9', border: '1px solid #e2e8f0' }}>
+                        {c.gender}
+                      </span>
+                    ) : (
+                      <span style={{ color: '#9ca3af' }}>—</span>
+                    )}
+                  </td>
                   <td style={{ padding: '12px 16px' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                       <UserAvatar user={userByEmpId[c.registeredBy]} name={c.registeredByName || c.registeredBy} size={28} />

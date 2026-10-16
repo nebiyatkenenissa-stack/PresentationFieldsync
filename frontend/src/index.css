@@ -9,60 +9,198 @@
     box-sizing: border-box;
   }
 
+  /* ============================================================
+     DESIGN TOKENS - FORMAL CIVIC
+     Institutional palette: deep navy authority, hairline rules,
+     restrained gold accent, near-flat surfaces. Shadows are used
+     only for true overlays (modals, toasts), never for cards.
+     ============================================================ */
   :root {
-    --fs-bg: #f4f6fb;
+    /* Surfaces */
+    --fs-bg: #f2f4f7;
     --fs-surface: #ffffff;
-    --fs-surface-2: #f8fafc;
-    --fs-ink: #14213d;
-    --fs-muted: #5b6b7c;
-    --fs-border: #e2e8f0;
-    --fs-navy: #1e3a5f;
-    --fs-navy-dark: #14213d;
-    --fs-green: #0b7e4b;
-    --fs-green-dark: #065f37;
-    --fs-gold: #c9a227;
-    --fs-accent: #4fc3f7;
+    --fs-surface-2: #f7f9fb;
+    --fs-surface-3: #eceff3;
     --fs-header-bg: #ffffff;
-    --fs-sidebar-bg: #1e3a5f;
-    --fs-shadow: rgba(20, 33, 61, 0.12);
-    --fs-input-bg: #fafbfc;
+    --fs-sidebar-bg: #16324f;
+    --fs-sidebar-bg-2: #10263c;
+    --fs-input-bg: #ffffff;
+
+    /* Ink */
+    --fs-ink: #111c2e;
+    --fs-ink-2: #33415a;
+    --fs-muted: #5a6b7d;
+    --fs-muted-2: #7b8899;
+
+    /* Lines */
+    --fs-border: #d5dbe3;
+    --fs-border-strong: #b9c2ce;
+    --fs-hairline: #e4e8ed;
+
+    /* Authority / brand */
+    --fs-navy: #16324f;
+    --fs-navy-dark: #0f2338;
+    --fs-navy-hover: #1f4266;
+
+    /* Accent - reserved for focus, selection and civic highlights */
+    --fs-accent: #1d4f82;
+    --fs-accent-soft: #e4ecf5;
+
+    /* Restrained gold, for seals and single accents only */
+    --fs-gold: #9c7a16;
+    --fs-gold-soft: #f5efdd;
+
+    /* Status */
+    --fs-green: #12694a;
+    --fs-green-dark: #0d5139;
+    --fs-green-soft: #e2f0e9;
+    --fs-red: #a32020;
+    --fs-red-dark: #861a1a;
+    --fs-red-soft: #f8e6e6;
+    --fs-amber: #8a5a0b;
+    --fs-amber-soft: #faf0dc;
+
+    /* Depth - flat by default */
+    --fs-shadow: rgba(17, 28, 46, 0.14);
+    --fs-shadow-sm: 0 1px 2px rgba(17, 28, 46, 0.06);
+    --fs-shadow-md: 0 2px 8px rgba(17, 28, 46, 0.1);
+    --fs-shadow-lg: 0 12px 32px rgba(17, 28, 46, 0.16);
+
+    /* Geometry - squared off for an institutional feel */
+    --fs-radius-sm: 2px;
+    --fs-radius: 3px;
+    --fs-radius-md: 4px;
+    --fs-radius-lg: 4px;
+    --fs-radius-pill: 999px;
+
+    /* Rhythm */
+    --fs-header-h: 68px;
+    --fs-sidebar-w: 264px;
+    --fs-sidebar-w-collapsed: 76px;
+    --fs-content-x: 32px;
+    --fs-content-y: 28px;
+
+    /* Type */
+    --fs-font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+      'Helvetica Neue', Arial, 'Noto Sans', sans-serif;
+    --fs-font-display: 'Iowan Old Style', 'Palatino Linotype', Palatino,
+      Georgia, 'Times New Roman', serif;
+    --fs-font-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas,
+      'Liberation Mono', monospace;
+
+    /* Type scale - 15px base, nothing below 12px */
+    --fs-text-2xs: 12px;
+    --fs-text-xs: 13px;
+    --fs-text-sm: 14px;
+    --fs-text-base: 15px;
+    --fs-text-md: 16px;
+    --fs-text-lg: 18px;
+    --fs-text-xl: 21px;
+    --fs-text-2xl: 26px;
+    --fs-text-3xl: 32px;
+
+    /* Focus */
+    --fs-focus-ring: 0 0 0 3px rgba(29, 79, 130, 0.28);
   }
 
   [data-theme='dark'] {
-    --fs-bg: #0f172a;
-    --fs-surface: #1a2440;
-    --fs-surface-2: #16203a;
-    --fs-ink: #eef2f8;
-    --fs-muted: #9fb0c6;
-    --fs-border: #2b3856;
-    --fs-navy: #2b4a77;
-    --fs-navy-dark: #0f172a;
-    --fs-green: #16a35f;
-    --fs-green-dark: #0b7e4b;
-    --fs-gold: #e2b64e;
-    --fs-accent: #5cc7fb;
-    --fs-header-bg: #16203a;
-    --fs-sidebar-bg: #101a30;
-    --fs-shadow: rgba(0, 0, 0, 0.45);
-    --fs-input-bg: #1a2440;
+    --fs-bg: #0d1520;
+    --fs-surface: #141d2b;
+    --fs-surface-2: #19232f;
+    --fs-surface-3: #1f2b39;
+    --fs-header-bg: #ffffff;
+    --fs-sidebar-bg: #0a121d;
+    --fs-sidebar-bg-2: #070d16;
+    --fs-input-bg: #101823;
+
+    --fs-ink: #e8edf4;
+    --fs-ink-2: #c2ccda;
+    --fs-muted: #94a3b5;
+    --fs-muted-2: #7c8899;
+
+    --fs-border: #2a3644;
+    --fs-border-strong: #3b4859;
+    --fs-hairline: #222d3a;
+
+    --fs-navy: #1f4266;
+    --fs-navy-dark: #0d1520;
+    --fs-navy-hover: #2a5580;
+
+    --fs-accent: #6ea8dc;
+    --fs-accent-soft: #1a2b3d;
+
+    --fs-gold: #c9a94a;
+    --fs-gold-soft: #2a2519;
+
+    --fs-green: #35a373;
+    --fs-green-dark: #2b8a60;
+    --fs-green-soft: #16281f;
+    --fs-red: #d9615f;
+    --fs-red-dark: #b94846;
+    --fs-red-soft: #2c1a1a;
+    --fs-amber: #d09a3c;
+    --fs-amber-soft: #2a2113;
+
+    --fs-shadow: rgba(0, 0, 0, 0.55);
+    --fs-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+    --fs-shadow-md: 0 2px 8px rgba(0, 0, 0, 0.45);
+    --fs-shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.6);
+    --fs-focus-ring: 0 0 0 3px rgba(110, 168, 220, 0.35);
   }
 
   html {
     scroll-behavior: smooth;
+    -webkit-text-size-adjust: 100%;
   }
 
   body {
     @apply bg-gray-50 text-gray-900 antialiased;
     background: var(--fs-bg);
     color: var(--fs-ink);
-    transition: background 0.3s ease, color 0.3s ease;
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    transition: background 0.2s ease, color 0.2s ease;
+    font-family: var(--fs-font-sans);
+    font-size: var(--fs-text-base);
+    line-height: 1.55;
+    letter-spacing: 0.005em;
+  }
+
+  /* Formal institutions lean on visible keyboard focus. */
+  :focus-visible {
+    outline: 2px solid var(--fs-accent);
+    outline-offset: 2px;
+  }
+
+  ::selection {
+    background: var(--fs-accent);
+    color: #ffffff;
+  }
+
+  /* Restrained scrollbars that match the surface tokens. */
+  * {
+    scrollbar-color: var(--fs-border-strong) transparent;
+  }
+  *::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  *::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  *::-webkit-scrollbar-thumb {
+    background: var(--fs-border-strong);
+    border: 3px solid transparent;
+    background-clip: content-box;
+    border-radius: var(--fs-radius-pill);
+  }
+  *::-webkit-scrollbar-thumb:hover {
+    background: var(--fs-muted-2);
+    background-clip: content-box;
   }
 }
 
 /* ===== DARK MODE OVERRIDES FOR THE APP SHELL ===== */
 [data-theme='dark'] .main-header {
-  background: var(--fs-header-bg) !important;
+  background: #ffffff !important;
   border-bottom-color: var(--fs-border) !important;
 }
 [data-theme='dark'] .main-content {
@@ -235,30 +373,36 @@
 .language-selector {
   display: inline-flex;
   align-items: center;
+  gap: 6px;
+  padding: 7px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--fs-border);
+  background: var(--fs-surface-2);
+  color: var(--fs-ink-2);
+  transition: all 0.25s ease;
+}
+.language-selector:hover {
+  border-color: var(--fs-accent);
+  color: var(--fs-ink);
+}
+.language-icon {
+  display: inline-flex;
+  align-items: center;
 }
 .language-select {
-  padding: 7px 10px;
-  border-radius: 999px;
-  border: 1px solid #e2e8f0;
-  background: #f1f5f9;
-  color: #14213d;
+  border: none;
+  background: transparent;
+  padding: 0;
+  border-radius: 0;
+  color: inherit;
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
   outline: none;
-  transition: all 0.25s ease;
-}
-.language-select:hover {
-  border-color: #4fc3f7;
-}
-[data-theme='dark'] .language-select {
-  background: #2b3856;
-  border-color: #3b4a6b;
-  color: #eef2f8;
 }
 [data-theme='dark'] .language-select option {
-  background: #16203a;
-  color: #eef2f8;
+  background: var(--fs-surface-3);
+  color: var(--fs-ink);
 }
 
 /* ===== NOTIFICATION DETAIL BOX ===== */
@@ -444,18 +588,65 @@
 
 @layer components {
   .btn-primary {
-    @apply bg-blue-600 text-white px-6 py-3 rounded-xl hover:bg-blue-700 transition-all duration-200 font-semibold;
+    @apply text-white font-semibold;
+    background: var(--fs-navy);
+    padding: 9px 18px;
+    border: 1px solid var(--fs-navy);
+    border-radius: var(--fs-radius);
+    transition: background 0.15s ease, border-color 0.15s ease;
   }
 
   .btn-secondary {
-    @apply bg-green-600 text-white px-6 py-3 rounded-xl hover:bg-green-700 transition-all duration-200 font-semibold;
+    @apply font-semibold;
+    background: var(--fs-surface);
+    color: var(--fs-ink);
+    border: 1px solid var(--fs-border-strong);
+    padding: 9px 18px;
+    border-radius: var(--fs-radius);
+    transition: background 0.15s ease, border-color 0.15s ease;
+  }
+
+  .btn-secondary:hover {
+    background: var(--fs-surface-2);
+    border-color: var(--fs-muted-2);
   }
 
   .card {
-    @apply bg-white rounded-2xl shadow-lg p-6;
+    background: var(--fs-surface);
+    border: 1px solid var(--fs-border);
+    border-radius: var(--fs-radius-lg);
+    box-shadow: none;
+    padding: 20px;
   }
 
   .input-field {
-    @apply w-full px-4 py-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200;
+    @apply w-full;
+    background: var(--fs-input-bg);
+    color: var(--fs-ink);
+    border: 1px solid var(--fs-border-strong);
+    border-radius: var(--fs-radius);
+    padding: 8px 11px;
+    font-size: 14px;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  }
+
+  .input-field:focus {
+    outline: none;
+    border-color: var(--fs-accent);
+    box-shadow: var(--fs-focus-ring);
+  }
+
+  .input-field::placeholder {
+    color: var(--fs-muted-2);
+  }
+
+  /* Small uppercase label used above sections and table columns. */
+  .field-label {
+    display: block;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--fs-muted);
   }
 }

@@ -86,20 +86,18 @@ export const generateNationalId = ({ region = '', dateOfBirth = null } = {}) => 
 export const getToday = () => new Date().toISOString().slice(0, 10);
 
 // Resolve the server origin (no /api suffix) so uploaded profile photos load
-// correctly both on localhost and from other devices on the same network.
-const API_PORT = (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_API_PORT)
-  || '5000';
-
+// correctly. Returns '' for same-origin, which is the default: both the nginx
+// container and the vite dev server proxy /api and /uploads through to the
+// backend, so the app only ever needs one port. That is what makes it usable
+// from a phone over a single port-forward or tunnel.
 export const getServerBase = () => {
   try {
-    if (typeof window === 'undefined' || !window.location) return `http://localhost:${API_PORT}`;
-    const { hostname } = window.location;
-    if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1') {
-      return `http://localhost:${API_PORT}`;
-    }
-    return `http://${hostname}:${API_PORT}`;
+    // Escape hatch for running the API on a genuinely different origin.
+    const configured = import.meta.env && import.meta.env.VITE_API_BASE;
+    if (configured) return configured.replace(/\/+$/, '');
+    return '';
   } catch (e) {
-    return `http://localhost:${API_PORT}`;
+    return '';
   }
 };
 

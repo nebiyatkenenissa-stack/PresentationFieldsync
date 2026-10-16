@@ -1,3 +1,9 @@
+import crypto from 'crypto';
+
+export function generateResetCode(): string {
+  return crypto.randomInt(100000, 999999).toString();
+}
+
 export function generateTempPassword(length = 6): string {
   const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
   let password = '';

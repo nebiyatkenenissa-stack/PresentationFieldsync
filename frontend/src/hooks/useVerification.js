@@ -12,6 +12,11 @@ const API_BASE_URL = getApiBase();
 // never appear sooner than this after the previous one.
 const MIN_VERIFICATION_INTERVAL_MS = 60 * 1000;
 
+// Consecutive unanswered verifications (timed out or skipped) that escalate to
+// a warning for the supervisor. Mirrors the 3-pass streak milestone below, but
+// on the failing side.
+const WARNING_STREAK_THRESHOLD = 5;
+
 const VERIFICATION_QUESTIONS = [
   { id: 'q1', question: 'What is your current location?', options: ['Office', 'Field', 'Home', 'Other'] },
   { id: 'q2', question: 'How many citizens did you register today?', options: ['0-5', '6-10', '11-15', '16+'] },
@@ -253,7 +258,19 @@ export function useVerification(officerId, officerName) {
         break;
       }
     }
+    // Count consecutive warnings (no response / skipped) the same way. A pass
+    // stops the count, so the streak only grows while the officer keeps
+    // failing to answer, and resets as soon as one goes through.
+    let consecutiveWarnings = 0;
+    for (const h of updatedHistory) {
+      if (h.success === false) {
+        consecutiveWarnings += 1;
+      } else {
+        break;
+      }
+    }
     const reachedMilestone = consecutivePasses === 3;
+    const reachedWarningThreshold = consecutiveWarnings === WARNING_STREAK_THRESHOLD;
 
     setVerificationHistory(updatedHistory);
     setVerificationScore(updatedScore);
@@ -294,6 +311,15 @@ export function useVerification(officerId, officerName) {
       toast.success(`🏆 ${consecutivePasses} consecutive verifications passed! Excellent work, ${officerName}!`);
       window.dispatchEvent(new CustomEvent('verification-streak-passed', {
         detail: { officerId, officerName, streak: consecutivePasses }
+      }));
+    }
+
+    // After 5 consecutive unanswered verifications: warn the officer and
+    // escalate to the supervisor, who owns the follow-up.
+    if (reachedWarningThreshold && isMounted.current) {
+      toast.error(`⚠️ ${consecutiveWarnings} verification checks with no response, ${officerName}. Your supervisor has been notified.`);
+      window.dispatchEvent(new CustomEvent('verification-warning-streak', {
+        detail: { officerId, officerName, streak: consecutiveWarnings }
       }));
     }
 

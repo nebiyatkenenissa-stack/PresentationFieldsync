@@ -28,7 +28,6 @@ function TaskManagement({
   const [showModal, setShowModal] = useState(false);
   const [taskFilter, setTaskFilter] = useState('all');
   const [isOnline, setIsOnline] = useState(navigator.onLine);
-  const [pendingCount, setPendingCount] = useState(0);
   const [isUpdating, setIsUpdating] = useState(false);
   const [newTask, setNewTask] = useState({
     employeeId: '',
@@ -45,14 +44,12 @@ function TaskManagement({
     const checkNetwork = async () => {
       const online = await checkRealInternet();
       setIsOnline(online);
-      setPendingCount(getPendingTaskCount());
     };
 
     checkNetwork();
     const interval = setInterval(checkNetwork, 5000);
 
     const handleQueueUpdate = () => {
-      setPendingCount(getPendingTaskCount());
     };
 
     window.addEventListener('sync-queue-updated', handleQueueUpdate);
@@ -158,7 +155,6 @@ function TaskManagement({
             id: task.id,
             data: task
           });
-          setPendingCount(getPendingTaskCount());
           toast(t('task.sync_failed_save'));
           if (addNotification) {
             await addNotification(
@@ -178,7 +174,6 @@ function TaskManagement({
           id: task.id,
           data: task
         });
-        setPendingCount(getPendingTaskCount());
         toast(t('task.saved_offline'));
         if (addNotification) {
           await addNotification(
@@ -277,7 +272,6 @@ function TaskManagement({
             id: taskId,
             data: { taskId, status: newStatus }
           });
-          setPendingCount(getPendingTaskCount());
           toast(t('task.update_sync_failed'));
           if (addNotification) {
             await addNotification(
@@ -298,7 +292,6 @@ function TaskManagement({
           id: taskId,
           data: { taskId, status: newStatus }
         });
-        setPendingCount(getPendingTaskCount());
         toast(t('task.status_updated_offline'));
         if (addNotification) {
           await addNotification(
@@ -427,18 +420,6 @@ function TaskManagement({
           }}>
             {t('task.completed_count', { count: taskStats.completed })}
           </span>
-          {pendingCount > 0 && (
-            <span style={{
-              background: 'rgba(251,191,36,0.15)',
-              border: '1px solid rgba(252,211,77,0.4)',
-              padding: '6px 14px',
-              borderRadius: '24px',
-              fontSize: '13px',
-              fontWeight: '600'
-            }}>
-              {t('task.pending_sync_count', { count: pendingCount })}
-            </span>
-          )}
         </div>
       </div>
 
@@ -458,17 +439,6 @@ function TaskManagement({
         <span style={{ fontWeight: '500', color: isOnline ? '#065f37' : '#991b1b' }}>
           {isOnline ? `✅ ${t('header.online')}` : `❌ ${t('header.offline')}`}
         </span>
-        {pendingCount > 0 && (
-          <span style={{
-            background: '#f59e0b',
-            color: 'white',
-            padding: '2px 12px',
-            borderRadius: '12px',
-            fontSize: '12px'
-          }}>
-            {t('task.pending_sync', { count: pendingCount })}
-          </span>
-        )}
       </div>
 
       {/* Offline banner */}
@@ -485,17 +455,6 @@ function TaskManagement({
           flexWrap: 'wrap'
         }}>
           <span>{t('task.offline_banner')}</span>
-          {pendingCount > 0 && (
-            <span style={{
-              background: '#f59e0b',
-              color: 'white',
-              padding: '2px 12px',
-              borderRadius: '12px',
-              fontSize: '12px'
-            }}>
-              {t('task.pending_sync', { count: pendingCount })}
-            </span>
-          )}
         </div>
       )}
 
@@ -554,23 +513,6 @@ function TaskManagement({
                   }}
                 >
                   {t('task.assign_task')} {!isOnline && '📴'}
-                </button>
-              )}
-              {isOnline && pendingCount > 0 && (
-                <button
-                  onClick={() => window.dispatchEvent(new Event('force-sync'))}
-                  style={{
-                    background: '#0b7e4b',
-                    color: 'white',
-                    border: 'none',
-                    padding: '6px 14px',
-                    borderRadius: '6px',
-                    cursor: 'pointer',
-                    fontSize: '13px',
-                    fontWeight: '500'
-                  }}
-                >
-                  {t('task.sync_now')}
                 </button>
               )}
             </div>
@@ -694,38 +636,6 @@ function TaskManagement({
             </table>
           </div>
 
-          {pendingCount > 0 && (
-            <div style={{
-              padding: '12px 16px',
-              borderTop: '1px solid #e5e7eb',
-              background: '#fef3c7',
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              fontSize: '13px',
-              color: '#92400e',
-              marginTop: '16px',
-              borderRadius: '0 0 8px 8px'
-            }}>
-              <span>{t('task.tasks_pending_sync', { count: pendingCount })}</span>
-              {isOnline && (
-                <button
-                  onClick={() => window.dispatchEvent(new Event('force-sync'))}
-                  style={{
-                    background: '#0b7e4b',
-                    color: 'white',
-                    border: 'none',
-                    padding: '4px 12px',
-                    borderRadius: '4px',
-                    cursor: 'pointer',
-                    fontSize: '12px'
-                  }}
-                >
-                  {t('task.sync_now')}
-                </button>
-              )}
-            </div>
-          )}
         </div>
       </div>
 
@@ -768,11 +678,6 @@ function TaskManagement({
                 marginBottom: '16px'
               }}>
                 <strong>📴 {t('auth.offline_mode')}:</strong> {t('task.offline_save_notice')}
-                {pendingCount > 0 && (
-                  <span style={{ marginLeft: '8px' }}>
-                    ({t('task.pending_sync', { count: pendingCount })})
-                  </span>
-                )}
               </div>
             )}
 
@@ -833,7 +738,7 @@ function TaskManagement({
                   }}
                 />
               </div>
-              <div className="form-row" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+              <div className="form-row">
                 <div className="form-group" style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                   <label style={{ fontSize: '13px', fontWeight: '500', color: '#374151' }}>{t('task.deadline')} *</label>
                   <input

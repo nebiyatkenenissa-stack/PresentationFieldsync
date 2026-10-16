@@ -1,3 +1,7 @@
+# Single source of truth: copy .env.example to .env in this directory
+# (cp .env.example .env). Every service below reads it via ${VAR} interpolation.
+# .env is gitignored and is never baked into an image.
+
 services:
   db:
     image: postgres:16-alpine
@@ -9,37 +13,101 @@ services:
       POSTGRES_DB: ${DB_NAME:-fieldsync_db}
     volumes:
       - pgdata:/var/lib/postgresql/data
+      # Creates the schema automatically the first time an empty pgdata volume
+      # is initialised, so a fresh clone gets a working database with no manual
+      # step. Schema only - no demo data. NOTE: postgres only runs this on a
+      # genuinely empty data directory, so it is skipped for an existing
+      # volume; use `docker compose down -v` to force a clean rebuild.
+      - ./backend/db/schema.sql:/docker-entrypoint-initdb.d/001-schema.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-postgres} -d ${DB_NAME:-fieldsync_db}"]
       interval: 5s
       timeout: 5s
       retries: 10
+      start_period: 10s
 
   backend:
-    build: ./backend
+    build:
+      context: ./backend
     container_name: fieldsync-backend
     restart: unless-stopped
-    env_file:
-      - ./backend/.env
     environment:
+      NODE_ENV: production
+      PORT: 5000
+      # Hardcoded: inside the compose network the database is always `db`,
+      # regardless of what DB_HOST says for local (non-Docker) development.
       DB_HOST: db
+      DB_PORT: 5432
+      DB_USER: ${DB_USER:-postgres}
+      DB_PASSWORD: ${DB_PASSWORD:-my13}
+      DB_NAME: ${DB_NAME:-fieldsync_db}
+      JWT_SECRET: ${JWT_SECRET:-my_jwt_secret_key}
+      # Seeded on boot by ensureAdminExists() when the account is missing, so a
+      # fresh volume always has an administrator to sign in with.
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@fieldsync.com}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin123}
+      ADMIN_NAME: ${ADMIN_NAME:-System Administrator}
+      ADMIN_EMPLOYEE_ID: ${ADMIN_EMPLOYEE_ID:-ADM001}
+      EMAIL_USER: ${EMAIL_USER:-}
+      EMAIL_PASS: ${EMAIL_PASS:-}
     depends_on:
       db:
         condition: service_healthy
     ports:
-      - "5001:5000"
+      # Published for direct access and debugging only. The browser does not
+      # need this: the frontend reaches the API through the frontend's nginx
+      # on FRONTEND_PORT, so the app works over a single port.
+      - "${BACKEND_PORT:-5001}:5000"
     volumes:
-      - uploads:/app/uploads
+      # Bind mount, not a named volume: the 63 existing photos live in
+      # backend/uploads on the host and 28 rows reference them, so a named
+      # volume would serve a container with none of the real images. This also
+      # means new uploads appear straight in the repo folder (gitignored).
+      - ./backend/uploads:/app/uploads
+    # Reap zombies and forward signals so `docker compose stop` is clean.
+    init: true
 
   frontend:
-    build: ./frontend
+    build:
+      context: ./frontend
     container_name: fieldsync-frontend
     restart: unless-stopped
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
     ports:
-      - "30001:80"
+      - "${FRONTEND_PORT:-30001}:80"
+    init: true
+
+  # Legacy Express server, superseded by the TypeScript `backend` service.
+  # Run with:  docker compose --profile legacy up
+  api:
+    build:
+      context: ./api
+    container_name: fieldsync-api
+    restart: unless-stopped
+    profiles: ["legacy"]
+    environment:
+      NODE_ENV: production
+      PORT: 5000
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_USER: ${DB_USER:-postgres}
+      DB_PASSWORD: ${DB_PASSWORD:-my13}
+      DB_NAME: ${DB_NAME:-fieldsync_db}
+      JWT_SECRET: ${JWT_SECRET:-my_jwt_secret_key}
+      EMAIL_USER: ${EMAIL_USER:-}
+      EMAIL_PASS: ${EMAIL_PASS:-}
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "${LEGACY_API_PORT:-5002}:5000"
+    volumes:
+      - api_uploads:/app/uploads
+    init: true
 
 volumes:
   pgdata:
   uploads:
+  api_uploads:

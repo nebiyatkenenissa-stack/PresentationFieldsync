@@ -9,8 +9,8 @@ export async function upsert(data: any): Promise<any> {
   const result = await pool.query(
     `INSERT INTO leaves (
         id, employee_id, employee_name, start_date, end_date,
-        reason, type, status, created_at, approved_by, approved_at, synced
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+        reason, type, duration, status, created_at, approved_by, approved_at, synced
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
     ON CONFLICT (id) DO UPDATE SET
         employee_id = EXCLUDED.employee_id,
         employee_name = EXCLUDED.employee_name,
@@ -18,6 +18,7 @@ export async function upsert(data: any): Promise<any> {
         end_date = EXCLUDED.end_date,
         reason = EXCLUDED.reason,
         type = EXCLUDED.type,
+        duration = EXCLUDED.duration,
         status = EXCLUDED.status,
         approved_by = EXCLUDED.approved_by,
         approved_at = EXCLUDED.approved_at,
@@ -32,11 +33,13 @@ export async function upsert(data: any): Promise<any> {
       data.endDate,
       data.reason,
       data.type,
+      data.duration || 'daily',
       data.status || 'pending',
       data.createdAt || new Date().toISOString(),
       data.approvedBy || null,
       data.approvedAt || null,
-      data.synced || false,
+      // Client may send the offline sentinel 'syncing' instead of a boolean.
+      data.synced === true || data.synced === 'true' || data.synced === 'syncing',
     ]
   );
   return result.rows[0];
@@ -51,11 +54,12 @@ export async function update(id: string, data: any): Promise<any> {
         end_date = $4,
         reason = $5,
         type = $6,
-        status = $7,
-        approved_by = $8,
-        approved_at = $9,
-        synced = $10
-    WHERE id = $11
+        duration = $7,
+        status = $8,
+        approved_by = $9,
+        approved_at = $10,
+        synced = $11
+    WHERE id = $12
     RETURNING *`,
     [
       data.employeeId,
@@ -64,6 +68,7 @@ export async function update(id: string, data: any): Promise<any> {
       data.endDate,
       data.reason,
       data.type,
+      data.duration || 'daily',
       data.status,
       data.approvedBy,
       data.approvedAt,

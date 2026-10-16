@@ -30,7 +30,6 @@ function PermissionManagement({
   const [selectedTab, setSelectedTab] = useState('requests');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isOnline, setIsOnline] = useState(navigator.onLine);
-  const [pendingCount, setPendingCount] = useState(0);
   const [displayPermissions, setDisplayPermissions] = useState([]);
   const [errors, setErrors] = useState({});
   const [rejectModalId, setRejectModalId] = useState(null);
@@ -40,8 +39,33 @@ function PermissionManagement({
     permissionType: '',
     startDate: '',
     endDate: '',
+    shift: '',
+    timeSlot: '',
     reason: ''
   });
+
+  // ===== SHIFT SLOTS =====
+  // A permission is booked against a fixed slot inside a shift rather than a
+  // free-text time range. Every slot is capped at MAX_PERMISSION_HOURS, so the
+  // "five hours maximum" rule is enforced by construction rather than by
+  // validating whatever the officer typed.
+  const MAX_PERMISSION_HOURS = 5;
+
+  const SHIFT_SLOTS = {
+    morning: [
+      { id: 'm_full',  label: '08:00 – 13:00', start: '08:00', end: '13:00', hours: 5 },
+      { id: 'm_early', label: '08:00 – 11:00', start: '08:00', end: '11:00', hours: 3 },
+      { id: 'm_late',  label: '10:00 – 13:00', start: '10:00', end: '13:00', hours: 3 }
+    ],
+    afternoon: [
+      { id: 'a_full',  label: '13:00 – 18:00', start: '13:00', end: '18:00', hours: 5 },
+      { id: 'a_early', label: '13:00 – 16:00', start: '13:00', end: '16:00', hours: 3 },
+      { id: 'a_late',  label: '15:00 – 18:00', start: '15:00', end: '18:00', hours: 3 }
+    ]
+  };
+
+  const getSlot = (shift, timeSlot) =>
+    (SHIFT_SLOTS[shift] || []).find(s => s.id === timeSlot) || null;
 
   // ===== UPDATE DISPLAY PERMISSIONS (only synced = true) =====
   const supervisorEmployeeIds = React.useMemo(() => {
@@ -93,7 +117,6 @@ function PermissionManagement({
       const online = await checkRealInternet();
       setIsOnline(online);
       const count = syncQueue.countByTypes(['permission', 'permission_update']);
-      setPendingCount(count);
       if (online && count > 0) {
         console.log(`🔄 Back online! Auto-syncing ${count} permission requests...`);
         window.dispatchEvent(new CustomEvent('force-sync'));
@@ -107,13 +130,11 @@ function PermissionManagement({
       console.log('🔄 Sync complete - refreshing permissions...');
       await refreshDataFromIndexedDB();
       const count = syncQueue.countByTypes(['permission', 'permission_update']);
-      setPendingCount(count);
       updateDisplayPermissions();
     };
 
     const handleQueueUpdate = () => {
       const count = syncQueue.countByTypes(['permission', 'permission_update']);
-      setPendingCount(count);
       updateDisplayPermissions();
     };
 
@@ -170,6 +191,20 @@ function PermissionManagement({
     } else if (newPermission.reason.trim().length > 200) {
       newErrors.reason = t('permission.error_reason_max');
     }
+    if (!newPermission.shift) {
+      newErrors.shift = t('permission.error_shift_required');
+    }
+    if (newPermission.shift && !newPermission.timeSlot) {
+      newErrors.timeSlot = t('permission.error_slot_required');
+    } else if (newPermission.shift) {
+      const slot = getSlot(newPermission.shift, newPermission.timeSlot);
+      if (!slot) {
+        // the slot id no longer exists for the chosen shift
+        newErrors.timeSlot = t('permission.error_slot_invalid');
+      } else if (slot.hours > MAX_PERMISSION_HOURS) {
+        newErrors.timeSlot = t('permission.error_max_hours', { hours: MAX_PERMISSION_HOURS });
+      }
+    }
     if (isManager && !newPermission.employeeId) {
       newErrors.employeeId = t('permission.error_select_employee');
     }
@@ -189,15 +224,21 @@ function PermissionManagement({
       return;
     }
 
-    setIsSubmitting(true);
+setIsSubmitting(true);
 
+    const slot = getSlot(newPermission.shift, newPermission.timeSlot);
     const permission = {
       id: uid(),
       employeeId: (isOfficer || isSupervisor) ? user.employeeId : newPermission.employeeId,
-      employeeName: (isOfficer || isSupervisor) ? user.name : users?.find(u => u.employeeId === newPermission.employeeId)?.name || user.name,
+      employeeName: (isOfficer||isSupervisor) ? user.name : users?.find(u => u.employeeId === newPermission.employeeId)?.name || user.name,
       permissionType: newPermission.permissionType,
       startDate: newPermission.startDate,
       endDate: newPermission.endDate,
+      shift: newPermission.shift,
+      timeSlot: slot ? slot.id : newPermission.timeSlot,
+      startTime: slot ? slot.start : null,
+      endTime: slot ? slot.end : null,
+      hours: slot ? slot.hours : null,
       reason: newPermission.reason.trim(),
       status: 'pending',
       requestedAt: new Date().toISOString(),
@@ -231,13 +272,11 @@ function PermissionManagement({
         } catch (err) {
           console.warn('Server unreachable, queueing permission:', err.message);
           syncQueue.add({ type: 'permission', id: permission.id, data: permission });
-          setPendingCount(syncQueue.countByTypes(['permission', 'permission_update']));
           toast(t('permission.toast_server_unreachable'));
         }
       } else {
         console.warn('Offline, queueing permission...');
         syncQueue.add({ type: 'permission', id: permission.id, data: permission });
-        setPendingCount(syncQueue.countByTypes(['permission', 'permission_update']));
         toast(t('permission.toast_saved_offline'));
       }
 
@@ -256,7 +295,7 @@ function PermissionManagement({
     } finally {
       setIsSubmitting(false);
       setShowModal(false);
-      setNewPermission({ employeeId: '', permissionType: '', startDate: '', endDate: '', reason: '' });
+      setNewPermission({ employeeId: '', permissionType: '', startDate: '', endDate: '', shift: '', timeSlot: '', reason: '' });
       setErrors({});
     }
   };
@@ -329,13 +368,11 @@ function PermissionManagement({
         } catch (err) {
           console.warn('Failed to sync approval, queueing:', err.message);
           syncQueue.add({ type: 'permission_update', id: permissionId, data: updatedPermission });
-          setPendingCount(syncQueue.countByTypes(['permission', 'permission_update']));
           toast(t('permission.toast_status_local_queued', { status: statusLabel }));
         }
       } else {
         console.warn('Offline, queueing permission approval...');
         syncQueue.add({ type: 'permission_update', id: permissionId, data: updatedPermission });
-        setPendingCount(syncQueue.countByTypes(['permission', 'permission_update']));
         toast(t('permission.toast_status_offline', { status: statusLabel }));
       }
 
@@ -518,9 +555,6 @@ function PermissionManagement({
               marginBottom: '16px'
             }}>
               <strong>📡 {t('permission.offline_mode')}:</strong> {t('permission.offline_banner_saved')}
-              {pendingCount > 0 && (
-                <span style={{ marginLeft: '8px' }}>({t('permission.pending_sync', { count: pendingCount })})</span>
-              )}
             </div>
           )}
 
@@ -591,7 +625,7 @@ function PermissionManagement({
                 </div>
               )}
             </div>
-            <div className="form-row" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+            <div className="form-row">
               <div className="form-group" style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                 <label style={{ fontSize: '13px', fontWeight: '500', color: '#374151' }}>{t('permission.start_date_label')} *</label>
                 <input
@@ -637,6 +671,82 @@ function PermissionManagement({
                 )}
               </div>
             </div>
+            <div className="form-row">
+              <div className="form-group" style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                <label style={{ fontSize: '13px', fontWeight: '500', color: '#374151' }}>{t('permission.shift_label')} *</label>
+                <select
+                  value={newPermission.shift}
+                  onChange={e => setNewPermission({
+                    ...newPermission,
+                    shift: e.target.value,
+                    // slots belong to a shift, so a shift change invalidates the pick
+                    timeSlot: ''
+                  })}
+                  required
+                  style={{
+                    padding: '8px 12px',
+                    border: `1px solid ${errors.shift ? '#dc2626' : '#d1d5db'}`,
+                    borderRadius: '6px',
+                    fontSize: '14px',
+                    width: '100%',
+                    background: 'white'
+                  }}
+                >
+                  <option value="">{t('permission.shift_select')}</option>
+                  <option value="morning">{t('permission.shift_morning')}</option>
+                  <option value="afternoon">{t('permission.shift_afternoon')}</option>
+                </select>
+                {errors.shift && (
+                  <div className="form-error" style={{ color: '#dc2626', fontSize: '12px', marginTop: '4px' }}>
+                    {errors.shift}
+                  </div>
+                )}
+              </div>
+              <div className="form-group" style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                <label style={{ fontSize: '13px', fontWeight: '500', color: '#374151' }}>{t('permission.slot_label')} *</label>
+                <select
+                  value={newPermission.timeSlot}
+                  onChange={e => setNewPermission({ ...newPermission, timeSlot: e.target.value })}
+                  required
+                  disabled={!newPermission.shift}
+                  style={{
+                    padding: '8px 12px',
+                    border: `1px solid ${errors.timeSlot ? '#dc2626' : '#d1d5db'}`,
+                    borderRadius: '6px',
+                    fontSize: '14px',
+                    width: '100%',
+                    background: 'white',
+                    opacity: newPermission.shift ? 1 : 0.6
+                  }}
+                >
+                  <option value="">
+                    {newPermission.shift ? t('permission.slot_select') : t('permission.slot_pick_shift_first')}
+                  </option>
+                  {(SHIFT_SLOTS[newPermission.shift] || []).map(slot => (
+                    <option key={slot.id} value={slot.id}>
+                      {slot.label} ({slot.hours}h)
+                    </option>
+                  ))}
+                </select>
+                {errors.timeSlot && (
+                  <div className="form-error" style={{ color: '#dc2626', fontSize: '12px', marginTop: '4px' }}>
+                    {errors.timeSlot}
+                  </div>
+                )}
+              </div>
+            </div>
+            {newPermission.shift && (
+              <div style={{
+                padding: '10px 12px',
+                background: '#eff6ff',
+                border: '1px solid #bfdbfe',
+                borderRadius: '6px',
+                fontSize: '13px',
+                color: '#1e40af'
+              }}>
+                {t('permission.shift_rule_hint', { hours: MAX_PERMISSION_HOURS })}
+              </div>
+            )}
             <div className="form-group" style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
               <label style={{ fontSize: '13px', fontWeight: '500', color: '#374151' }}>{t('permission.reason_label')} *</label>
               <textarea
@@ -720,40 +830,6 @@ function PermissionManagement({
 
     return (
       <div className="permissions-view">
-        {!isOnline && pendingCount > 0 && (
-          <div style={{
-            background: '#fef3c7',
-            border: '1px solid #f59e0b',
-            padding: '12px 16px',
-            borderRadius: '8px',
-            marginBottom: '16px',
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            flexWrap: 'wrap'
-          }}>
-            <span>📡 {t('permission.offline_banner', { count: pendingCount })}</span>
-            <span style={{ fontSize: '12px', color: '#92400e' }}>⏳ {t('permission.waiting_connection')}</span>
-          </div>
-        )}
-
-        {isOnline && pendingCount > 0 && (
-          <div style={{
-            background: '#dbeafe',
-            border: '1px solid #3b82f6',
-            padding: '12px 16px',
-            borderRadius: '8px',
-            marginBottom: '16px',
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            flexWrap: 'wrap'
-          }}>
-            <span>🔄 {t('permission.syncing_banner', { count: pendingCount })}</span>
-            <span style={{ fontSize: '12px', color: '#1e40af' }}>⏳ {t('permission.please_wait')}</span>
-          </div>
-        )}
-
         {/* ===== HERO HEADER (dashboard style) ===== */}
         <div style={{
           background: 'linear-gradient(135deg, #0f2a4a 0%, #1e3a5f 55%, #2563eb 120%)',
@@ -832,8 +908,9 @@ function PermissionManagement({
           <div className="table-wrapper">
             <table>
               <thead><tr><th>{t('permission.employee')}</th><th>{t('permission.permission_type')}</th><th>{t('permission.start')}</th><th>{t('permission.end')}</th><th>{t('permission.reason')}</th><th>{t('common.status')}</th><th>{t('permission.action')}</th></tr></thead>
+              <th>{t('permission.shift_column')}</th>
               <tbody>
-                {getDisplayPermissions().length === 0 && (<tr><td colSpan="7" className="empty-state"><div className="empty-icon">📋</div><div>{t('permission.no_requests')}</div></td></tr>)}
+                {getDisplayPermissions().length === 0 && (<tr><td colSpan="8" className="empty-state"><div className="empty-icon">📋</div><div>{t('permission.no_requests')}</div></td></tr>)}
                 {getDisplayPermissions().map(p => {
                   const isOwnPermission = p.employeeId === user.employeeId;
                   const isTeamMember = teamIds.includes(p.employeeId);
@@ -851,6 +928,7 @@ function PermissionManagement({
                         </div>
                       </td>
                       <td>{p.permissionType}</td>
+                      <td><span>{p.startTime && p.endTime ? `${p.startTime} – ${p.endTime}` : t(`permission.shift_${p.shift || 'morning'}`)}</span>{p.hours ? <span style={{ fontSize: '11px', color: '#6b7f94', marginLeft: '6px' }}>({p.hours}h)</span> : null}</td>
                       <td>{p.startDate}</td>
                       <td>{p.endDate}</td>
                       <td>
@@ -929,40 +1007,6 @@ function PermissionManagement({
   const renderOfficerView = () => {
     return (
       <div className="permissions-view">
-        {!isOnline && pendingCount > 0 && (
-          <div style={{
-            background: '#fef3c7',
-            border: '1px solid #f59e0b',
-            padding: '12px 16px',
-            borderRadius: '8px',
-            marginBottom: '16px',
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            flexWrap: 'wrap'
-          }}>
-            <span>📡 {t('permission.offline_banner', { count: pendingCount })}</span>
-            <span style={{ fontSize: '12px', color: '#92400e' }}>⏳ {t('permission.waiting_connection')}</span>
-          </div>
-        )}
-
-        {isOnline && pendingCount > 0 && (
-          <div style={{
-            background: '#dbeafe',
-            border: '1px solid #3b82f6',
-            padding: '12px 16px',
-            borderRadius: '8px',
-            marginBottom: '16px',
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            flexWrap: 'wrap'
-          }}>
-            <span>🔄 {t('permission.syncing_banner', { count: pendingCount })}</span>
-            <span style={{ fontSize: '12px', color: '#1e40af' }}>⏳ {t('permission.please_wait')}</span>
-          </div>
-        )}
-
         {/* ===== HERO HEADER (dashboard style) ===== */}
         <div style={{
           background: 'linear-gradient(135deg, #0f2a4a 0%, #1e3a5f 55%, #2563eb 120%)',
@@ -1027,8 +1071,9 @@ function PermissionManagement({
           <div className="table-wrapper">
             <table>
               <thead><tr><th>{t('permission.employee')}</th><th>{t('permission.permission_type')}</th><th>{t('permission.start')}</th><th>{t('permission.end')}</th><th>{t('permission.reason')}</th><th>{t('common.status')}</th></tr></thead>
+              <th>{t('permission.shift_column')}</th>
               <tbody>
-                {getDisplayPermissions().length === 0 && (<tr><td colSpan="6" className="empty-state"><div className="empty-icon">📋</div><div>{t('permission.no_requests')}</div></td></tr>)}
+                {getDisplayPermissions().length === 0 && (<tr><td colSpan="7" className="empty-state"><div className="empty-icon">📋</div><div>{t('permission.no_requests')}</div></td></tr>)}
                 {getDisplayPermissions().map(p => (
                   <tr key={p.id}>
                     <td>
@@ -1038,6 +1083,7 @@ function PermissionManagement({
                       </div>
                     </td>
                     <td>{p.permissionType}</td>
+                    <td><span>{p.startTime && p.endTime ? `${p.startTime} – ${p.endTime}` : t(`permission.shift_${p.shift || 'morning'}`)}</span>{p.hours ? <span style={{ fontSize: '11px', color: '#6b7f94', marginLeft: '6px' }}>({p.hours}h)</span> : null}</td>
                     <td>{p.startDate}</td>
                     <td>{p.endDate}</td>
                     <td>
@@ -1065,40 +1111,6 @@ function PermissionManagement({
   const renderManagerView = () => {
     return (
       <div className="permissions-view">
-        {!isOnline && pendingCount > 0 && (
-          <div style={{
-            background: '#fef3c7',
-            border: '1px solid #f59e0b',
-            padding: '12px 16px',
-            borderRadius: '8px',
-            marginBottom: '16px',
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            flexWrap: 'wrap'
-          }}>
-            <span>📡 {t('permission.offline_banner', { count: pendingCount })}</span>
-            <span style={{ fontSize: '12px', color: '#92400e' }}>⏳ {t('permission.waiting_connection')}</span>
-          </div>
-        )}
-
-        {isOnline && pendingCount > 0 && (
-          <div style={{
-            background: '#dbeafe',
-            border: '1px solid #3b82f6',
-            padding: '12px 16px',
-            borderRadius: '8px',
-            marginBottom: '16px',
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            flexWrap: 'wrap'
-          }}>
-            <span>🔄 {t('permission.syncing_banner', { count: pendingCount })}</span>
-            <span style={{ fontSize: '12px', color: '#1e40af' }}>⏳ {t('permission.please_wait')}</span>
-          </div>
-        )}
-
         {/* ===== HERO HEADER (dashboard style) ===== */}
         <div style={{
           background: 'linear-gradient(135deg, #0f2a4a 0%, #1e3a5f 55%, #2563eb 120%)',
@@ -1145,8 +1157,9 @@ function PermissionManagement({
           <div className="table-wrapper">
             <table>
               <thead><tr><th>{t('permission.employee')}</th><th>{t('permission.permission_type')}</th><th>{t('permission.start')}</th><th>{t('permission.end')}</th><th>{t('permission.reason')}</th><th>{t('common.status')}</th><th>{t('permission.action')}</th></tr></thead>
+              <th>{t('permission.shift_column')}</th>
               <tbody>
-                {getDisplayPermissions().length === 0 && (<tr><td colSpan="7" className="empty-state"><div className="empty-icon">📋</div><div>{t('permission.no_requests')}</div></td></tr>)}
+                {getDisplayPermissions().length === 0 && (<tr><td colSpan="8" className="empty-state"><div className="empty-icon">📋</div><div>{t('permission.no_requests')}</div></td></tr>)}
                 {getDisplayPermissions().map(p => (
                   <tr key={p.id}>
                     <td>
@@ -1156,6 +1169,7 @@ function PermissionManagement({
                       </div>
                     </td>
                     <td>{p.permissionType}</td>
+                    <td><span>{p.startTime && p.endTime ? `${p.startTime} – ${p.endTime}` : t(`permission.shift_${p.shift || 'morning'}`)}</span>{p.hours ? <span style={{ fontSize: '11px', color: '#6b7f94', marginLeft: '6px' }}>({p.hours}h)</span> : null}</td>
                     <td>{p.startDate}</td>
                     <td>{p.endDate}</td>
                     <td>

@@ -1,40 +1,20 @@
 import React, { useState, useEffect } from 'react';
-import { syncQueue, checkRealInternet } from '../../services/database';
+import { checkRealInternet } from '../../services/database';
 
+// Shows whether the app can reach the server. The queued-item count is
+// deliberately NOT shown: it counted everything that had not been flushed
+// yet, which read as "N records lost" even though the records were already
+// saved locally and synced on reconnect.
 const OfflineIndicator = () => {
   const [isOnline, setIsOnline] = useState(navigator.onLine);
-  const [pendingCount, setPendingCount] = useState(0);
-  const [pendingDetails, setPendingDetails] = useState({});
 
   useEffect(() => {
     const updateStatus = async () => {
-      const online = await checkRealInternet();
-      setIsOnline(online);
-      const count = syncQueue.count();
-      setPendingCount(count);
-      
-      const items = syncQueue.getAll();
-      const details = {};
-      items.forEach(item => {
-        const labels = {
-          'citizen': 'Citizens',
-          'report': 'Reports',
-          'leave_request': 'Leave Requests',
-          'permission_request': 'Permission Requests',
-          'attendance': 'Attendance',
-          'task': 'Tasks',
-          'leave_update': 'Leave Updates',
-          'permission_update': 'Permission Updates',
-          'supervisor_report': 'Supervisor Reports'
-        };
-        const label = labels[item.type] || item.type;
-        details[label] = (details[label] || 0) + 1;
-      });
-      setPendingDetails(details);
+      setIsOnline(await checkRealInternet());
     };
 
     updateStatus();
-    
+
     window.addEventListener('online', updateStatus);
     window.addEventListener('offline', updateStatus);
     window.addEventListener('sync-complete', updateStatus);
@@ -51,11 +31,8 @@ const OfflineIndicator = () => {
     };
   }, []);
 
-  if (isOnline && pendingCount === 0) return null;
-
-  const detailStrings = Object.entries(pendingDetails)
-    .map(([type, count]) => `${count} ${type}`)
-    .join(', ');
+  // Only surface the banner when the connection is actually down.
+  if (isOnline) return null;
 
   return (
     <div style={{
@@ -63,7 +40,7 @@ const OfflineIndicator = () => {
       bottom: '20px',
       left: '50%',
       transform: 'translateX(-50%)',
-      background: isOnline ? '#0b7e4b' : '#dc2626',
+      background: '#dc2626',
       color: 'white',
       padding: '12px 24px',
       borderRadius: '12px',
@@ -77,28 +54,11 @@ const OfflineIndicator = () => {
       flexWrap: 'wrap',
       justifyContent: 'center'
     }}>
-      <span>{isOnline ? '🔄' : '📡'}</span>
-      <span>
-        {isOnline 
-          ? `Syncing... (${pendingCount} pending)` 
-          : `Offline - ${pendingCount} items pending`}
+      <span>📡</span>
+      <span>Offline</span>
+      <span style={{ fontSize: '11px', opacity: 0.7 }}>
+        Data will sync when online
       </span>
-      {pendingCount > 0 && detailStrings && (
-        <span style={{
-          fontSize: '11px',
-          opacity: 0.8,
-          background: 'rgba(255,255,255,0.15)',
-          padding: '2px 10px',
-          borderRadius: '12px'
-        }}>
-          {detailStrings}
-        </span>
-      )}
-      {!isOnline && (
-        <span style={{ fontSize: '11px', opacity: 0.7 }}>
-          Data will sync when online
-        </span>
-      )}
     </div>
   );
 };

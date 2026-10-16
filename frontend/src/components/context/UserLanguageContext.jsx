@@ -55,7 +55,17 @@ const userLanguages = {
         email: 'Email',
         role: 'Role',
         region: 'Region',
-        shift: 'Shift'
+        shift: 'Shift',
+        gender: 'Gender',
+        selectGender: 'Select Gender',
+        male: 'Male',
+        female: 'Female',
+        other: 'Other',
+        notSpecified: 'Not specified',
+        genderBreakdown: 'Gender Breakdown',
+        staffUsers: 'Staff Users',
+        registeredCitizens: 'Registered Citizens',
+        totalLabel: 'Total'
       }
     }
   },
@@ -112,7 +122,17 @@ const userLanguages = {
         email: 'ኢሜይል',
         role: 'ሚና',
         region: 'ክልል',
-        shift: 'ፈረቃ'
+        shift: 'ፈረቃ',
+        gender: 'ጾታ',
+        selectGender: 'ጾታ ይምረጡ',
+        male: 'ወንድ',
+        female: 'ሴት',
+        other: 'ሌላ',
+        notSpecified: 'አልተገለጸም',
+        genderBreakdown: 'የጾታ ትንታኔ',
+        staffUsers: 'ሰራተኞች',
+        registeredCitizens: 'የተመዘገቡ ዜጎች',
+        totalLabel: 'ጠቅላላ'
       }
     }
   },
@@ -169,7 +189,17 @@ const userLanguages = {
         email: 'ኢሜይል',
         role: 'ሚና',
         region: 'ክልል',
-        shift: 'ፈረቃ'
+        shift: 'ፈረቃ',
+        gender: 'ጾታ',
+        selectGender: 'ጾታ ይምረጡ',
+        male: 'ወንድ',
+        female: 'ሴት',
+        other: 'ሌላ',
+        notSpecified: 'አልተገለጸም',
+        genderBreakdown: 'የጾታ ትንታኔ',
+        staffUsers: 'ሰራተኞች',
+        registeredCitizens: 'የተመዘገቡ ዜጎች',
+        totalLabel: 'ጠቅላላ'
       }
     }
   },
@@ -226,7 +256,17 @@ const userLanguages = {
         email: 'Imeelii',
         role: 'Gosa',
         region: 'Naannoo',
-        shift: 'Yommuu'
+        shift: 'Yommuu',
+        gender: 'Sadarkaa',
+        selectGender: 'Sadarkaa Filadhoo',
+        male: 'Dhiirii',
+        female: 'Dubartii',
+        other: 'Kan Biroo',
+        notSpecified: 'Hin bayyinaame',
+        genderBreakdown: 'Tarkaanfii Sadarkaa',
+        staffUsers: 'Hojjettoota',
+        registeredCitizens: 'Lammiiwwan Galmeessan',
+        totalLabel: 'Waliigalaa'
       }
     }
   }

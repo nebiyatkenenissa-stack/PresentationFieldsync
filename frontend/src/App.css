@@ -809,9 +809,109 @@ body {
   position: fixed;
   top: 0;
   left: 0;
+  /* dvh tracks the shrinking mobile browser chrome; the vh fallback keeps
+     older browsers usable. */
   height: 100vh;
+  height: 100dvh;
   z-index: 100;
   overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/* Dimmed layer behind the drawer. Only ever visible on narrow screens, where
+   the sidebar is overlaid instead of docked. */
+.sidebar-backdrop {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.5);
+  z-index: 99;
+}
+
+/* Three-line toggle in the brand row. The one control that works in both
+   layouts: it closes the overlay drawer on narrow screens and collapses the
+   docked sidebar on desktop. */
+.sidebar-toggle {
+  margin-left: auto;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 5px;
+  width: 38px;
+  height: 38px;
+  padding: 0 9px;
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: var(--fs-radius, 6px);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.sidebar-brand .sidebar-toggle span {
+  display: block;
+  height: 2px;
+  width: 100%;
+  background: rgba(255, 255, 255, 0.9);
+  border-radius: 2px;
+}
+
+.sidebar-toggle:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+/* Desktop collapse: the docked sidebar shrinks to an icon rail, keeping the
+   navigation reachable while labels are hidden. Below 768px the sidebar is an
+   overlay drawer, where closing hides it entirely (see media queries). */
+.sidebar {
+  transition: width 0.25s ease, transform 0.25s ease, visibility 0.25s ease;
+}
+
+.app.sidebar-collapsed .main-content {
+  margin-left: var(--fs-sidebar-w-collapsed, 76px);
+}
+
+/* Hamburger lives in the header. Hidden on desktop while the sidebar is
+   docked or collapsed to the rail (the rail keeps its own toggle); it only
+   appears below 768px, where the sidebar is an overlay drawer. */
+.hamburger-btn {
+  display: none;
+  flex-direction: column;
+  justify-content: center;
+  gap: 5px;
+  width: 40px;
+  height: 40px;
+  padding: 0 9px;
+  background: transparent;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.hamburger-btn span {
+  display: block;
+  height: 2px;
+  width: 100%;
+  background: #1e3a5f;
+  border-radius: 2px;
+}
+
+.hamburger-btn:active {
+  background: #f1f5f9;
+}
+
+/* The header background is overridden in dark mode, so the bars have to be
+   lightened too or the button disappears against the dark surface. */
+[data-theme='dark'] .hamburger-btn {
+  border-color: var(--fs-border);
+}
+
+[data-theme='dark'] .hamburger-btn span {
+  background: #e2e8f0;
+}
+
+[data-theme='dark'] .hamburger-btn:active {
+  background: rgba(255, 255, 255, 0.1);
 }
 
 .sidebar-brand {
@@ -940,8 +1040,10 @@ body {
   flex: 1;
   margin-left: 260px;
   min-height: 100vh;
+  min-height: 100dvh;
   display: flex;
   flex-direction: column;
+  transition: margin-left 0.25s ease;
 }
 
 /* ============================================================
@@ -1247,12 +1349,30 @@ body {
 .table-wrapper {
   overflow-x: auto;
   padding: 0;
+  /* Momentum scrolling on touch devices, and stop the horizontal scroll from
+     chaining up to the page when the table is already at its end. */
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-x: contain;
+}
+
+/* Without a floor the table just squeezes every column into an unreadable
+   sliver on a phone. 720px keeps ~4-5 columns legible and scrollable. */
+.table-wrapper > table {
+  min-width: 720px;
 }
 
 table {
   width: 100%;
   border-collapse: collapse;
   font-size: 14px;
+}
+
+/* Long free text (emails, reasons, report bodies) must wrap instead of forcing
+   the whole table wider than the screen. Cells that opt out with an inline
+   white-space: nowrap keep their behaviour, since inline styles still win. */
+.table-wrapper td,
+.table-wrapper th {
+  overflow-wrap: break-word;
 }
 
 thead {
@@ -1853,6 +1973,7 @@ tr:hover {
   background: #f8fafc;
   border-radius: 8px;
   font-size: 14px;
+  flex-wrap: wrap;
 }
 
 .performer-rank {
@@ -1864,6 +1985,10 @@ tr:hover {
 .performer-name {
   font-weight: 600;
   flex: 1;
+  /* Without this a flex item refuses to shrink below its content width, so a
+     long officer name pushes the whole row wider than the screen. */
+  min-width: 0;
+  overflow-wrap: break-word;
 }
 
 .performer-region {
@@ -2105,16 +2230,60 @@ tr:hover {
 }
 
 @media (max-width: 768px) {
+  /* Below this width the sidebar is no longer docked: it slides in over the
+     content as a drawer, so the page gets the full viewport width back. */
   .sidebar {
-    width: 220px;
+    width: 260px;
+    max-width: 85vw;
+    transform: translateX(-100%);
+    /* visibility (not just transform) so the closed drawer is skipped by
+       keyboard tab order and hidden from screen readers. Transitioning it
+       keeps the panel visible for the whole slide-out. */
+    visibility: hidden;
+    transition: transform 0.25s ease, visibility 0.25s ease;
+    box-shadow: 0 0 40px rgba(0, 0, 0, 0.3);
   }
-  
+
+  .sidebar.open {
+    transform: translateX(0);
+    visibility: visible;
+  }
+
+  .sidebar-backdrop {
+    display: block;
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity 0.25s ease, visibility 0.25s ease;
+  }
+
+  .sidebar-backdrop.visible {
+    opacity: 1;
+    visibility: visible;
+  }
+
+  .hamburger-btn {
+    display: flex;
+  }
+
   .main-content {
-    margin-left: 220px;
+    margin-left: 0;
   }
   
   .main-header {
     padding: 12px 16px;
+  }
+  
+  .header-left {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-width: 0;
+  }
+
+  .header-left h1 {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   
   .content {
@@ -2129,14 +2298,44 @@ tr:hover {
     grid-template-columns: 1fr;
   }
   
+  /* Tighten dense tables so more columns fit before the user has to scroll.
+     The !important is required because most cells set their padding with an
+     inline style, which would otherwise win. */
+  .table-wrapper > table {
+    min-width: 640px;
+    font-size: 13px;
+  }
+  
+  .table-wrapper th,
+  .table-wrapper td {
+    padding: 10px 12px !important;
+  }
+  
+  /* Seven date labels cannot fit a 375px screen. Scrolling the shared parent
+     keeps the label row and the bar row aligned as one unit. */
+  .css-trend-chart {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .css-trend-labels,
+  .css-trend-bars {
+    min-width: 420px;
+    gap: 4px;
+  }
+
+  .css-trend-bars {
+    height: 150px;
+  }
+  
   .notification-dropdown {
     width: 320px;
     right: -40px;
   }
   
   .modal-content {
-    padding: 20px;
-    margin: 10px;
+    padding: 16px;
+    margin: 8px;
   }
   
   .header-right {
@@ -2156,26 +2355,6 @@ tr:hover {
 }
 
 @media (max-width: 480px) {
-  .sidebar {
-    width: 60px;
-  }
-  
-  .sidebar-brand span,
-  .nav-item span:not(.nav-badge),
-  .user-info,
-  .logout-btn {
-    display: none;
-  }
-  
-  .nav-item {
-    justify-content: center;
-    padding: 12px;
-  }
-  
-  .main-content {
-    margin-left: 60px;
-  }
-  
   .login-card-full {
     padding: 24px;
   }
@@ -2186,6 +2365,14 @@ tr:hover {
   
   .login-features-full {
     display: none;
+  }
+
+  .content {
+    padding: 12px;
+  }
+
+  .main-header {
+    padding: 10px 12px;
   }
 }
 
@@ -2898,4 +3085,1469 @@ tr:hover {
   border: 3px solid #3b82f6;
   border-style: dashed;
   opacity: 0.3;
+}
+
+/* ============================================================================
+   FORMAL CIVIC THEME
+   ----------------------------------------------------------------------------
+   Single source of truth is the token set in index.css. Everything below
+   re-declares the app shell and shared components against those tokens so the
+   whole product inherits one institutional look: squared geometry, hairline
+   rules instead of shadows, restrained navy/gold accents, and small-caps
+   section labels. Declared last so it wins over the legacy rules above.
+   ============================================================================ */
+
+/* ---------------------------------------------------------------- SHELL --- */
+.sidebar {
+  width: var(--fs-sidebar-w);
+  background: var(--fs-sidebar-bg);
+  border-right: 1px solid var(--fs-sidebar-bg-2);
+}
+
+.main-content {
+  margin-left: var(--fs-sidebar-w);
+  background: var(--fs-bg);
+}
+
+.main-header {
+  min-height: var(--fs-header-h);
+  padding: 12px var(--fs-content-x);
+  background: transparent;
+  color: var(--fs-ink);
+  border-bottom: 1px solid var(--fs-border);
+  box-shadow: none;
+}
+
+.content {
+  padding: var(--fs-content-y) var(--fs-content-x);
+  max-width: 1440px;
+  width: 100%;
+}
+
+/* ------------------------------------------------------------- SIDEBAR --- */
+.sidebar-brand {
+  padding: 18px var(--fs-content-x);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+  background: var(--fs-sidebar-bg-2);
+}
+
+/* The wordmark is the one place a serif reads as civic authority rather than
+   decoration, so it is the only serif in the product chrome. */
+.sidebar-brand span {
+  font-family: var(--fs-font-display);
+  font-size: 19px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.brand-icon-small {
+  font-size: 26px;
+}
+
+.sidebar-nav {
+  padding: 10px 0;
+  gap: 0;
+}
+
+/* Grouped navigation: a hairline divider between sections reads far more
+   official than a flat list. */
+.sidebar-nav .nav-item {
+  padding: 11px var(--fs-content-x);
+  font-size: var(--fs-text-base);
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  color: rgba(255, 255, 255, 0.72);
+  border-right: 3px solid transparent;
+  border-radius: 0;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.sidebar-nav .nav-item:hover {
+  background: rgba(255, 255, 255, 0.07);
+  color: #ffffff;
+}
+
+/* Active state uses a left rule plus a solid block, the standard
+   institutional navigation treatment. */
+.sidebar-nav .nav-item.active {
+  background: rgba(255, 255, 255, 0.13);
+  color: #ffffff;
+  font-weight: 600;
+  border-right-color: var(--fs-gold);
+  box-shadow: inset 3px 0 0 var(--fs-gold);
+}
+
+.nav-badge {
+  border-radius: var(--fs-radius-sm);
+  font-size: var(--fs-text-2xs);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 1px 7px;
+}
+
+.sidebar-footer {
+  padding: 14px var(--fs-content-x);
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+  background: var(--fs-sidebar-bg-2);
+}
+
+.avatar {
+  border-radius: var(--fs-radius);
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+}
+
+.logout-btn {
+  border-radius: var(--fs-radius);
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.logout-btn:hover {
+  background: rgba(163, 32, 32, 0.28);
+  border-color: var(--fs-red);
+}
+
+/* -------------------------------------------------------------- HEADER --- */
+.header-left h1 {
+  font-family: var(--fs-font-display);
+  font-size: 21px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--fs-ink);
+}
+
+/* Page title. A class rather than an inline font-size so the type scale and the
+   responsive step-downs can both reach it. */
+.header-page-title {
+  font-family: var(--fs-font-display);
+  font-size: var(--fs-text-2xl);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  line-height: 1.25;
+  color: var(--fs-ink);
+  margin: 0;
+}
+
+.hamburger-btn {
+  border-radius: var(--fs-radius);
+  border-color: var(--fs-border-strong);
+}
+
+.hamburger-btn span {
+  background: var(--fs-navy);
+  border-radius: 1px;
+}
+
+.sync-btn {
+  border-radius: var(--fs-radius-sm);
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+/* --------------------------------------------------------------- CARDS ---
+   Shadows are dropped in favour of 1px borders. This is the single biggest
+   contributor to the formal, printed-document feel. */
+.card,
+.stat-card,
+.quick-stat,
+.form-card,
+.table-card,
+.top-performers,
+.trend-chart-card,
+.attendance-status-card,
+.modal-content,
+.notification-detail-box {
+  background: var(--fs-surface);
+  color: var(--fs-ink);
+  border: 1px solid var(--fs-border);
+  border-radius: var(--fs-radius-lg);
+  box-shadow: none;
+}
+
+.stat-card,
+.quick-stat {
+  border-left: 3px solid var(--fs-navy);
+}
+
+.stat-card {
+  padding: 16px 18px;
+  gap: 14px;
+}
+
+.stat-icon {
+  width: 44px;
+  height: 44px;
+  font-size: 22px;
+  border-radius: var(--fs-radius);
+  background: var(--fs-accent-soft);
+  color: var(--fs-navy);
+}
+
+.stat-value {
+  font-size: 25px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--fs-ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.stat-label {
+  font-size: var(--fs-text-2xs);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--fs-muted);
+}
+
+.form-card {
+  padding: 20px;
+}
+
+.form-header {
+  margin-bottom: 18px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--fs-hairline);
+}
+
+.form-header h3,
+.table-header h3 {
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: var(--fs-ink);
+}
+
+.form-header p,
+.table-header p {
+  font-size: 13px;
+  color: var(--fs-muted);
+}
+
+/* -------------------------------------------------------------- TABLES --- */
+.table-card {
+  border-radius: var(--fs-radius-lg);
+}
+
+.table-header {
+  padding: 14px 18px;
+  background: var(--fs-surface-2);
+  border-bottom: 1px solid var(--fs-border);
+}
+
+table {
+  font-size: var(--fs-text-sm);
+}
+
+thead,
+.table-wrapper thead {
+  background: var(--fs-surface-2);
+}
+
+th {
+  padding: 11px 16px;
+  font-size: var(--fs-text-xs);
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--fs-muted);
+  background: var(--fs-surface-2);
+  border-bottom: 1px solid var(--fs-border-strong);
+  border-top: 1px solid var(--fs-hairline);
+  white-space: nowrap;
+}
+
+td {
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--fs-hairline);
+  color: var(--fs-ink-2);
+}
+
+tr:hover td {
+  background: var(--fs-surface-2);
+}
+
+.empty-state {
+  color: var(--fs-muted);
+}
+
+/* -------------------------------------------------------------- FORMS --- */
+.form-group label {
+  font-size: var(--fs-text-xs);
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--fs-muted);
+}
+
+.form-group input,
+.form-group select,
+.form-group textarea,
+.search-input,
+.filter-select,
+.date-input {
+  background: var(--fs-input-bg);
+  color: var(--fs-ink);
+  border: 1px solid var(--fs-border-strong);
+  border-radius: var(--fs-radius);
+  padding: 8px 11px;
+  font-size: 14px;
+  font-family: inherit;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.search-input,
+.filter-select,
+.date-input {
+  padding: 6px 10px;
+  font-size: 13px;
+}
+
+.form-group input:focus,
+.form-group select:focus,
+.form-group textarea:focus,
+.search-input:focus,
+.filter-select:focus,
+.date-input:focus {
+  outline: none;
+  border-color: var(--fs-accent);
+  box-shadow: var(--fs-focus-ring);
+}
+
+.form-group input::placeholder,
+.form-group textarea::placeholder,
+.search-input::placeholder {
+  color: var(--fs-muted-2);
+}
+
+/* ------------------------------------------------------------- BUTTONS ---
+   Square shoulders, no lift on hover, uppercase labels on the primary
+   actions. Transforms are removed because floating buttons undercut the
+   institutional tone. */
+.btn-primary,
+.btn-submit,
+.btn-cancel,
+.btn-sm,
+.btn-export {
+  border-radius: var(--fs-radius);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+  box-shadow: none;
+}
+
+.btn-primary:hover,
+.btn-submit:hover,
+.btn-export:hover,
+.btn-sm:hover {
+  transform: none;
+  box-shadow: none;
+}
+
+.btn-primary {
+  background: var(--fs-navy);
+  border: 1px solid var(--fs-navy);
+  color: #ffffff;
+  padding: 8px 18px;
+  font-size: 13px;
+  text-transform: uppercase;
+}
+
+.btn-primary:hover {
+  background: var(--fs-navy-hover);
+  border-color: var(--fs-navy-hover);
+}
+
+.btn-primary.btn-danger {
+  background: var(--fs-red);
+  border-color: var(--fs-red);
+}
+
+.btn-primary.btn-danger:hover {
+  background: var(--fs-red-dark);
+  border-color: var(--fs-red-dark);
+}
+
+.btn-submit {
+  background: var(--fs-green);
+  border: 1px solid var(--fs-green);
+  color: #ffffff;
+  padding: 9px 22px;
+  font-size: 13px;
+  text-transform: uppercase;
+}
+
+.btn-submit:hover {
+  background: var(--fs-green-dark);
+  border-color: var(--fs-green-dark);
+}
+
+.btn-cancel {
+  background: var(--fs-surface);
+  color: var(--fs-ink-2);
+  border: 1px solid var(--fs-border-strong);
+  padding: 9px 22px;
+  font-size: 13px;
+  text-transform: uppercase;
+}
+
+.btn-cancel:hover {
+  background: var(--fs-surface-2);
+  color: var(--fs-ink);
+}
+
+.btn-sm {
+  padding: 4px 10px;
+  font-size: 12px;
+  border: 1px solid transparent;
+}
+
+.btn-approve {
+  background: var(--fs-green);
+  color: #ffffff;
+}
+
+.btn-approve:hover {
+  background: var(--fs-green-dark);
+}
+
+.btn-reject {
+  background: var(--fs-red);
+  color: #ffffff;
+}
+
+.btn-reject:hover {
+  background: var(--fs-red-dark);
+}
+
+.btn-export {
+  background: var(--fs-accent);
+  border: 1px solid var(--fs-accent);
+  color: #ffffff;
+  padding: 6px 14px;
+  font-size: 12px;
+  text-transform: uppercase;
+}
+
+.btn-export:hover {
+  background: var(--fs-navy);
+  border-color: var(--fs-navy);
+}
+
+.tab-btn {
+  border-radius: var(--fs-radius);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  padding: 7px 16px;
+}
+
+.tab-btn:hover {
+  transform: none;
+}
+
+/* -------------------------------------------------------------- BADGES ---
+   Status pills keep their colour coding but lose the rounded lozenge shape. */
+.region-tag,
+.attendance-tag,
+.form-badge,
+.stat-icon,
+.notification-detail-type {
+  border-radius: var(--fs-radius-sm);
+}
+
+.region-tag {
+  background: var(--fs-accent-soft);
+  color: var(--fs-navy);
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  border: 1px solid var(--fs-border);
+}
+
+.attendance-tag.present {
+  background: var(--fs-green-soft);
+  color: var(--fs-green-dark);
+}
+
+.attendance-tag.late {
+  background: var(--fs-amber-soft);
+  color: var(--fs-amber);
+}
+
+.attendance-tag.absent {
+  background: var(--fs-red-soft);
+  color: var(--fs-red);
+}
+
+.attendance-tag.half_day {
+  background: var(--fs-gold-soft);
+  color: var(--fs-gold);
+}
+
+.attendance-tag.pending {
+  background: var(--fs-surface-3);
+  color: var(--fs-muted);
+}
+
+/* -------------------------------------------------------------- MODALS --- */
+.modal-overlay {
+  background: rgba(10, 18, 30, 0.6);
+}
+
+.modal-content {
+  border-radius: var(--fs-radius-lg);
+  padding: 24px;
+  border: 1px solid var(--fs-border);
+  box-shadow: var(--fs-shadow-lg);
+}
+
+.modal-header {
+  margin-bottom: 18px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--fs-hairline);
+}
+
+.modal-header h3 {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--fs-ink);
+}
+
+.modal-close {
+  border-radius: var(--fs-radius);
+  color: var(--fs-muted);
+}
+
+.modal-close:hover {
+  background: var(--fs-surface-2);
+  color: var(--fs-ink);
+}
+
+/* -------------------------------------------------------- NOTIFICATIONS --- */
+.notification-detail-box {
+  border-radius: var(--fs-radius-lg);
+}
+
+.notification-detail-head {
+  background: var(--fs-surface-2);
+  border-bottom: 1px solid var(--fs-border);
+}
+
+.notification-detail-close {
+  border-radius: var(--fs-radius);
+}
+
+.notification-detail-close:hover {
+  background: var(--fs-surface-3);
+}
+
+.notification-detail-foot {
+  background: var(--fs-surface-2);
+  border-top: 1px solid var(--fs-border);
+}
+
+.notification-detail-ghost,
+.notification-detail-action {
+  border-radius: var(--fs-radius);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.notification-detail-ghost {
+  background: var(--fs-surface);
+  border-color: var(--fs-border-strong);
+  color: var(--fs-ink-2);
+}
+
+.notification-detail-ghost:hover {
+  background: var(--fs-surface-2);
+  color: var(--fs-ink);
+}
+
+.notification-detail-action {
+  background: var(--fs-navy);
+}
+
+.notification-detail-action:hover {
+  background: var(--fs-navy-hover);
+  opacity: 1;
+}
+
+/* --------------------------------------------------------- LANGUAGE PICKER --- */
+.language-selector {
+  border-radius: var(--fs-radius-pill);
+}
+
+.language-select {
+  border-radius: 0;
+  background: transparent;
+  border: none;
+  padding: 0;
+  color: inherit;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.language-selector:hover {
+  border-color: var(--fs-accent);
+}
+
+/* ============================================================================
+   FORMAL CIVIC THEME - DARK MODE
+   The legacy dark-mode rules above key off hardcoded hex values in inline
+   styles. These re-assert the token palette on top so shell chrome, cards,
+   tables and controls all resolve correctly in dark mode.
+   ============================================================================ */
+[data-theme='dark'] .sidebar {
+  background: var(--fs-sidebar-bg);
+}
+
+[data-theme='dark'] .sidebar-brand,
+[data-theme='dark'] .sidebar-footer {
+  background: var(--fs-sidebar-bg-2);
+}
+
+[data-theme='dark'] .main-content {
+  background: var(--fs-bg);
+}
+
+[data-theme='dark'] .main-header {
+  background: var(--fs-header-bg);
+  border-bottom-color: var(--fs-border);
+}
+
+[data-theme='dark'] .header-left h1 {
+  color: var(--fs-ink);
+}
+
+[data-theme='dark'] .hamburger-btn {
+  border-color: var(--fs-border-strong);
+}
+
+[data-theme='dark'] .hamburger-btn span {
+  background: var(--fs-ink);
+}
+
+[data-theme='dark'] .card,
+[data-theme='dark'] .stat-card,
+[data-theme='dark'] .quick-stat,
+[data-theme='dark'] .form-card,
+[data-theme='dark'] .table-card,
+[data-theme='dark'] .top-performers,
+[data-theme='dark'] .trend-chart-card,
+[data-theme='dark'] .attendance-status-card,
+[data-theme='dark'] .modal-content {
+  background: var(--fs-surface);
+  border-color: var(--fs-border);
+  box-shadow: none;
+}
+
+[data-theme='dark'] .stat-card,
+[data-theme='dark'] .quick-stat {
+  border-left-color: var(--fs-accent);
+}
+
+[data-theme='dark'] .stat-icon {
+  background: var(--fs-accent-soft);
+  color: var(--fs-accent);
+}
+
+[data-theme='dark'] .stat-value,
+[data-theme='dark'] .stat-label,
+[data-theme='dark'] .form-header h3,
+[data-theme='dark'] .table-header h3 {
+  color: var(--fs-ink);
+}
+
+[data-theme='dark'] .stat-label,
+[data-theme='dark'] .form-header p,
+[data-theme='dark'] .table-header p {
+  color: var(--fs-muted);
+}
+
+[data-theme='dark'] .table-header {
+  background: var(--fs-surface-2);
+  border-bottom-color: var(--fs-border);
+}
+
+[data-theme='dark'] thead,
+[data-theme='dark'] .table-wrapper thead,
+[data-theme='dark'] th {
+  background: var(--fs-surface-2);
+  color: var(--fs-muted);
+  border-bottom-color: var(--fs-border-strong);
+  border-top-color: var(--fs-hairline);
+}
+
+[data-theme='dark'] td {
+  color: var(--fs-ink-2);
+  border-bottom-color: var(--fs-hairline);
+}
+
+[data-theme='dark'] tr:hover td {
+  background: var(--fs-surface-2);
+}
+
+[data-theme='dark'] .form-group input,
+[data-theme='dark'] .form-group select,
+[data-theme='dark'] .form-group textarea,
+[data-theme='dark'] .search-input,
+[data-theme='dark'] .filter-select,
+[data-theme='dark'] .date-input {
+  background: var(--fs-input-bg);
+  color: var(--fs-ink);
+  border-color: var(--fs-border-strong);
+}
+
+[data-theme='dark'] .btn-cancel {
+  background: var(--fs-surface);
+  color: var(--fs-ink-2);
+  border-color: var(--fs-border-strong);
+}
+
+[data-theme='dark'] .btn-cancel:hover {
+  background: var(--fs-surface-2);
+  color: var(--fs-ink);
+}
+
+[data-theme='dark'] .region-tag {
+  background: var(--fs-accent-soft);
+  color: var(--fs-accent);
+  border-color: var(--fs-border);
+}
+
+[data-theme='dark'] .attendance-tag.present {
+  background: var(--fs-green-soft);
+  color: var(--fs-green);
+}
+
+[data-theme='dark'] .attendance-tag.late {
+  background: var(--fs-amber-soft);
+  color: var(--fs-amber);
+}
+
+[data-theme='dark'] .attendance-tag.absent {
+  background: var(--fs-red-soft);
+  color: var(--fs-red);
+}
+
+[data-theme='dark'] .attendance-tag.half_day {
+  background: var(--fs-gold-soft);
+  color: var(--fs-gold);
+}
+
+[data-theme='dark'] .attendance-tag.pending {
+  background: var(--fs-surface-3);
+  color: var(--fs-muted);
+}
+
+[data-theme='dark'] .modal-overlay {
+  background: rgba(0, 0, 0, 0.7);
+}
+
+/* ============================================================================
+   TYPE SCALE
+   ----------------------------------------------------------------------------
+   Authoritative for text size across the shell. Declared last so it settles
+   every font-size left over from the legacy rules above. Reads from the
+   --fs-text-* tokens, so the whole product rescales from one place.
+   15px base, 12px floor, 1.55 line height.
+   ============================================================================ */
+
+/* --- Navigation and chrome --- */
+.sidebar-brand span {
+  font-size: var(--fs-text-xl);
+}
+
+.sidebar-nav .nav-item {
+  font-size: var(--fs-text-base);
+  padding: 11px var(--fs-content-x);
+}
+
+.nav-badge {
+  font-size: var(--fs-text-2xs);
+  padding: 1px 7px;
+}
+
+.user-name {
+  font-size: var(--fs-text-base);
+}
+
+.user-role {
+  font-size: var(--fs-text-xs);
+}
+
+.logout-btn {
+  font-size: var(--fs-text-xs);
+  padding: 9px;
+}
+
+.header-left h1,
+.header-page-title {
+  font-size: var(--fs-text-2xl);
+}
+
+.connection-status,
+.status-text {
+  font-size: var(--fs-text-xs);
+}
+
+.status-dot {
+  width: 11px;
+  height: 11px;
+}
+
+.sync-btn {
+  font-size: var(--fs-text-xs);
+  padding: 5px 13px;
+}
+
+/* --- Headings --- */
+.page-title {
+  font-size: var(--fs-text-2xl);
+}
+
+.form-header h3,
+.table-header h3 {
+  font-size: var(--fs-text-lg);
+}
+
+.form-header p,
+.table-header p {
+  font-size: var(--fs-text-sm);
+}
+
+/* --- Cards and stats --- */
+.stat-card {
+  padding: 18px 20px;
+}
+
+.stat-icon {
+  width: 50px;
+  height: 50px;
+  font-size: 24px;
+}
+
+.stat-value {
+  font-size: var(--fs-text-3xl);
+}
+
+.stat-label {
+  font-size: var(--fs-text-2xs);
+  letter-spacing: 0.06em;
+}
+
+.quick-stat {
+  padding: 16px 20px;
+}
+
+.quick-stat span {
+  font-size: var(--fs-text-sm);
+}
+
+.quick-stat strong {
+  font-size: var(--fs-text-xl);
+}
+
+.form-badge {
+  font-size: var(--fs-text-xs);
+}
+
+/* --- Tables --- */
+table {
+  font-size: var(--fs-text-sm);
+}
+
+th {
+  font-size: var(--fs-text-xs);
+  letter-spacing: 0.05em;
+  padding: 11px 16px;
+}
+
+td {
+  font-size: var(--fs-text-sm);
+  padding: 12px 16px;
+}
+
+.table-wrapper > table {
+  min-width: 820px;
+}
+
+.search-input,
+.filter-select,
+.date-input {
+  font-size: var(--fs-text-sm);
+  padding: 7px 11px;
+}
+
+.empty-state {
+  font-size: var(--fs-text-base);
+}
+
+/* --- Forms --- */
+.form-group label,
+.filter-group label {
+  font-size: var(--fs-text-xs);
+  letter-spacing: 0.05em;
+}
+
+.form-group input,
+.form-group select,
+.form-group textarea {
+  font-size: var(--fs-text-base);
+  padding: 9px 12px;
+}
+
+.form-group textarea {
+  min-height: 80px;
+}
+
+.form-error {
+  font-size: var(--fs-text-xs);
+}
+
+.field-label {
+  font-size: var(--fs-text-xs);
+}
+
+/* --- Buttons --- */
+.btn-primary,
+.btn-submit,
+.btn-cancel {
+  font-size: var(--fs-text-sm);
+  padding: 10px 20px;
+}
+
+.btn-sm {
+  font-size: var(--fs-text-xs);
+  padding: 5px 11px;
+}
+
+.btn-export {
+  font-size: var(--fs-text-xs);
+  padding: 7px 15px;
+}
+
+.tab-btn {
+  font-size: var(--fs-text-sm);
+  padding: 8px 18px;
+}
+
+/* --- Status pills and badges --- */
+.region-tag,
+.attendance-tag,
+.status-tag,
+.sync-tag,
+.leave-status,
+.permission-status,
+.priority-tag,
+.task-status,
+.status-badge,
+.form-badge,
+.role-badge-full {
+  font-size: var(--fs-text-xs);
+  padding: 3px 10px;
+}
+
+.notification-badge {
+  font-size: var(--fs-text-xs);
+  min-width: 18px;
+  height: 18px;
+}
+
+.notification-time {
+  font-size: var(--fs-text-xs);
+}
+
+/* --- Charts and misc --- */
+.css-trend-label,
+.css-trend-value,
+.css-chart-value,
+.performance-value,
+.performance-label {
+  font-size: var(--fs-text-xs);
+}
+
+.offline-indicator {
+  font-size: var(--fs-text-sm);
+}
+
+/* --- Modals and notifications --- */
+.modal-header h3 {
+  font-size: var(--fs-text-xl);
+}
+
+.modal-content {
+  padding: 28px;
+}
+
+.modal-form {
+  gap: 18px;
+}
+
+.notification-detail-title {
+  font-size: var(--fs-text-lg);
+}
+
+.notification-detail-message {
+  font-size: var(--fs-text-base);
+  line-height: 1.7;
+}
+
+.notification-detail-type,
+.notification-detail-row,
+.notification-detail-ghost,
+.notification-detail-action {
+  font-size: var(--fs-text-sm);
+}
+
+/* --- Login --- */
+.login-card-full h2 {
+  font-size: var(--fs-text-2xl);
+}
+
+.login-footer-full,
+.cred-email,
+.cred-role-full {
+  font-size: var(--fs-text-sm);
+}
+
+.cred-role-full small,
+.cred-pass {
+  font-size: var(--fs-text-xs);
+}
+
+.language-select {
+  font-size: var(--fs-text-sm);
+  padding: 0;
+}
+
+/* ============================================================================
+   RESPONSIVE
+   ----------------------------------------------------------------------------
+   Declared last, after the formal theme, because the theme's desktop rules are
+   unlayered and would otherwise win over the legacy media queries higher up.
+   Anything a page sets with an inline style needs !important to yield here,
+   which is why so many of these are flagged.
+   ============================================================================ */
+
+/* ---------------------------------------------------------- <= 1200px --- */
+@media (max-width: 1200px) {
+  .content {
+    max-width: none;
+  }
+}
+
+/* ---------------------------------------------------------- <= 1024px --- */
+@media (max-width: 1024px) {
+  .stats-grid,
+  .officer-quick-stats,
+  .attendance-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  /* Two cards per row is as tight as a data table stays readable. */
+  .team-grid,
+  .home-contact-grid {
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  }
+}
+
+/* ----------------------------------------------------------- <= 900px --- */
+@media (max-width: 900px) {
+  .charts-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* ----------------------------------------------------------- <= 768px ---
+   Sidebar becomes an overlay drawer so the page regains the full viewport
+   width. This mirrors the markup contract in Sidebar.jsx: .sidebar.open and
+   .sidebar-backdrop.visible. */
+@media (max-width: 768px) {
+  .sidebar {
+    width: min(280px, 84vw);
+    max-width: 84vw;
+    transform: translateX(-100%);
+    visibility: hidden;
+    transition: transform 0.25s ease, visibility 0.25s ease;
+    box-shadow: var(--fs-shadow-lg);
+  }
+
+  .sidebar.open {
+    transform: translateX(0);
+    visibility: visible;
+  }
+
+  .sidebar-backdrop {
+    display: block;
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity 0.25s ease, visibility 0.25s ease;
+  }
+
+  .sidebar-backdrop.visible {
+    opacity: 1;
+    visibility: visible;
+  }
+
+  .hamburger-btn {
+    display: flex;
+  }
+
+  /* Tap targets, not mouse targets. */
+  .sidebar-nav .nav-item {
+    padding: 13px var(--fs-content-x);
+  }
+
+  .main-content {
+    margin-left: 0;
+  }
+
+  .main-header {
+    min-height: 0;
+    padding: 10px 16px;
+    gap: 10px;
+  }
+
+  .header-left {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-width: 0;
+    flex: 1;
+  }
+
+  .header-left h1,
+  .header-page-title {
+    font-size: var(--fs-text-xl);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .header-right {
+    gap: 10px;
+  }
+
+  .content {
+    padding: 16px;
+  }
+
+  .stats-grid,
+  .officer-quick-stats,
+  .attendance-stats {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .form-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .stat-card,
+  .quick-stat {
+    padding: 16px;
+  }
+
+  .stat-value {
+    font-size: var(--fs-text-2xl);
+  }
+
+  .form-card {
+    padding: 16px;
+  }
+
+  /* Buttons go full width so they are comfortably tappable. !important is
+     required because most cells set padding with an inline style. */
+  .form-actions,
+  .modal-actions,
+  .notification-detail-foot {
+    flex-direction: column-reverse;
+    align-items: stretch;
+  }
+
+  .form-actions > *,
+  .modal-actions > *,
+  .notification-detail-foot > * {
+    width: 100%;
+    justify-content: center;
+    text-align: center;
+  }
+
+  .btn-primary,
+  .btn-submit,
+  .btn-cancel,
+  .btn-export,
+  .btn-sm {
+    min-height: 42px;
+  }
+
+  .table-header {
+    flex-direction: column;
+    align-items: stretch;
+    padding: 12px 14px;
+  }
+
+  .table-actions {
+    flex-direction: column;
+    width: 100%;
+  }
+
+  .search-input,
+  .filter-select,
+  .date-input {
+    width: 100%;
+    min-width: 0;
+    min-height: 40px;
+  }
+
+  /* Narrow the floor and drop a step in size so 3-4 columns stay legible
+     before the user has to scroll sideways. */
+  .table-wrapper > table {
+    min-width: 560px;
+    font-size: var(--fs-text-xs);
+  }
+
+  .table-wrapper th,
+  .table-wrapper td {
+    padding: 10px 12px !important;
+  }
+
+  .css-trend-chart {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .css-trend-labels,
+  .css-trend-bars {
+    min-width: 420px;
+    gap: 4px;
+  }
+
+  .css-chart-label {
+    min-width: 48px;
+    font-size: var(--fs-text-xs);
+  }
+
+  .notification-dropdown {
+    width: min(320px, calc(100vw - 24px));
+    right: -8px;
+  }
+
+  .modal-content {
+    padding: 18px;
+    margin: 10px;
+    width: calc(100% - 20px);
+    max-height: 88vh;
+  }
+
+  .notification-detail-box {
+    max-height: 86vh;
+  }
+
+  /* --- Login --- */
+  .login-left-full {
+    padding: 28px 20px;
+    min-height: auto;
+  }
+
+  .login-brand-full h1 {
+    font-size: 28px;
+  }
+
+  .login-card-full h2 {
+    font-size: var(--fs-text-xl);
+  }
+
+  .login-card-full {
+    padding: 24px 18px;
+  }
+
+  .cred-grid-full {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+}
+
+/* ----------------------------------------------------------- <= 480px --- */
+@media (max-width: 480px) {
+  .login-left-full {
+    padding: 22px 16px;
+  }
+
+  .login-brand-full h1 {
+    font-size: 24px;
+  }
+
+  .tagline-full {
+    font-size: var(--fs-text-sm);
+  }
+
+  .login-card-full {
+    padding: 20px 14px;
+  }
+
+  .login-card-full h2 {
+    font-size: var(--fs-text-lg);
+  }
+
+  .login-right-full {
+    padding: 20px 12px;
+  }
+}
+
+/* ----------------------------------------------------------- <= 560px ---
+   Small phones. Single-column everything, and the type scale steps down one
+   notch so long labels do not wrap into unreadable stacks. */
+@media (max-width: 560px) {
+  .main-header {
+    padding: 10px 12px;
+  }
+
+  .header-left h1,
+  .header-page-title {
+    font-size: var(--fs-text-lg);
+  }
+
+  .content {
+    padding: 12px;
+  }
+
+  .stat-card,
+  .quick-stat {
+    gap: 12px;
+  }
+
+  .stat-icon {
+    width: 42px;
+    height: 42px;
+    font-size: 20px;
+  }
+
+  .stat-value {
+    font-size: var(--fs-text-xl);
+  }
+
+  .form-card {
+    padding: 14px;
+  }
+
+  .table-wrapper > table {
+    min-width: 480px;
+  }
+
+  .modal-content {
+    padding: 14px;
+    margin: 6px;
+    width: calc(100% - 12px);
+  }
+
+  .notification-detail-row {
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .notification-detail-row dd {
+    text-align: left;
+  }
+
+  /* Long emails and URLs must not push the layout wide. */
+  .table-wrapper td,
+  .table-wrapper th,
+  .main-content p,
+  .main-content li {
+    overflow-wrap: break-word;
+  }
+}
+
+/* ----------------------------------------------------------- <= 400px --- */
+@media (max-width: 400px) {
+  .header-left h1,
+  .header-page-title {
+    font-size: var(--fs-text-base);
+  }
+
+  .content {
+    padding: 10px;
+  }
+
+  .stat-value {
+    font-size: var(--fs-text-lg);
+  }
+
+  .table-wrapper > table {
+    min-width: 420px;
+  }
+}
+
+/* ------------------------------------------------- REDUCED MOTION ---
+   Formal styling leans on stillness; honour the OS preference so the
+   pulse/spinner animations do not run for users who opt out. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ------------------------------------------------- COLLAPSED RAIL ---
+   On desktop, collapsing shrinks the docked sidebar to an icon rail instead of
+   sliding it away: icons stay visible, labels and badges hide. The sidebar
+   toggle (and the header hamburger) bring the labels back. */
+@media (min-width: 769px) {
+  .app.sidebar-collapsed .sidebar {
+    width: var(--fs-sidebar-w-collapsed, 76px);
+    overflow-x: hidden;
+  }
+
+  .app.sidebar-collapsed .sidebar .brand-wordmark,
+  .app.sidebar-collapsed .sidebar .nav-label,
+  .app.sidebar-collapsed .sidebar .nav-badge {
+    display: none;
+  }
+
+  .app.sidebar-collapsed .sidebar .sidebar-brand {
+    justify-content: center;
+    gap: 0;
+    padding-left: 0;
+    padding-right: 0;
+  }
+
+  .app.sidebar-collapsed .sidebar .sidebar-brand .brand-icon-small {
+    display: none;
+  }
+
+  .app.sidebar-collapsed .sidebar .sidebar-toggle {
+    margin-left: 0;
+  }
+
+  .app.sidebar-collapsed .sidebar .sidebar-nav {
+    padding: 10px 8px;
+  }
+
+  .app.sidebar-collapsed .sidebar .nav-item {
+    justify-content: center;
+    gap: 0;
+    padding: 12px 0;
+  }
+
+  .app.sidebar-collapsed .sidebar .nav-icon {
+    font-size: 20px;
+    line-height: 1;
+  }
+}
+
+/* The rail only exists above the breakpoint; on the mobile drawer the sidebar
+   stays hidden when closed, so the content needs no extra offset. */
+@media (max-width: 768px) {
+  .app.sidebar-collapsed .main-content {
+    margin-left: 0;
+  }
 }

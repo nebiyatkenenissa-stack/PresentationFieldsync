@@ -9,15 +9,21 @@ export async function upsert(data: any): Promise<any> {
   const result = await pool.query(
     `INSERT INTO permissions (
         id, employee_id, employee_name, permission_type,
-        start_date, end_date, reason, status, requested_at,
+        start_date, end_date, shift, time_slot, start_time, end_time, hours,
+        reason, status, requested_at,
         approved_by, approved_at, synced, reject_reason
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
     ON CONFLICT (id) DO UPDATE SET
         employee_id = EXCLUDED.employee_id,
         employee_name = EXCLUDED.employee_name,
         permission_type = EXCLUDED.permission_type,
         start_date = EXCLUDED.start_date,
         end_date = EXCLUDED.end_date,
+        shift = EXCLUDED.shift,
+        time_slot = EXCLUDED.time_slot,
+        start_time = EXCLUDED.start_time,
+        end_time = EXCLUDED.end_time,
+        hours = EXCLUDED.hours,
         reason = EXCLUDED.reason,
         status = EXCLUDED.status,
         approved_by = EXCLUDED.approved_by,
@@ -33,12 +39,20 @@ export async function upsert(data: any): Promise<any> {
       data.permissionType,
       data.startDate,
       data.endDate,
+      // Permissions booked before the shift rule existed have no shift; fall
+      // back to the default so the column is never null.
+      data.shift || 'morning',
+      data.timeSlot || null,
+      data.startTime || null,
+      data.endTime || null,
+      data.hours != null ? Number(data.hours) : null,
       data.reason,
       data.status || 'pending',
       data.requestedAt || new Date().toISOString(),
       data.approvedBy || null,
       data.approvedAt || null,
-      data.synced || false,
+      // Client may send the offline sentinel 'syncing' instead of a boolean.
+      data.synced === true || data.synced === 'true' || data.synced === 'syncing',
       data.rejectReason || null,
     ]
   );
@@ -53,13 +67,18 @@ export async function update(id: string, data: any): Promise<any> {
         permission_type = $3,
         start_date = $4,
         end_date = $5,
-        reason = $6,
-        status = $7,
-        approved_by = $8,
-        approved_at = $9,
-        reject_reason = $10,
-        synced = $11
-    WHERE id = $12
+        shift = $6,
+        time_slot = $7,
+        start_time = $8,
+        end_time = $9,
+        hours = $10,
+        reason = $11,
+        status = $12,
+        approved_by = $13,
+        approved_at = $14,
+        reject_reason = $15,
+        synced = $16
+    WHERE id = $17
     RETURNING *`,
     [
       data.employeeId,
@@ -67,6 +86,11 @@ export async function update(id: string, data: any): Promise<any> {
       data.permissionType,
       data.startDate,
       data.endDate,
+      data.shift || 'morning',
+      data.timeSlot || null,
+      data.startTime || null,
+      data.endTime || null,
+      data.hours != null ? Number(data.hours) : null,
       data.reason,
       data.status,
       data.approvedBy,

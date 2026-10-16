@@ -10,6 +10,24 @@ import { syncQueue, checkRealInternet } from '../../services/database';
 import { getServerBase } from '../../utils/helpers';
 const API_BASE = getServerBase() + '/api';
 
+// Date helpers for the leave duration picker. These work on 'YYYY-MM-DD'
+// strings throughout because that is what <input type="date"> produces and what
+// the form stores; going through Date objects alone would shift the day for
+// anyone west of UTC.
+
+const toDateInput = (date) => {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+};
+
+const daysBetween = (startStr, endStr) => {
+  const start = new Date(`${startStr}T00:00:00`);
+  const end = new Date(`${endStr}T00:00:00`);
+  return Math.round((end - start) / 86400000);
+};
+
 function LeaveManagement({
   filteredLeaves,
   leaves,
@@ -29,7 +47,6 @@ function LeaveManagement({
   const [selectedTab, setSelectedTab] = useState('requests');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isOnline, setIsOnline] = useState(navigator.onLine);
-  const [pendingCount, setPendingCount] = useState(0);
   const [displayLeaves, setDisplayLeaves] = useState([]);
   const [errors, setErrors] = useState({});
   const [newLeave, setNewLeave] = useState({
@@ -37,8 +54,73 @@ function LeaveManagement({
     startDate: '',
     endDate: '',
     reason: '',
-    type: 'annual'
+    type: 'annual',
+    duration: 'daily'
   });
+
+  // ===== LEAVE DURATION =====
+  // Each duration has its own ceiling, and daily additionally hides the end-date
+  // picker because a one-day leave is just the start date.
+  const DURATION_LIMITS = {
+    daily: { maxDays: 0, hint: 'leave.duration.hint_daily' },
+    weekly: { maxDays: 3, hint: 'leave.duration.hint_weekly' },
+    monthly: { maxDays: 15, hint: 'leave.duration.hint_monthly' },
+    yearly: { maxMonths: 5, hint: 'leave.duration.hint_yearly' }
+  };
+
+  // Whole months between two dates, used for the yearly ceiling. Counting by
+  // months (not a fixed day count) keeps "5 months" exact across month lengths
+  // and leap years.
+  const monthsBetween = (startStr, endStr) => {
+    const start = new Date(startStr);
+    const end = new Date(endStr);
+    let months = (end.getFullYear() - start.getFullYear()) * 12
+      + (end.getMonth() - start.getMonth());
+    // A partial trailing month counts toward the limit: 1 Jan → 15 Feb is one
+    // full month plus half, so it is 2 months of leave, not 1.
+    if (end.getDate() > start.getDate()) months += 1;
+    return months;
+  };
+
+  // Change the duration and settle the end date for it: daily collapses to the
+  // start date, the rest take the largest window their limit allows unless an
+  // end date the user already picked still fits.
+  const handleDurationChange = (duration) => {
+    const limit = DURATION_LIMITS[duration];
+    let endDate = newLeave.endDate;
+
+    if (duration === 'daily') {
+      endDate = newLeave.startDate;
+    } else if (newLeave.startDate) {
+      const start = new Date(newLeave.startDate);
+      let candidate;
+      if (duration === 'yearly') {
+        candidate = new Date(start);
+        candidate.setMonth(candidate.getMonth() + limit.maxMonths);
+      } else {
+        candidate = new Date(start);
+        candidate.setDate(candidate.getDate() + limit.maxDays);
+      }
+      const candidateStr = toDateInput(candidate);
+
+      // Keep a shorter end date the user already chose, as long as it still
+      // fits inside the new duration's ceiling.
+      const existingFits = endDate && endDate >= newLeave.startDate
+        && (duration === 'yearly'
+          ? monthsBetween(newLeave.startDate, endDate) <= limit.maxMonths
+          : daysBetween(newLeave.startDate, endDate) <= limit.maxDays);
+      endDate = existingFits ? endDate : candidateStr;
+    }
+
+    setNewLeave(prev => ({ ...prev, duration, endDate }));
+    // The ceiling moved, so any error from the previous duration is stale.
+    setErrors(prev => {
+      if (!prev.endDate) return prev;
+      const next = { ...prev };
+      delete next.endDate;
+      return next;
+    });
+  };
 
   // ===== UPDATE DISPLAY LEAVES (only synced = true) =====
   const updateDisplayLeaves = () => {
@@ -83,7 +165,6 @@ function LeaveManagement({
       const online = await checkRealInternet();
       setIsOnline(online);
       const count = syncQueue.count();
-      setPendingCount(count);
       if (online && count > 0) {
         console.log(`🔄 Back online! Auto-syncing ${count} leave requests...`);
         window.dispatchEvent(new CustomEvent('force-sync'));
@@ -96,14 +177,10 @@ function LeaveManagement({
     const handleSyncComplete = async () => {
       console.log('🔄 Sync complete - refreshing leaves...');
       await refreshDataFromIndexedDB();
-      const count = syncQueue.count();
-      setPendingCount(count);
       updateDisplayLeaves();
     };
 
     const handleQueueUpdate = () => {
-      const count = syncQueue.count();
-      setPendingCount(count);
       updateDisplayLeaves();
     };
 
@@ -128,22 +205,37 @@ function LeaveManagement({
   // ===== VALIDATION =====
   const validateLeave = () => {
     const newErrors = {};
+    const duration = newLeave.duration || 'daily';
+
     if (!newLeave.startDate) {
       newErrors.startDate = t('leave.start_date_required');
     }
-    if (!newLeave.endDate) {
+
+    if (duration === 'daily') {
+      // A daily leave is entirely described by its start date, so the end date
+      // is derived rather than chosen and must not be validated.
+      if (!newLeave.startDate) {
+        newErrors.endDate = t('leave.end_date_required');
+      }
+    } else if (!newLeave.endDate) {
       newErrors.endDate = t('leave.end_date_required');
     } else if (newLeave.startDate && newLeave.endDate < newLeave.startDate) {
       newErrors.endDate = t('leave.end_date_after_start');
     }
-    if (newLeave.startDate && newLeave.endDate) {
-      const start = new Date(newLeave.startDate);
-      const end = new Date(newLeave.endDate);
-      const diffDays = Math.ceil((end - start) / (1000 * 60 * 60 * 24));
-      if (diffDays > 30) {
-        newErrors.endDate = t('leave.max_30_days');
+
+    if (newLeave.startDate && newLeave.endDate && newLeave.endDate >= newLeave.startDate) {
+      if (duration === 'yearly') {
+        if (monthsBetween(newLeave.startDate, newLeave.endDate) > DURATION_LIMITS.yearly.maxMonths) {
+          newErrors.endDate = t('leave.max_yearly_months');
+        }
+      } else if (daysBetween(newLeave.startDate, newLeave.endDate) > DURATION_LIMITS[duration].maxDays) {
+        // Each duration carries its own ceiling: weekly 3 days, monthly 15.
+        newErrors.endDate = t(
+          duration === 'weekly' ? 'leave.max_weekly_days' : 'leave.max_monthly_days'
+        );
       }
     }
+
     if (newLeave.startDate) {
       const today = new Date();
       today.setHours(0, 0, 0, 0);
@@ -186,6 +278,7 @@ function LeaveManagement({
       endDate: newLeave.endDate,
       reason: newLeave.reason.trim(),
       type: newLeave.type,
+      duration: newLeave.duration || 'daily',
       status: 'pending',
       createdAt: new Date().toISOString(),
       approvedBy: null,
@@ -220,14 +313,12 @@ function LeaveManagement({
         } catch (err) {
           console.warn('Server unreachable, queueing leave:', err.message);
           syncQueue.add({ type: 'leave', id: leave.id, data: leave });
-          setPendingCount(syncQueue.count());
           toast(t('leave.server_unreachable_save'));
         }
       } else {
         // Offline – queue immediately
         console.warn('Offline, queueing leave...');
         syncQueue.add({ type: 'leave', id: leave.id, data: leave });
-        setPendingCount(syncQueue.count());
         toast(t('leave.saved_offline'));
       }
 
@@ -246,7 +337,7 @@ function LeaveManagement({
     } finally {
       setIsSubmitting(false);
       setShowModal(false);
-      setNewLeave({ employeeId: '', startDate: '', endDate: '', reason: '', type: 'annual' });
+      setNewLeave({ employeeId: '', startDate: '', endDate: '', reason: '', type: 'annual', duration: 'daily' });
       setErrors({});
     }
   };
@@ -313,14 +404,12 @@ function LeaveManagement({
         } catch (err) {
           console.warn('Failed to sync approval, queueing:', err.message);
           syncQueue.add({ type: 'leave_update', id: leaveId, data: updatedLeave });
-          setPendingCount(syncQueue.count());
           toast(approve ? t('leave.approved_local_pending') : t('leave.rejected_local_pending'));
         }
       } else {
         // Offline – queue the update
         console.warn('Offline, queueing leave approval...');
         syncQueue.add({ type: 'leave_update', id: leaveId, data: updatedLeave });
-        setPendingCount(syncQueue.count());
         toast(approve ? t('leave.approved_local') : t('leave.rejected_local'));
       }
 
@@ -386,9 +475,6 @@ function LeaveManagement({
               marginBottom: '16px'
             }}>
               <strong>📴 {t('auth.offline_mode')}:</strong> {t('leave.offline_save_notice')}
-              {pendingCount > 0 && (
-                <span style={{ marginLeft: '8px' }}>({t('leave.pending_sync', { count: pendingCount })})</span>
-              )}
             </div>
           )}
 
@@ -432,13 +518,51 @@ function LeaveManagement({
                 />
               </div>
             )}
-            <div className="form-row" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+            <div className="form-group" style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+              <label style={{ fontSize: '13px', fontWeight: '500', color: '#374151' }}>{t('leave.duration.label')}</label>
+              <select
+                value={newLeave.duration || 'daily'}
+                onChange={e => handleDurationChange(e.target.value)}
+                style={{ padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '14px', width: '100%', background: 'white' }}
+              >
+                <option value="daily">{t('leave.duration.daily')}</option>
+                <option value="weekly">{t('leave.duration.weekly')}</option>
+                <option value="monthly">{t('leave.duration.monthly')}</option>
+                <option value="yearly">{t('leave.duration.yearly')}</option>
+              </select>
+              <span style={{ fontSize: '12px', color: '#6b7280' }}>
+                {t(DURATION_LIMITS[newLeave.duration || 'daily'].hint)}
+              </span>
+            </div>
+            <div className="form-row">
               <div className="form-group" style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                 <label style={{ fontSize: '13px', fontWeight: '500', color: '#374151' }}>{t('leave.start_date')} *</label>
                 <input
                   type="date"
                   value={newLeave.startDate}
-                  onChange={e => setNewLeave({ ...newLeave, startDate: e.target.value })}
+                  onChange={e => {
+                    const startDate = e.target.value;
+                    const duration = newLeave.duration || 'daily';
+                    if (duration === 'daily') {
+                      setNewLeave({ ...newLeave, startDate, endDate: startDate });
+                      return;
+                    }
+                    // Re-derive the end date from the new start so a shifted
+                    // start never leaves an end that precedes it. Dropping the
+                    // old end here (rather than keeping it when it still fits)
+                    // is deliberate: it was computed against the previous start.
+                    const limit = DURATION_LIMITS[duration];
+                    const start = new Date(`${startDate}T00:00:00`);
+                    let end;
+                    if (duration === 'yearly') {
+                      end = new Date(start);
+                      end.setMonth(end.getMonth() + limit.maxMonths);
+                    } else {
+                      end = new Date(start);
+                      end.setDate(end.getDate() + limit.maxDays);
+                    }
+                    setNewLeave({ ...newLeave, startDate, endDate: toDateInput(end) });
+                  }}
                   required
                   min={new Date().toISOString().split('T')[0]}
                   style={{
@@ -455,28 +579,30 @@ function LeaveManagement({
                   </div>
                 )}
               </div>
-              <div className="form-group" style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                <label style={{ fontSize: '13px', fontWeight: '500', color: '#374151' }}>{t('leave.end_date')} *</label>
-                <input
-                  type="date"
-                  value={newLeave.endDate}
-                  onChange={e => setNewLeave({ ...newLeave, endDate: e.target.value })}
-                  required
-                  min={newLeave.startDate || new Date().toISOString().split('T')[0]}
-                  style={{
-                    padding: '8px 12px',
-                    border: `1px solid ${errors.endDate ? '#dc2626' : '#d1d5db'}`,
-                    borderRadius: '6px',
-                    fontSize: '14px',
-                    width: '100%'
-                  }}
-                />
-                {errors.endDate && (
-                  <div className="form-error" style={{ color: '#dc2626', fontSize: '12px', marginTop: '4px' }}>
-                    ⚠️ {errors.endDate}
-                  </div>
-                )}
-              </div>
+              {(newLeave.duration || 'daily') !== 'daily' && (
+                <div className="form-group" style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                  <label style={{ fontSize: '13px', fontWeight: '500', color: '#374151' }}>{t('leave.end_date')} *</label>
+                  <input
+                    type="date"
+                    value={newLeave.endDate}
+                    onChange={e => setNewLeave({ ...newLeave, endDate: e.target.value })}
+                    required
+                    min={newLeave.startDate || new Date().toISOString().split('T')[0]}
+                    style={{
+                      padding: '8px 12px',
+                      border: `1px solid ${errors.endDate ? '#dc2626' : '#d1d5db'}`,
+                      borderRadius: '6px',
+                      fontSize: '14px',
+                      width: '100%'
+                    }}
+                  />
+                  {errors.endDate && (
+                    <div className="form-error" style={{ color: '#dc2626', fontSize: '12px', marginTop: '4px' }}>
+                      ⚠️ {errors.endDate}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
             <div className="form-group" style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
               <label style={{ fontSize: '13px', fontWeight: '500', color: '#374151' }}>{t('leave.type.label')}</label>
@@ -574,40 +700,6 @@ function LeaveManagement({
 
     return (
       <div className="leaves-view">
-        {!isOnline && pendingCount > 0 && (
-          <div style={{
-            background: '#fef3c7',
-            border: '1px solid #f59e0b',
-            padding: '12px 16px',
-            borderRadius: '8px',
-            marginBottom: '16px',
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            flexWrap: 'wrap'
-          }}>
-            <span>{t('leave.offline_requests_saved', { count: pendingCount })}</span>
-            <span style={{ fontSize: '12px', color: '#92400e' }}>{t('leave.waiting_connection')}</span>
-          </div>
-        )}
-
-        {isOnline && pendingCount > 0 && (
-          <div style={{
-            background: '#dbeafe',
-            border: '1px solid #3b82f6',
-            padding: '12px 16px',
-            borderRadius: '8px',
-            marginBottom: '16px',
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            flexWrap: 'wrap'
-          }}>
-            <span>{t('leave.syncing_requests', { count: pendingCount })}</span>
-            <span style={{ fontSize: '12px', color: '#1e40af' }}>{t('leave.please_wait')}</span>
-          </div>
-        )}
-
         {/* ===== HERO HEADER (dashboard style) ===== */}
         <div style={{
           background: 'linear-gradient(135deg, #0f2a4a 0%, #1e3a5f 55%, #2563eb 120%)',
@@ -688,9 +780,9 @@ function LeaveManagement({
 
           <div className="table-wrapper">
             <table>
-              <thead><tr><th>{t('leave.employee')}</th><th>{t('leave.type.label')}</th><th>{t('leave.start')}</th><th>{t('leave.end')}</th><th>{t('leave.reason')}</th><th>{t('common.status')}</th><th>{t('leave.action')}</th></tr></thead>
+              <thead><tr><th>{t('leave.employee')}</th><th>{t('leave.type.label')}</th><th>{t('leave.duration.label')}</th><th>{t('leave.start')}</th><th>{t('leave.end')}</th><th>{t('leave.reason')}</th><th>{t('common.status')}</th><th>{t('leave.action')}</th></tr></thead>
               <tbody>
-                {getDisplayLeaves().length === 0 && (<tr><td colSpan="7" className="empty-state"><div className="empty-icon">📭</div><div>{t('leave.no_requests_found')}</div></td></tr>)}
+                {getDisplayLeaves().length === 0 && (<tr><td colSpan="8" className="empty-state"><div className="empty-icon">📭</div><div>{t('leave.no_requests_found')}</div></td></tr>)}
                 {getDisplayLeaves().map(l => {
                   const isOwnLeave = l.employeeId === user.employeeId;
                   const isTeamMember = teamIds.includes(l.employeeId);
@@ -701,6 +793,7 @@ function LeaveManagement({
                     <tr key={l.id}>
                       <td><strong>{l.employeeName}</strong>{isOwnLeave && <span style={{ fontSize: '11px', color: '#6b7f94', marginLeft: '6px' }}>({t('leave.you')})</span>}{isTeamMember && !isOwnLeave && <span style={{ fontSize: '11px', color: '#0369a1', marginLeft: '6px' }}>({t('leave.team')})</span>}</td>
                       <td><span style={{ textTransform: 'capitalize' }}>{t(`leave.type.${l.type}`, { defaultValue: l.type })}</span></td>
+                      <td><span style={{ textTransform: 'capitalize' }}>{t(`leave.duration.${l.duration || 'daily'}`)}</span></td>
                       <td>{l.startDate}</td>
                       <td>{l.endDate}</td>
                       <td>{l.reason}</td>
@@ -729,7 +822,7 @@ function LeaveManagement({
                                   display: 'inline-flex'
                                 }}
                               >
-                                ? {t('common.approve')}
+                                {t('common.approve')}
                               </button>
                               <button
                                 onClick={() => approveLeave(l.id, false)}
@@ -746,7 +839,7 @@ function LeaveManagement({
                                   display: 'inline-flex'
                                 }}
                               >
-                                ? {t('common.reject')}
+                                {t('common.reject')}
                               </button>
                             </>
                           ) : isOwnLeave ? (
@@ -774,40 +867,6 @@ function LeaveManagement({
   const renderOfficerView = () => {
     return (
       <div className="leaves-view">
-        {!isOnline && pendingCount > 0 && (
-          <div style={{
-            background: '#fef3c7',
-            border: '1px solid #f59e0b',
-            padding: '12px 16px',
-            borderRadius: '8px',
-            marginBottom: '16px',
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            flexWrap: 'wrap'
-          }}>
-            <span>{t('leave.offline_requests_saved', { count: pendingCount })}</span>
-            <span style={{ fontSize: '12px', color: '#92400e' }}>{t('leave.waiting_connection')}</span>
-          </div>
-        )}
-
-        {isOnline && pendingCount > 0 && (
-          <div style={{
-            background: '#dbeafe',
-            border: '1px solid #3b82f6',
-            padding: '12px 16px',
-            borderRadius: '8px',
-            marginBottom: '16px',
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            flexWrap: 'wrap'
-          }}>
-            <span>{t('leave.syncing_requests', { count: pendingCount })}</span>
-            <span style={{ fontSize: '12px', color: '#1e40af' }}>{t('leave.please_wait')}</span>
-          </div>
-        )}
-
         {/* ===== HERO HEADER (dashboard style) ===== */}
         <div style={{
           background: 'linear-gradient(135deg, #0f2a4a 0%, #1e3a5f 55%, #2563eb 120%)',
@@ -854,13 +913,14 @@ function LeaveManagement({
 
           <div className="table-wrapper">
             <table>
-              <thead><tr><th>{t('leave.employee')}</th><th>{t('leave.type.label')}</th><th>{t('leave.start')}</th><th>{t('leave.end')}</th><th>{t('leave.reason')}</th><th>{t('common.status')}</th></tr></thead>
+              <thead><tr><th>{t('leave.employee')}</th><th>{t('leave.type.label')}</th><th>{t('leave.duration.label')}</th><th>{t('leave.start')}</th><th>{t('leave.end')}</th><th>{t('leave.reason')}</th><th>{t('common.status')}</th></tr></thead>
               <tbody>
-                {getDisplayLeaves().length === 0 && (<tr><td colSpan="6" className="empty-state"><div className="empty-icon">📭</div><div>{t('leave.no_requests_found')}</div></td></tr>)}
+                {getDisplayLeaves().length === 0 && (<tr><td colSpan="7" className="empty-state"><div className="empty-icon">📭</div><div>{t('leave.no_requests_found')}</div></td></tr>)}
                 {getDisplayLeaves().map(l => (
                   <tr key={l.id}>
                     <td><strong>{l.employeeName}</strong></td>
                     <td><span style={{ textTransform: 'capitalize' }}>{t(`leave.type.${l.type}`, { defaultValue: l.type })}</span></td>
+                    <td><span style={{ textTransform: 'capitalize' }}>{t(`leave.duration.${l.duration || 'daily'}`)}</span></td>
                     <td>{l.startDate}</td>
                     <td>{l.endDate}</td>
                     <td>{l.reason}</td>
@@ -884,40 +944,6 @@ function LeaveManagement({
   const renderManagerView = () => {
     return (
       <div className="leaves-view">
-        {!isOnline && pendingCount > 0 && (
-          <div style={{
-            background: '#fef3c7',
-            border: '1px solid #f59e0b',
-            padding: '12px 16px',
-            borderRadius: '8px',
-            marginBottom: '16px',
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            flexWrap: 'wrap'
-          }}>
-            <span>{t('leave.offline_requests_saved', { count: pendingCount })}</span>
-            <span style={{ fontSize: '12px', color: '#92400e' }}>{t('leave.waiting_connection')}</span>
-          </div>
-        )}
-
-        {isOnline && pendingCount > 0 && (
-          <div style={{
-            background: '#dbeafe',
-            border: '1px solid #3b82f6',
-            padding: '12px 16px',
-            borderRadius: '8px',
-            marginBottom: '16px',
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            flexWrap: 'wrap'
-          }}>
-            <span>{t('leave.syncing_requests', { count: pendingCount })}</span>
-            <span style={{ fontSize: '12px', color: '#1e40af' }}>{t('leave.please_wait')}</span>
-          </div>
-        )}
-
         {/* ===== HERO HEADER (dashboard style) ===== */}
         <div style={{
           background: 'linear-gradient(135deg, #0f2a4a 0%, #1e3a5f 55%, #2563eb 120%)',
@@ -963,13 +989,14 @@ function LeaveManagement({
 
           <div className="table-wrapper">
             <table>
-              <thead><tr><th>{t('leave.employee')}</th><th>{t('leave.type.label')}</th><th>{t('leave.start')}</th><th>{t('leave.end')}</th><th>{t('leave.reason')}</th><th>{t('common.status')}</th><th>{t('leave.action')}</th></tr></thead>
+              <thead><tr><th>{t('leave.employee')}</th><th>{t('leave.type.label')}</th><th>{t('leave.duration.label')}</th><th>{t('leave.start')}</th><th>{t('leave.end')}</th><th>{t('leave.reason')}</th><th>{t('common.status')}</th><th>{t('leave.action')}</th></tr></thead>
               <tbody>
-                {getDisplayLeaves().length === 0 && (<tr><td colSpan="7" className="empty-state"><div className="empty-icon">📭</div><div>{t('leave.no_requests_found')}</div></td></tr>)}
+                {getDisplayLeaves().length === 0 && (<tr><td colSpan="8" className="empty-state"><div className="empty-icon">📭</div><div>{t('leave.no_requests_found')}</div></td></tr>)}
                 {getDisplayLeaves().map(l => (
                   <tr key={l.id}>
                     <td><strong>{l.employeeName}</strong></td>
                     <td><span style={{ textTransform: 'capitalize' }}>{t(`leave.type.${l.type}`, { defaultValue: l.type })}</span></td>
+                    <td><span style={{ textTransform: 'capitalize' }}>{t(`leave.duration.${l.duration || 'daily'}`)}</span></td>
                     <td>{l.startDate}</td>
                     <td>{l.endDate}</td>
                     <td>{l.reason}</td>
@@ -997,7 +1024,7 @@ function LeaveManagement({
                               display: 'inline-flex'
                             }}
                           >
-                            ? {t('common.approve')}
+                            {t('common.approve')}
                           </button>
                           <button
                             onClick={() => approveLeave(l.id, false)}
@@ -1014,7 +1041,7 @@ function LeaveManagement({
                               display: 'inline-flex'
                             }}
                           >
-                            ? {t('common.reject')}
+                            {t('common.reject')}
                           </button>
                         </>
                       )}

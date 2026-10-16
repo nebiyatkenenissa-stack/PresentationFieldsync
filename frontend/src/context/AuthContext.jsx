@@ -1,5 +1,5 @@
 import React, { createContext, useState, useContext, useEffect } from 'react';
-import { db } from '../services/database';
+import { db, getApiBase } from '../services/database';
 
 const AuthContext = createContext(null);
 
@@ -18,6 +18,7 @@ export function AuthProvider({ children }) {
           const loggedInUser = users.find(u => u.id === session.userId);
           if (loggedInUser && loggedInUser.status === 'active') {
             setUser(loggedInUser);
+            if (session.token) localStorage.setItem('fieldsync_token', session.token);
           }
         }
       } catch (error) {
@@ -32,15 +33,33 @@ export function AuthProvider({ children }) {
   const login = async (email, password) => {
     setLoginError('');
     try {
-      const users = await db.users.toArray();
-      const foundUser = users.find(u => u.email === email && u.password === password && u.status === 'active');
-      if (foundUser) {
-        setUser(foundUser);
-        await db.auth.put({ id: 'session', userId: foundUser.id });
-        return true;
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 5000);
+      try {
+        const res = await fetch(`${getApiBase()}/auth/login`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, password }),
+          signal: controller.signal,
+        });
+        clearTimeout(timeout);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.token) {
+            localStorage.setItem('fieldsync_token', data.token);
+            await db.auth.put({ id: 'session', userId: data.user.id, token: data.token });
+            setUser(data.user);
+            return true;
+          }
+        }
+        const data = await res.json().catch(() => ({}));
+        setLoginError(data.error || 'Invalid email or password');
+        return false;
+      } catch (e) {
+        clearTimeout(timeout);
+        setLoginError('Server unreachable. Please try again.');
+        return false;
       }
-      setLoginError('Invalid email or password');
-      return false;
     } catch (error) {
       console.error('Login error:', error);
       setLoginError('An error occurred during login');
@@ -50,6 +69,7 @@ export function AuthProvider({ children }) {
 
   const logout = async () => {
     setUser(null);
+    localStorage.removeItem('fieldsync_token');
     await db.auth.delete('session');
   };
 

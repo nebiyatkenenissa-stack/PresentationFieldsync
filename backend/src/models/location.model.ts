@@ -56,6 +56,7 @@ export async function ensureLocationTable(): Promise<void> {
 export async function addMissingColumns(): Promise<void> {
   await pool.query(`
     ALTER TABLE users ADD COLUMN IF NOT EXISTS phone VARCHAR(50);
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS gender VARCHAR(20);
     ALTER TABLE users ADD COLUMN IF NOT EXISTS shift VARCHAR(20) DEFAULT 'Day';
     ALTER TABLE users ADD COLUMN IF NOT EXISTS department VARCHAR(100);
     ALTER TABLE users ADD COLUMN IF NOT EXISTS profile_photo TEXT;
@@ -71,7 +72,6 @@ export async function addMissingColumns(): Promise<void> {
     ALTER TABLE users ALTER COLUMN region TYPE TEXT;
     ALTER TABLE users ALTER COLUMN location_path TYPE TEXT;
     ALTER TABLE reports ALTER COLUMN region TYPE TEXT;
-    ALTER TABLE attendance ALTER COLUMN region TYPE TEXT;
     ALTER TABLE supervisor_reports ALTER COLUMN region TYPE TEXT;
     ALTER TABLE supervisor_reports ALTER COLUMN officer_region TYPE TEXT;
     ALTER TABLE citizens ADD COLUMN IF NOT EXISTS id_type VARCHAR(50);
@@ -101,6 +101,17 @@ export async function addMissingColumns(): Promise<void> {
     ALTER TABLE supervisor_reports ADD COLUMN IF NOT EXISTS team_morale VARCHAR(20);
     ALTER TABLE supervisor_reports ADD COLUMN IF NOT EXISTS resource_status VARCHAR(20);
     ALTER TABLE supervisor_reports ADD COLUMN IF NOT EXISTS overall_status VARCHAR(20);
+    -- Leave duration bucket chosen on the request form (daily / weekly /
+    -- monthly / yearly). Defaults to 'daily' so existing rows keep meaning.
+    ALTER TABLE leaves ADD COLUMN IF NOT EXISTS duration VARCHAR(20) DEFAULT 'daily';
+    -- Permission shift/slot. A permission is booked against a fixed slot inside
+    -- a shift, capped at 5 hours, so start/end/hours are denormalised here
+    -- rather than derived on every read.
+    ALTER TABLE permissions ADD COLUMN IF NOT EXISTS shift VARCHAR(20) DEFAULT 'morning';
+    ALTER TABLE permissions ADD COLUMN IF NOT EXISTS time_slot VARCHAR(30);
+    ALTER TABLE permissions ADD COLUMN IF NOT EXISTS start_time TIME;
+    ALTER TABLE permissions ADD COLUMN IF NOT EXISTS end_time TIME;
+    ALTER TABLE permissions ADD COLUMN IF NOT EXISTS hours NUMERIC(4,2);
   `);
 
   // community_id on users references the `communities` table (a dropdown id),

@@ -400,10 +400,9 @@ function AllReports({ reports, users, supervisorReports, setReports, setSupervis
                     </td>
                     <td><span className="status-tag">{t(`allReports.status.${r.operationalStatus}`)}</span></td>
                     <td>
-                      {r.synced ?
-                        <span className="sync-tag synced">✅ {t('allReports.synced')}</span> :
-                        <span className="sync-tag pending">⏳ {t('allReports.pending')}</span>
-                      }
+                      {r.synced
+                        ? <span className="sync-tag synced">✅ {t('allReports.synced')}</span>
+                        : null}
                     </td>
                     <td>
                       {isNew && (

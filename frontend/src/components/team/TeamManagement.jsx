@@ -169,93 +169,102 @@ function TeamManagement({
         marginBottom: '24px'
       }}>
         <div style={{
-          background: 'linear-gradient(135deg, #1e3a5f, #2a4a7a)',
+          background: 'var(--fs-surface)',
+          border: '1px solid var(--fs-border)',
+          borderLeft: '3px solid #1e3a5f',
           padding: '20px',
-          borderRadius: '12px',
-          color: 'white',
-          boxShadow: cardFilter === null ? '0 4px 12px rgba(30, 58, 95, 0.2)' : '0 0 0 3px rgba(255,255,255,0.7), 0 4px 12px rgba(30, 58, 95, 0.2)',
+          borderRadius: '8px',
+          color: 'var(--fs-ink)',
+          // The "selected" ring was white, which vanishes on a light card --
+          // it is now the card's own accent colour.
+          boxShadow: cardFilter === null ? '0 1px 3px rgba(0,0,0,0.08)' : '0 0 0 3px #1e3a5f, 0 1px 3px rgba(0,0,0,0.08)',
           transition: 'all 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94)',
           cursor: 'pointer'
         }}
         onClick={() => setCardFilter(null)}
         onMouseEnter={(e) => {
           e.currentTarget.style.transform = 'translateY(-4px) scale(1.02)';
-          e.currentTarget.style.boxShadow = '0 8px 25px rgba(30, 58, 95, 0.35)';
+          e.currentTarget.style.boxShadow = '0 6px 16px rgba(17,28,46,0.14)';
         }}
         onMouseLeave={(e) => {
           e.currentTarget.style.transform = 'translateY(0) scale(1)';
-          e.currentTarget.style.boxShadow = cardFilter === null ? '0 4px 12px rgba(30, 58, 95, 0.2)' : '0 0 0 3px rgba(255,255,255,0.7), 0 4px 12px rgba(30, 58, 95, 0.2)';
+          e.currentTarget.style.boxShadow = cardFilter === null ? '0 1px 3px rgba(0,0,0,0.08)' : '0 0 0 3px #1e3a5f, 0 1px 3px rgba(0,0,0,0.08)';
         }}>
-          <div style={{fontSize: '28px', fontWeight: '700'}}>{teamStats.totalMembers}</div>
-          <div style={{fontSize: '13px', opacity: 0.8}}>{t('team.total_members')}</div>
-          <div style={{fontSize: '11px', opacity: 0.7, marginTop: '6px'}}>{cardFilter === null ? t('team.click_view_all') : t('team.showing_all')}</div>
+          <div style={{fontSize: '28px', fontWeight: '700', color: 'var(--fs-ink)'}}>{teamStats.totalMembers}</div>
+          <div style={{fontSize: '13px', color: 'var(--fs-muted)'}}>{t('team.total_members')}</div>
+          <div style={{fontSize: '11px', color: 'var(--fs-muted-2)', marginTop: '6px'}}>{cardFilter === null ? t('team.click_view_all') : t('team.showing_all')}</div>
         </div>
         <div style={{
-          background: 'linear-gradient(135deg, #0b7e4b, #0a6a3f)',
+          background: 'var(--fs-surface)',
+          border: '1px solid var(--fs-border)',
+          borderLeft: '3px solid #0b7e4b',
           padding: '20px',
-          borderRadius: '12px',
-          color: 'white',
-          boxShadow: cardFilter === 'online' ? '0 0 0 3px rgba(255,255,255,0.7), 0 4px 12px rgba(11, 126, 75, 0.2)' : '0 4px 12px rgba(11, 126, 75, 0.2)',
+          borderRadius: '8px',
+          color: 'var(--fs-ink)',
+          boxShadow: cardFilter === 'online' ? '0 0 0 3px #0b7e4b, 0 1px 3px rgba(0,0,0,0.08)' : '0 1px 3px rgba(0,0,0,0.08)',
           transition: 'all 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94)',
           cursor: 'pointer'
         }}
         onClick={() => setCardFilter(cardFilter === 'online' ? null : 'online')}
         onMouseEnter={(e) => {
           e.currentTarget.style.transform = 'translateY(-4px) scale(1.02)';
-          e.currentTarget.style.boxShadow = '0 8px 25px rgba(11, 126, 75, 0.35)';
+          e.currentTarget.style.boxShadow = '0 6px 16px rgba(17,28,46,0.14)';
         }}
         onMouseLeave={(e) => {
           e.currentTarget.style.transform = 'translateY(0) scale(1)';
-          e.currentTarget.style.boxShadow = cardFilter === 'online' ? '0 0 0 3px rgba(255,255,255,0.7), 0 4px 12px rgba(11, 126, 75, 0.2)' : '0 4px 12px rgba(11, 126, 75, 0.2)';
+          e.currentTarget.style.boxShadow = cardFilter === 'online' ? '0 0 0 3px #0b7e4b, 0 1px 3px rgba(0,0,0,0.08)' : '0 1px 3px rgba(0,0,0,0.08)';
         }}>
-          <div style={{fontSize: '28px', fontWeight: '700'}}>{teamStats.onlineMembers}</div>
-          <div style={{fontSize: '13px', opacity: 0.8}}>{t('team.online_now')}</div>
-          <div style={{fontSize: '11px', opacity: 0.7, marginTop: '6px'}}>{cardFilter === 'online' ? t('team.filtering_online') : t('team.click_filter_online')}</div>
+          <div style={{fontSize: '28px', fontWeight: '700', color: 'var(--fs-ink)'}}>{teamStats.onlineMembers}</div>
+          <div style={{fontSize: '13px', color: 'var(--fs-muted)'}}>{t('team.online_now')}</div>
+          <div style={{fontSize: '11px', color: 'var(--fs-muted-2)', marginTop: '6px'}}>{cardFilter === 'online' ? t('team.filtering_online') : t('team.click_filter_online')}</div>
         </div>
         <div style={{
-          background: 'linear-gradient(135deg, #2563eb, #1d4ed8)',
+          background: 'var(--fs-surface)',
+          border: '1px solid var(--fs-border)',
+          borderLeft: '3px solid #2563eb',
           padding: '20px',
-          borderRadius: '12px',
-          color: 'white',
-          boxShadow: cardFilter === 'reports' ? '0 0 0 3px rgba(255,255,255,0.7), 0 4px 12px rgba(37, 99, 235, 0.2)' : '0 4px 12px rgba(37, 99, 235, 0.2)',
+          borderRadius: '8px',
+          color: 'var(--fs-ink)',
+          boxShadow: cardFilter === 'reports' ? '0 0 0 3px #2563eb, 0 1px 3px rgba(0,0,0,0.08)' : '0 1px 3px rgba(0,0,0,0.08)',
           transition: 'all 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94)',
           cursor: 'pointer'
         }}
         onClick={() => setCardFilter(cardFilter === 'reports' ? null : 'reports')}
         onMouseEnter={(e) => {
           e.currentTarget.style.transform = 'translateY(-4px) scale(1.02)';
-          e.currentTarget.style.boxShadow = '0 8px 25px rgba(37, 99, 235, 0.35)';
+          e.currentTarget.style.boxShadow = '0 6px 16px rgba(17,28,46,0.14)';
         }}
         onMouseLeave={(e) => {
           e.currentTarget.style.transform = 'translateY(0) scale(1)';
-          e.currentTarget.style.boxShadow = cardFilter === 'reports' ? '0 0 0 3px rgba(255,255,255,0.7), 0 4px 12px rgba(37, 99, 235, 0.2)' : '0 4px 12px rgba(37, 99, 235, 0.2)';
+          e.currentTarget.style.boxShadow = cardFilter === 'reports' ? '0 0 0 3px #2563eb, 0 1px 3px rgba(0,0,0,0.08)' : '0 1px 3px rgba(0,0,0,0.08)';
         }}>
-          <div style={{fontSize: '28px', fontWeight: '700'}}>{teamStats.totalReports}</div>
-          <div style={{fontSize: '13px', opacity: 0.8}}>{t('team.total_reports')}</div>
-          <div style={{fontSize: '11px', opacity: 0.7, marginTop: '6px'}}>{cardFilter === 'reports' ? t('team.filtering_reports') : t('team.click_filter_reports')}</div>
+          <div style={{fontSize: '28px', fontWeight: '700', color: 'var(--fs-ink)'}}>{teamStats.totalReports}</div>
+          <div style={{fontSize: '13px', color: 'var(--fs-muted)'}}>{t('team.total_reports')}</div>
+          <div style={{fontSize: '11px', color: 'var(--fs-muted-2)', marginTop: '6px'}}>{cardFilter === 'reports' ? t('team.filtering_reports') : t('team.click_filter_reports')}</div>
         </div>
-        <div style={{
-          background: 'linear-gradient(135deg, #d97706, #b45309)',
+<div style={{
+          background: 'var(--fs-surface)',
+          border: '1px solid var(--fs-border)',
+          borderLeft: '3px solid #d97706',
           padding: '20px',
-          borderRadius: '12px',
-          color: 'white',
-          boxShadow: cardFilter === 'citizens' ? '0 0 0 3px rgba(255,255,255,0.7), 0 4px 12px rgba(217, 119, 6, 0.2)' : '0 4px 12px rgba(217, 119, 6, 0.2)',
+          borderRadius: '8px',
+          color: 'var(--fs-ink)',
+          boxShadow: cardFilter === 'citizens' ? '0 0 0 3px #d97706, 0 1px 3px rgba(0,0,0,0.08)' : '0 1px 3px rgba(0,0,0,0.08)',
           transition: 'all 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94)',
           cursor: 'pointer'
         }}
         onClick={() => setCardFilter(cardFilter === 'citizens' ? null : 'citizens')}
         onMouseEnter={(e) => {
           e.currentTarget.style.transform = 'translateY(-4px) scale(1.02)';
-          e.currentTarget.style.boxShadow = '0 8px 25px rgba(217, 119, 6, 0.35)';
+          e.currentTarget.style.boxShadow = '0 6px 16px rgba(17,28,46,0.14)';
         }}
         onMouseLeave={(e) => {
           e.currentTarget.style.transform = 'translateY(0) scale(1)';
-          e.currentTarget.style.boxShadow = cardFilter === 'citizens' ? '0 0 0 3px rgba(255,255,255,0.7), 0 4px 12px rgba(217, 119, 6, 0.2)' : '0 4px 12px rgba(217, 119, 6, 0.2)';
+          e.currentTarget.style.boxShadow = cardFilter === 'citizens' ? '0 0 0 3px #d97706, 0 1px 3px rgba(0,0,0,0.08)' : '0 1px 3px rgba(0,0,0,0.08)';
         }}>
-          {/* ✅ FIX: Display actual citizens count */}
-          <div style={{fontSize: '28px', fontWeight: '700'}}>{teamStats.totalRegistrations}</div>
-          <div style={{fontSize: '13px', opacity: 0.8}}>{t('team.citizens_registered')}</div>
-          <div style={{fontSize: '11px', opacity: 0.7, marginTop: '6px'}}>{cardFilter === 'citizens' ? t('team.filtering_citizens') : t('team.click_filter_citizens')}</div>
+          <div style={{fontSize: '28px', fontWeight: '700', color: 'var(--fs-ink)'}}>{teamStats.totalCitizens}</div>
+          <div style={{fontSize: '13px', color: 'var(--fs-muted)'}}>{t('team.total_citizens')}</div>
+          <div style={{fontSize: '11px', color: 'var(--fs-muted-2)', marginTop: '6px'}}>{cardFilter === 'citizens' ? t('team.filtering_citizens') : t('team.click_filter_citizens')}</div>
         </div>
       </div>
 
@@ -616,12 +625,7 @@ function TeamManagement({
             </div>
 
             {/* Detail Grid - Enhanced */}
-            <div style={{
-              display: 'grid',
-              gridTemplateColumns: '1fr 1fr',
-              gap: '12px',
-              marginBottom: '20px'
-            }}>
+            <div className="form-row" style={{ gap: '12px', marginBottom: '20px' }}>
               {[
                 { label: t('team.detail_employee_id'), value: selectedOfficer.employeeId },
                 { label: t('team.detail_region'), value: selectedOfficer.region },

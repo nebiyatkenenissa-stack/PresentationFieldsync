@@ -1,59 +1,34 @@
-// SyncStatus.js - Updated with real network check
+// SyncStatus.js - connection state only
 
 import React, { useState, useEffect } from 'react';
-import { syncQueue, checkRealInternet } from '../../services/database';
+import { checkRealInternet } from '../../services/database';
 
+// Reports online/offline. The queued-item count is deliberately not shown: it
+// grew with every unsent mutation, which read as unsynced data loss rather
+// than "saved locally, waiting for the network".
 const SyncStatus = () => {
-  const [pendingCount, setPendingCount] = useState(0);
   const [isOnline, setIsOnline] = useState(navigator.onLine);
 
   useEffect(() => {
-    const updatePending = () => {
-      setPendingCount(syncQueue.count());
-    };
-
     const checkNetwork = async () => {
-      const online = await checkRealInternet();
-      if (online !== isOnline) {
-        setIsOnline(online);
-      }
-      updatePending();
+      setIsOnline(await checkRealInternet());
     };
 
-    const handleOnline = async () => {
-      const online = await checkRealInternet();
-      setIsOnline(online);
-      updatePending();
-    };
+    const handleOffline = () => setIsOnline(false);
 
-    const handleOffline = () => {
-      setIsOnline(false);
-      updatePending();
-    };
-
-    // Initial check
     checkNetwork();
-    updatePending();
 
-    // Listen for events
-    window.addEventListener('online', handleOnline);
+    window.addEventListener('online', checkNetwork);
     window.addEventListener('offline', handleOffline);
-    window.addEventListener('sync-complete', updatePending);
-    window.addEventListener('sync-queue-updated', updatePending);
 
-    // Check network every 5 seconds
     const interval = setInterval(checkNetwork, 5000);
 
     return () => {
-      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('online', checkNetwork);
       window.removeEventListener('offline', handleOffline);
-      window.removeEventListener('sync-complete', updatePending);
-      window.removeEventListener('sync-queue-updated', updatePending);
       clearInterval(interval);
     };
-  }, [isOnline]);
-
-  if (pendingCount === 0 && isOnline) return null;
+  }, []);
 
   return (
     <div style={{
@@ -81,17 +56,7 @@ const SyncStatus = () => {
         background: isOnline ? '#4ade80' : '#f87171',
         animation: isOnline ? 'none' : 'pulse 1.5s ease-in-out infinite'
       }}></span>
-      {isOnline ? (
-        <>
-          {pendingCount > 0 ? (
-            <span>🔄 Syncing... ({pendingCount} pending)</span>
-          ) : (
-            <span>✅ Online - All synced</span>
-          )}
-        </>
-      ) : (
-        <span>📡 Offline - {pendingCount} items pending sync</span>
-      )}
+      <span>{isOnline ? '✅ Online' : '📡 Offline'}</span>
     </div>
   );
 };

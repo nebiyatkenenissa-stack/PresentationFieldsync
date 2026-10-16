@@ -10,6 +10,7 @@ export async function ensureCitizenSchema(): Promise<void> {
   await pool.query('ALTER TABLE citizens ADD COLUMN IF NOT EXISTS mother_name TEXT');
   await pool.query('ALTER TABLE citizens ADD COLUMN IF NOT EXISTS birth_place TEXT');
   await pool.query('ALTER TABLE citizens ADD COLUMN IF NOT EXISTS birth_certificate_number VARCHAR(100)');
+  await pool.query('ALTER TABLE citizens ADD COLUMN IF NOT EXISTS gender VARCHAR(20)');
 }
 
 // Lazily migrates legacy base64 photos (data URLs) stored in the DB into file

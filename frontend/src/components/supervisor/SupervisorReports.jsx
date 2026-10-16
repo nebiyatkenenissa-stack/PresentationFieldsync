@@ -18,7 +18,6 @@ function SupervisorReports({
   const [showOfficerReport, setShowOfficerReport] = useState(false);
   const [showSelfReport, setShowSelfReport] = useState(false);
   const [isOnline, setIsOnline] = useState(navigator.onLine);
-  const [pendingCount, setPendingCount] = useState(0);
   const [localReports, setLocalReports] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [form, setForm] = useState({
@@ -63,14 +62,12 @@ function SupervisorReports({
     const checkNetwork = async () => {
       const online = await checkRealInternet();
       setIsOnline(online);
-      setPendingCount(syncQueue.countByTypes(['supervisor_report']));
     };
 
     checkNetwork();
     const interval = setInterval(checkNetwork, 5000);
 
     const handleQueueUpdate = () => {
-      setPendingCount(syncQueue.countByTypes(['supervisor_report']));
     };
 
     window.addEventListener('sync-queue-updated', handleQueueUpdate);
@@ -368,14 +365,12 @@ function SupervisorReports({
         } catch (err) {
           console.warn('Server unreachable, queueing report:', err.message);
           syncQueue.add({ type: 'supervisor_report', id: report.id, data: report });
-          setPendingCount(syncQueue.countByTypes(['supervisor_report']));
           toast('⚠️ Server unreachable. Report saved and will sync later.');
         }
       } else {
         // Offline – queue immediately
         console.warn('Offline, queueing report...');
         syncQueue.add({ type: 'supervisor_report', id: report.id, data: report });
-        setPendingCount(syncQueue.countByTypes(['supervisor_report']));
         toast('📋 Supervisor report saved OFFLINE! Will sync when online.');
       }
       
@@ -472,13 +467,11 @@ function SupervisorReports({
         } catch (err) {
           console.warn('Server unreachable, queueing self report:', err.message);
           syncQueue.add({ type: 'supervisor_report', id: report.id, data: report });
-          setPendingCount(syncQueue.countByTypes(['supervisor_report']));
           toast('⚠️ Server unreachable. Self report saved and will sync later.');
         }
       } else {
         console.warn('Offline, queueing self report...');
         syncQueue.add({ type: 'supervisor_report', id: report.id, data: report });
-        setPendingCount(syncQueue.countByTypes(['supervisor_report']));
         toast('📋 Self report saved OFFLINE! Will sync when online.');
       }
       
@@ -537,17 +530,6 @@ function SupervisorReports({
         <span style={{ fontWeight: '500', color: isOnline ? '#065f37' : '#991b1b' }}>
           {isOnline ? t('header.online') : t('header.offline')}
         </span>
-        {pendingCount > 0 && (
-          <span style={{
-            background: '#f59e0b',
-            color: 'white',
-            padding: '2px 12px',
-            borderRadius: '12px',
-            fontSize: '12px'
-          }}>
-            {t('supervisor.pending_sync', { count: pendingCount })}
-          </span>
-        )}
         {isLoading && (
           <span style={{
             background: '#dbeafe',
@@ -575,17 +557,6 @@ function SupervisorReports({
           flexWrap: 'wrap'
         }}>
           <span>{t('supervisor.offline_banner')}</span>
-          {pendingCount > 0 && (
-            <span style={{
-              background: '#f59e0b',
-              color: 'white',
-              padding: '2px 12px',
-              borderRadius: '12px',
-              fontSize: '12px'
-            }}>
-              {t('supervisor.pending_sync', { count: pendingCount })}
-            </span>
-          )}
         </div>
       )}
 
@@ -723,18 +694,6 @@ function SupervisorReports({
               {t('supervisor.reports_submitted', { count: sortedReports.length })}
             </p>
           </div>
-          {pendingCount > 0 && (
-            <span style={{
-              background: '#fef3c7',
-              color: '#92400e',
-              padding: '2px 12px',
-              borderRadius: '12px',
-              fontSize: '12px',
-              fontWeight: '500'
-            }}>
-              {t('supervisor.pending_sync', { count: pendingCount })}
-            </span>
-          )}
         </div>
 
         <div className="table-wrapper" style={{ overflowX: 'auto' }}>
@@ -862,36 +821,6 @@ function SupervisorReports({
         </div>
 
         {/* Footer with pending count */}
-        {pendingCount > 0 && (
-          <div style={{
-            padding: '12px 24px',
-            borderTop: '1px solid #e5e7eb',
-            background: '#fef3c7',
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            fontSize: '13px',
-            color: '#92400e'
-          }}>
-            <span>{t('supervisor.reports_pending_sync', { count: pendingCount })}</span>
-            {isOnline && (
-              <button
-                onClick={() => window.dispatchEvent(new Event('force-sync'))}
-                style={{
-                  background: '#0b7e4b',
-                  color: 'white',
-                  border: 'none',
-                  padding: '4px 12px',
-                  borderRadius: '4px',
-                  cursor: 'pointer',
-                  fontSize: '12px'
-                }}
-              >
-                {t('supervisor.sync_now')}
-              </button>
-            )}
-          </div>
-        )}
       </div>
 
       {/* ===== OFFICER REPORT MODAL ===== */}
@@ -935,11 +864,6 @@ function SupervisorReports({
                 marginBottom: '16px'
               }}>
                 <strong>{t('auth.offline_mode')}:</strong> {t('supervisor.offline_save_notice')}
-                {pendingCount > 0 && (
-                  <span style={{ marginLeft: '8px' }}>
-                    ({t('supervisor.pending_sync', { count: pendingCount })})
-                  </span>
-                )}
               </div>
             )}
 
@@ -988,7 +912,7 @@ function SupervisorReports({
                   }}
                 />
               </div>
-              <div className="form-row" style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px'}}>
+              <div className="form-row">
                 <div className="form-group" style={{display: 'flex', flexDirection: 'column', gap: '4px'}}>
                   <label style={{fontSize: '13px', fontWeight: '500', color: '#374151'}}>{t('supervisor.performance')}</label>
                   <select 
@@ -1036,7 +960,7 @@ function SupervisorReports({
                   </select>
                 </div>
               </div>
-              <div className="form-row" style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px'}}>
+              <div className="form-row">
                 <div className="form-group" style={{display: 'flex', flexDirection: 'column', gap: '4px'}}>
                   <label style={{fontSize: '13px', fontWeight: '500', color: '#374151'}}>{t('supervisor.quality_of_work')}</label>
                   <select 
@@ -1084,7 +1008,7 @@ function SupervisorReports({
                   </select>
                 </div>
               </div>
-              <div className="form-row" style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px'}}>
+              <div className="form-row">
                 <div className="form-group" style={{display: 'flex', flexDirection: 'column', gap: '4px'}}>
                   <label style={{fontSize: '13px', fontWeight: '500', color: '#374151'}}>{t('supervisor.teamwork')}</label>
                   <select 
@@ -1299,11 +1223,6 @@ function SupervisorReports({
                 marginBottom: '16px'
               }}>
                 <strong>{t('auth.offline_mode')}:</strong> {t('supervisor.self_offline_notice')}
-                {pendingCount > 0 && (
-                  <span style={{ marginLeft: '8px' }}>
-                    ({t('supervisor.pending_sync', { count: pendingCount })})
-                  </span>
-                )}
               </div>
             )}
 
@@ -1348,7 +1267,7 @@ function SupervisorReports({
                   }}
                 />
               </div>
-              <div className="form-row" style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px'}}>
+              <div className="form-row">
                 <div className="form-group" style={{display: 'flex', flexDirection: 'column', gap: '4px'}}>
                   <label style={{fontSize: '13px', fontWeight: '500', color: '#374151'}}>{t('supervisor.site_visits')} *</label>
                   <input 
@@ -1389,7 +1308,7 @@ function SupervisorReports({
                   />
                 </div>
               </div>
-              <div className="form-row" style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px'}}>
+              <div className="form-row">
                 <div className="form-group" style={{display: 'flex', flexDirection: 'column', gap: '4px'}}>
                   <label style={{fontSize: '13px', fontWeight: '500', color: '#374151'}}>{t('supervisor.team_morale')}</label>
                   <select 

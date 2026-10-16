@@ -8,12 +8,12 @@ import { db, syncQueue, checkRealInternet } from '../../services/database';
 import { getProfilePhotoUrl } from '../../utils/helpers';
 import ThemeToggle from './ThemeToggle';
 import LanguageSelector from './LanguageSelector';
+import { BellIcon } from './Icons';
 
 function Header({ 
   user, 
   isOnline: propIsOnline, 
   syncing: propSyncing, 
-  pendingSync: propPendingSync, 
   screenTimeDisplay, 
   isIdle,
   activeTab,
@@ -23,7 +23,9 @@ function Header({
   markAllNotificationsRead,
   onProfileClick,
   onLogout,
-  setActiveTab
+  setActiveTab,
+  onToggleSidebar,
+  sidebarOpen
 }) {
   const { t } = useTranslation();
   const [showDropdown, setShowDropdown] = useState(false);
@@ -31,7 +33,6 @@ function Header({
   const [selectedNotification, setSelectedNotification] = useState(null);
   const [isOnline, setIsOnline] = useState(propIsOnline || navigator.onLine);
   const [syncing, setSyncing] = useState(propSyncing || false);
-  const [pendingSync, setPendingSync] = useState(propPendingSync || 0);
   const [syncProgress, setSyncProgress] = useState(0);
   const [profilePhotoFailed, setProfilePhotoFailed] = useState(false);
 
@@ -95,23 +96,19 @@ function Header({
     };
     const handleSyncComplete = (event) => {
       setSyncing(false);
-      const queueCount = syncQueue.count();
-      setPendingSync(queueCount);
       if (event.detail && event.detail.synced > 0) {
         console.log(`✅ Sync complete: ${event.detail.synced} items synced`);
       }
     };
     const handleQueueUpdated = () => {
-      const queueCount = syncQueue.count();
-      setPendingSync(queueCount);
+      // Queue size is tracked elsewhere for the sync engine; the header does
+      // not display it, so there is nothing to re-render here.
     };
 
     window.addEventListener('sync-start', handleSyncStart);
     window.addEventListener('sync-progress', handleSyncProgress);
     window.addEventListener('sync-complete', handleSyncComplete);
     window.addEventListener('sync-queue-updated', handleQueueUpdated);
-
-    handleQueueUpdated();
 
     return () => {
       window.removeEventListener('sync-start', handleSyncStart);
@@ -120,12 +117,6 @@ function Header({
       window.removeEventListener('sync-queue-updated', handleQueueUpdated);
     };
   }, []);
-
-  useEffect(() => {
-    if (propPendingSync !== undefined && propPendingSync !== pendingSync) {
-      setPendingSync(propPendingSync);
-    }
-  }, [propPendingSync]);
 
   useEffect(() => {
     if (propSyncing !== undefined && propSyncing !== syncing) {
@@ -154,8 +145,6 @@ function Header({
       tasks: 'tasks',
       leaves: 'leaves',
       permissions: 'permissions',
-      attendance: 'attendance',
-      manager_attendance: 'manager_attendance',
       screentime: 'screentime',
       supervisor_reports: 'supervisor_reports',
       alerts: 'alerts',
@@ -237,27 +226,29 @@ function Header({
     '/audit': 'audit',
     '/all_reports': 'all_reports',
     '/alerts': 'alerts',
-    '/verification': 'verification'
+    '/verification': 'verification',
+    '/leaves': 'leaves'
   };
 
   const TAB_ACCESS = {
-    dashboard: ['manager', 'supervisor', 'field_officer'],
-    profile: ['manager', 'supervisor', 'field_officer'],
+    dashboard: ['manager', 'supervisor', 'field_officer', 'admin'],
+    profile: ['manager', 'supervisor', 'field_officer', 'admin'],
     register: ['field_officer'],
     reports: ['supervisor', 'field_officer'],
     report_new: ['field_officer'],
     tasks: ['supervisor', 'field_officer'],
-    permissions: ['manager', 'supervisor', 'field_officer'],
+    permissions: ['manager', 'supervisor', 'field_officer', 'admin'],
     screentime: ['supervisor'],
     supervisor_reports: ['supervisor'],
     team: ['supervisor'],
-    users: ['manager'],
-    analytics: ['manager'],
-    citizens: ['manager'],
-    audit: ['manager'],
-    all_reports: ['manager'],
-    alerts: ['manager', 'supervisor', 'field_officer'],
-    verification: ['supervisor']
+    users: ['manager', 'admin'],
+    analytics: ['manager', 'admin'],
+    citizens: ['manager', 'admin'],
+    audit: ['manager', 'admin'],
+    all_reports: ['manager', 'admin'],
+    alerts: ['manager', 'supervisor', 'field_officer', 'admin'],
+    verification: ['supervisor'],
+    leaves: ['manager', 'supervisor', 'field_officer', 'admin']
   };
 
   const isWelcomeNotification = (n) => /welcome/i.test(n?.title || '');
@@ -265,6 +256,10 @@ function Header({
   const resolveTargetTab = (n) => {
     const tab = LINK_TO_TAB[n?.link];
     if (!tab) return null;
+    // Field officers stay on their current page when opening a task
+    // notification — the Tasks tab is a supervisor-section page (not in
+    // their sidebar), so navigating there would kick them off their page.
+    if (tab === 'tasks' && user?.role === 'field_officer') return null;
     const allowed = TAB_ACCESS[tab];
     if (allowed && !allowed.includes(user?.role)) return null;
     return tab;
@@ -340,26 +335,34 @@ function Header({
 
   return (
     <header className="main-header" style={{
-      background: 'white',
-      padding: '12px 24px',
       display: 'flex',
       justifyContent: 'space-between',
       alignItems: 'center',
-      borderBottom: '1px solid #e5e7eb',
       position: 'sticky',
       top: 0,
       zIndex: 50,
       flexWrap: 'wrap',
-      gap: '8px'
+      background: '#ffffff'
     }}>
       <div className="header-left">
-        <h1 style={{fontSize: '18px', fontWeight: '600', margin: 0}}>{getTitle()}</h1>
+        <button
+          type="button"
+          className="hamburger-btn"
+          onClick={onToggleSidebar}
+          aria-label="Toggle navigation"
+          aria-expanded={sidebarOpen}
+          aria-controls="app-sidebar"
+        >
+          <span />
+          <span />
+          <span />
+        </button>
+        <h1 className="header-page-title">{getTitle()}</h1>
       </div>
 
       <div className="header-right" style={{
         display: 'flex',
         alignItems: 'center',
-        gap: '12px',
         flexWrap: 'wrap'
       }}>
         {/* Theme Toggle */}
@@ -375,13 +378,19 @@ function Header({
             style={{
               background: 'transparent',
               border: 'none',
-              fontSize: '20px',
+              color: 'var(--fs-ink)',
               cursor: 'pointer',
               position: 'relative',
-              padding: '4px'
+              padding: '6px',
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              width: '32px',
+              height: '32px',
+              borderRadius: '50%'
             }}
           >
-            🔔
+            <BellIcon size={20} />
             {unreadCount > 0 && (
               <span style={{
                 position: 'absolute',
@@ -409,6 +418,7 @@ function Header({
               top: '100%',
               right: 0,
               width: '360px',
+              maxWidth: 'calc(100vw - 32px)',
               maxHeight: '440px',
               background: 'white',
               borderRadius: '12px',
@@ -595,6 +605,7 @@ function Header({
                 top: '100%',
                 right: 0,
                 width: '280px',
+                maxWidth: 'calc(100vw - 32px)',
                 background: 'white',
                 borderRadius: '12px',
                 boxShadow: '0 10px 40px rgba(0,0,0,0.15)',

@@ -7,14 +7,9 @@ export default {
     allUsers: 'Hundi Fayyaa',
     noUsers: 'Fayyaa hin argamne',
     fullName: 'Maqaa Dhuunfaa *',
-    email: 'Imeelii *',
     password: 'Jecha Darbaa *',
     phone: 'Bilbila',
-    role: 'Gosa *',
-    region: 'Naannoo *',
-    shift: 'Yommuu',
     department: 'Kutaa',
-    supervisor: 'Iyyataa',
     assignedSites: 'Naannoo Iyyatame',
     enterName: 'Maqaa dhuunfaa galchaa',
     enterEmail: 'Imeelii galchaa',
@@ -57,3 +52,4 @@ export default {
     shift: 'Yommuu'
   }
 };
+

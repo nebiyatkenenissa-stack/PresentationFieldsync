@@ -1,5 +1,6 @@
 import React from 'react';
 import { useTheme } from '../../ThemeContext';
+import { SunIcon, MoonIcon } from './Icons';
 
 function ThemeToggle({ className = '', label }) {
   const { theme, toggleTheme } = useTheme();
@@ -16,19 +17,19 @@ function ThemeToggle({ className = '', label }) {
         display: 'inline-flex',
         alignItems: 'center',
         justifyContent: 'center',
-        gap: '6px',
-        background: isDark ? '#2b3856' : '#f1f5f9',
-        border: isDark ? '1px solid #3b4a6b' : '1px solid #e2e8f0',
-        color: isDark ? '#e2b64e' : '#7a5a00',
+        background: isDark ? 'var(--fs-surface-2)' : '#f1f5f9',
+        border: isDark ? '1px solid var(--fs-border)' : '1px solid #e2e8f0',
+        color: isDark ? 'var(--fs-ink)' : '#334155',
         borderRadius: '999px',
         cursor: 'pointer',
-        padding: '8px 14px',
-        fontSize: '16px',
+        padding: '8px',
+        width: '34px',
+        height: '34px',
         lineHeight: 1,
         transition: 'all 0.25s ease'
       }}
     >
-      {isDark ? '☀️' : '🌙'}
+      {isDark ? <SunIcon size={17} /> : <MoonIcon size={17} />}
     </button>
   );
 }

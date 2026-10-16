@@ -270,11 +270,6 @@ function NotificationBell({
     trackAction(action, 'Task', `${action} task: ${taskTitle}`);
   };
 
-  // Track attendance actions
-  const trackAttendanceAction = (action, officerName) => {
-    trackAction(action, 'Attendance', `${action} attendance for: ${officerName}`);
-  };
-
   // Track user actions
   const trackUserAction = (action, userName) => {
     trackAction(action, 'User', `${action} user: ${userName}`);

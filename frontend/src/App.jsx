@@ -1,4 +1,4 @@
-// App.jsx – FULL COMPLETE VERSION with Profile (password change + file-upload photo path)
+﻿// App.jsx – FULL COMPLETE VERSION with Profile (password change + file-upload photo path)
 // + FORCE PASSWORD CHANGE ON FIRST LOGIN
 // + HIERARCHICAL LOCATION (Country → Region → Zone → Woreda → Kebele → Community)
 // + SERVER LOGIN (hybrid online/offline)
@@ -39,6 +39,7 @@ import './App.css';
 
 // Import components
 import Login from './components/auth/Login';
+import ForgotPassword from './components/auth/ForgotPassword';
 import Home from './components/home/Home';
 import Dashboard from './components/dashboard/Dashboard';
 import Sidebar from './components/common/Sidebar';
@@ -263,10 +264,6 @@ const processOfflineQueue = async (queueItems) => {
           await db.citizens.update(item.id, { synced: true });
           results.synced++;
           break;
-        case 'attendance':
-          await db.attendance.update(item.id, { synced: true });
-          results.synced++;
-          break;
         case 'task':
           await db.tasks.update(item.id, { synced: true });
           results.synced++;
@@ -414,6 +411,7 @@ const mergeUsersFromServer = (localUsers, serverUsers) => {
         shift: serverUser.shift || existing.shift || 'Day',
         department: serverUser.department || existing.department || '',
         phone: serverUser.phone || existing.phone || '',
+        gender: serverUser.gender || existing.gender || '',
         // Keep the local value when the server omits the field, so a partial
         // response cannot clear a flag that is still pending locally.
         must_change_password: serverUser.must_change_password !== undefined
@@ -437,7 +435,8 @@ const mergeUsersFromServer = (localUsers, serverUsers) => {
 
       merged[existingIndex] = updated;
     } else {
-      const defaultPassword = serverUser.role === 'manager' ? 'manager123'
+      const defaultPassword = serverUser.role === 'admin' ? 'admin123'
+        : serverUser.role === 'manager' ? 'manager123'
         : serverUser.role === 'supervisor' ? 'super123' : 'officer123';
       merged.push({
         id: serverUser.id,
@@ -454,6 +453,7 @@ const mergeUsersFromServer = (localUsers, serverUsers) => {
         supervisorId: serverUser.supervisor_id,
         status: serverUser.status,
         phone: serverUser.phone || '',
+        gender: serverUser.gender || '',
         shift: serverUser.shift || 'Day',
         department: serverUser.department || '',
         assignedSites: [],
@@ -486,7 +486,10 @@ const mergeUsersFromServer = (localUsers, serverUsers) => {
 function AppContent() {
   // ===== STATE =====
   const [user, setUser] = useState(null);
-  const [authView, setAuthView] = useState('home');
+  const [authView, setAuthView] = useState(() => {
+    if (typeof window !== 'undefined' && window.location.hash === '#forgot-password') return 'forgot';
+    return 'home';
+  });
   const [isLoading, setIsLoading] = useState(true);
   const [serverChecking, setServerChecking] = useState(true);
   const [serverReachable, setServerReachable] = useState(null);
@@ -508,6 +511,24 @@ function AppContent() {
   const [syncLog, setSyncLog] = useState([]);
   const [showSyncLog, setShowSyncLog] = useState(false);
   const [activeTab, setActiveTab] = useState('dashboard');
+  const [sidebarOpen, setSidebarOpen] = useState(
+    () => typeof window !== 'undefined' && window.innerWidth > 768
+  );
+  // Docked above 768px, overlay drawer below. When the viewport crosses that
+  // breakpoint, resync with the layout on screen instead of carrying the other
+  // mode's state across.
+  useEffect(() => {
+    let wasDesktop = window.innerWidth > 768;
+    const onResize = () => {
+      const isDesktop = window.innerWidth > 768;
+      if (isDesktop !== wasDesktop) {
+        wasDesktop = isDesktop;
+        setSidebarOpen(isDesktop);
+      }
+    };
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
   const [selectedOfficer, setSelectedOfficer] = useState(null);
   const [selectedRegion, setSelectedRegion] = useState('All');
   const [loginError, setLoginError] = useState('');
@@ -615,6 +636,7 @@ function AppContent() {
     email: '',
     password: '',
     phone: '',
+    gender: '',
     role: '',
     region: '',
     supervisorId: '',
@@ -687,6 +709,10 @@ function AppContent() {
   // ===== ROLE CHECKS =====
   const isManager = user?.role === 'manager';
   const isSupervisor = user?.role === 'supervisor';
+  // The management pages belong to the manager role alone.
+  const canManage = isManager;
+
+  const resolvedTab = activeTab;
 
   // ============================================================
   // HELPER: Build location path
@@ -751,6 +777,26 @@ function AppContent() {
             if (foundUser) {
               setUser(foundUser);
               console.log('🔐 Session restored on refresh for', foundUser.name);
+              // Sessions started before the token was persisted have no API
+              // token, which makes every sync/pull call fail with 401. Re-login
+              // silently with the locally cached credentials to obtain one; if
+              // that fails the app simply keeps working unauthenticated.
+              if (!localStorage.getItem('fieldsync_token') && foundUser.password && foundUser.email) {
+                try {
+                  const res = await fetch(`${getApiBase()}/auth/login`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email: foundUser.email, password: foundUser.password })
+                  });
+                  const body = await res.json();
+                  if (res.ok && body.token) {
+                    localStorage.setItem('fieldsync_token', body.token);
+                    console.log('🔑 API token recovered for', foundUser.name);
+                  }
+                } catch (tokenErr) {
+                  console.warn('Silent token refresh failed:', tokenErr);
+                }
+              }
             } else {
               await db.auth.clear();
             }
@@ -879,6 +925,26 @@ function AppContent() {
     return () => window.removeEventListener('verification-streak-passed', handleStreakPassed);
   }, [user, users, addNotification]);
 
+  // ===== 5 CONSECUTIVE UNANSWERED VERIFICATIONS → warn the supervisor =====
+  useEffect(() => {
+    const handleWarningStreak = (event) => {
+      const detail = event.detail;
+      if (!detail || detail.officerId !== user?.id) return;
+      if (!user?.supervisorId) return;
+      const supervisor = (users || []).find(u => u.id === user.supervisorId);
+      if (!supervisor) return;
+      addNotification(
+        supervisor.id,
+        `⚠️ ${detail.streak} Verifications With No Response`,
+        `${detail.officerName || user.name} did not respond to ${detail.streak} consecutive verification checks. Please check in with them.`,
+        'warning',
+        '/verification'
+      );
+    };
+    window.addEventListener('verification-warning-streak', handleWarningStreak);
+    return () => window.removeEventListener('verification-warning-streak', handleWarningStreak);
+  }, [user, users, addNotification]);
+
   // ============================================================
   // DATA LOADING
   // ============================================================
@@ -893,7 +959,8 @@ function AppContent() {
         const [
           usersData, reportsData, citizensData, auditData,
           supervisorReportsData, screenTimeData, tasksData, leavesData,
-          alertsData, liveStatusData, notificationsData, permissionsData
+          alertsData, liveStatusData, notificationsData,
+          permissionsData
         ] = await Promise.all([
           db.users.toArray(),
           db.reports.toArray(),
@@ -1080,7 +1147,7 @@ function AppContent() {
   // ============================================================
   useEffect(() => {
     if (!user) return;
-    const isManagerOrSupervisor = user.role === 'manager' || user.role === 'supervisor';
+    const isManagerOrSupervisor = user.role === 'manager' || user.role === 'supervisor' || user.role === 'admin';
     if (!isManagerOrSupervisor) return;
 
     const pullData = async () => {
@@ -1114,7 +1181,7 @@ function AppContent() {
   // ============================================================
   useEffect(() => {
     if (!user) return;
-    if (user.role !== 'manager') return;
+    if (user.role !== 'manager' && user.role !== 'admin') return;
 
     const pullAudit = async () => {
       await pullAuditLogsFromServer();
@@ -1256,7 +1323,7 @@ function AppContent() {
   // ============================================================
   useEffect(() => {
     if (!user) return;
-    if (user.role !== 'manager') return;
+    if (user.role !== 'manager' && user.role !== 'admin') return;
 
     const pullVerification = async () => {
       await pullVerificationFromServer();
@@ -1286,7 +1353,7 @@ function AppContent() {
   // ============================================================
   useEffect(() => {
     if (!user) return;
-    if (user.role !== 'manager' && user.role !== 'supervisor') return;
+    if (user.role !== 'manager' && user.role !== 'supervisor' && user.role !== 'admin') return;
 
     const pullReports = async () => {
       await pullSupervisorReportsFromServer();
@@ -1446,7 +1513,7 @@ function AppContent() {
       
       const [
         updatedReports, updatedCitizens,
-        updatedTasks, updatedLeaves, updatedPermissions, 
+        updatedTasks, updatedLeaves, updatedPermissions,
         updatedSupervisorReports
       ] = await Promise.all([
         db.reports.toArray(),
@@ -1636,7 +1703,13 @@ function AppContent() {
   const totalReports = reports.length + supervisorReports.length;
   const totalRegistrations = citizens.length;
   const totalCitizens = citizens.length;
-  const pendingSync = reports.filter(r => !r.synced).length + syncQueue.count();
+  // Pending = everything still waiting to reach the server, counted once:
+  // every queued item, plus unsynced reports that have not (yet) been queued.
+  // Reporting the same report twice used to keep this number above zero even
+  // when the queue was empty.
+  // The pendingSync total is no longer surfaced anywhere: it counted every
+  // not-yet-flushed mutation, which read as unsynced data loss even though the
+  // records were already stored locally and flushed on reconnect.
 
   const regionStats = useMemo(() => {
     const map = {};
@@ -1737,7 +1810,7 @@ function AppContent() {
     
     if (online) {
       try {
-        const response = await fetchWithTimeout(`${getApiBase()}/login`, {
+        const response = await fetchWithTimeout(`${getApiBase()}/auth/login`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ email, password })
@@ -1773,6 +1846,15 @@ function AppContent() {
           setActiveTab('dashboard');
           await db.auth.put({ id: 'session', userId: localUser.id });
           sessionStorage.setItem('fieldsync_session_active', 'true');
+          // Persist the API token. Without it every authenticated call
+          // (/api/sync, data pulls, ...) is rejected with 401, so queued
+          // records never reach the server and the "pending sync" count can
+          // never fall to zero.
+          if (data.token) {
+            localStorage.setItem('fieldsync_token', data.token);
+          } else {
+            localStorage.removeItem('fieldsync_token');
+          }
           setLoginError('');
           addNotification(localUser.id, '👋 Welcome Back!', `Welcome back ${localUser.name}!`, 'success');
           addAuditLog('LOGIN', { email: localUser.email, name: localUser.name });
@@ -1928,6 +2010,7 @@ function AppContent() {
     setUser(null);
     await db.auth.clear();
     sessionStorage.removeItem('fieldsync_session_active');
+    localStorage.removeItem('fieldsync_token');
     setShowForceChangePassword(false);
     setAuthView('home');
     if (user) {
@@ -1974,6 +2057,7 @@ function AppContent() {
       email: newUser.email,
       password: newUser.password || generateSimplePassword(),
       phone: newUser.phone || '',
+      gender: newUser.gender || '',
       role: newUser.role,
       region: locationPath,
       supervisorId: newUser.role === 'field_officer' ? newUser.supervisorId : null,
@@ -2946,6 +3030,14 @@ function AppContent() {
     if (isLoading) {
       return <LoadingScreen />;
     }
+    if (authView === 'forgot') {
+      return (
+        <ForgotPassword
+          onBack={() => setAuthView('login')}
+          onLoginSuccess={() => setAuthView('login')}
+        />
+      );
+    }
     if (authView === 'login') {
       return (
         <Login
@@ -2953,6 +3045,7 @@ function AppContent() {
           loginError={loginError}
           isOnline={isOnline}
           onBack={() => setAuthView('home')}
+          onForgot={() => setAuthView('forgot')}
         />
       );
     }
@@ -3096,12 +3189,11 @@ function AppContent() {
         <NextVerificationCountdown target={nextVerificationAt} />
       )}
       
-      <div className="app">
+      <div className={`app${sidebarOpen ? '' : ' sidebar-collapsed'}`}>
         <Sidebar 
-          activeTab={activeTab} 
+          activeTab={resolvedTab} 
           setActiveTab={setActiveTab} 
-          user={user} 
-          pendingSync={pendingSync}
+          user={user}
           liveStatus={liveStatus}
           users={users}
           verificationHistory={verificationHistory}
@@ -3109,13 +3201,15 @@ function AppContent() {
           citizens={citizens}
           verificationScore={verificationScore}
           onProfileClick={() => setActiveTab('profile')}
+          isOpen={sidebarOpen}
+          onClose={() => setSidebarOpen(false)}
+          onToggle={() => setSidebarOpen((open) => !open)}
         />
         <div className="main-content">
           <Header 
             user={user}
             isOnline={isOnline}
             syncing={syncing}
-            pendingSync={pendingSync}
             screenTimeDisplay={screenTimeDisplay}
             isScreenTimeRunning={isScreenTimeRunning}
             isIdle={isIdle}
@@ -3127,13 +3221,15 @@ function AppContent() {
             setActiveTab={setActiveTab}
             onProfileClick={() => setActiveTab('profile')}
             onLogout={handleLogout}
+            onToggleSidebar={() => setSidebarOpen((open) => !open)}
+            sidebarOpen={sidebarOpen}
           />
           <div className="content">
             {/* Each tab wrapped with ErrorBoundary to isolate crashes */}
             <ErrorBoundary>
-              {activeTab === 'dashboard' && (
+              {resolvedTab === 'dashboard' && (
                 <Dashboard 
-                  isManager={isManager}
+                  isManager={canManage}
                   isSupervisor={isSupervisor}
                   isOfficer={isOfficer}
                   user={user}
@@ -3223,7 +3319,7 @@ function AppContent() {
                   setTasks={setTasks}
                   users={users}
                   user={user}
-                  isManager={isManager}
+                  isManager={canManage}
                   isSupervisor={isSupervisor}
                   isOfficer={isOfficer}
                   teamMembers={teamMembers}
@@ -3237,14 +3333,14 @@ function AppContent() {
             </ErrorBoundary>
 
             <ErrorBoundary>
-              {activeTab === 'permissions' && (isManager || isSupervisor || isOfficer) && (
+              {activeTab === 'permissions' && (canManage || isSupervisor || isOfficer) && (
                 <PermissionManagement 
                   filteredPermissions={isSupervisor ? getSupervisorPermissions() : filteredPermissions}
                   permissions={permissions}
                   setPermissions={setPermissions}
                   users={users}
                   user={user}
-                  isManager={isManager}
+                  isManager={canManage}
                   isSupervisor={isSupervisor}
                   isOfficer={isOfficer}
                   teamMembers={teamMembers}
@@ -3256,13 +3352,32 @@ function AppContent() {
             </ErrorBoundary>
 
             <ErrorBoundary>
+              {activeTab === 'leaves' && (canManage || isSupervisor || isOfficer) && (
+                <LeaveManagement
+                  filteredLeaves={isSupervisor ? getSupervisorLeaves() : filteredLeaves}
+                  leaves={leaves}
+                  setLeaves={setLeaves}
+                  users={users}
+                  user={user}
+                  isManager={canManage}
+                  isSupervisor={isSupervisor}
+                  isOfficer={isOfficer}
+                  teamMembers={teamMembers}
+                  addNotification={addNotification}
+                  renderLeaves={renderLeaves}
+                  renderLeaveModal={renderLeaveModal}
+                />
+              )}
+            </ErrorBoundary>
+
+            <ErrorBoundary>
               {activeTab === 'screentime' && isSupervisor && (
                 <ScreenTimeManagement 
                   screenTime={screenTime}
                   setScreenTime={setScreenTime}
                   users={users}
                   user={user}
-                  isManager={isManager}
+                  isManager={canManage}
                   isSupervisor={isSupervisor}
                   isOfficer={isOfficer}
                   teamMembers={teamMembers}
@@ -3303,7 +3418,7 @@ function AppContent() {
                 <TeamManagement 
                   users={users}
                   user={user}
-                  isManager={isManager}
+                  isManager={canManage}
                   isSupervisor={isSupervisor}
                   teamMembers={teamMembers}
                   reports={reports}
@@ -3318,7 +3433,7 @@ function AppContent() {
             </ErrorBoundary>
 
             <ErrorBoundary>
-              {activeTab === 'users' && isManager && (
+              {activeTab === 'users' && canManage && (
                 <UserManagement 
                   users={users}
                   setUsers={setUsers}
@@ -3337,7 +3452,7 @@ function AppContent() {
             </ErrorBoundary>
 
             <ErrorBoundary>
-              {activeTab === 'analytics' && isManager && (
+              {activeTab === 'analytics' && canManage && (
                 <Analytics 
                   reports={reports}
                   users={users}
@@ -3354,7 +3469,7 @@ function AppContent() {
             </ErrorBoundary>
 
             <ErrorBoundary>
-              {activeTab === 'citizens' && isManager && (
+              {activeTab === 'citizens' && canManage && (
                 <CitizensDatabase 
                   citizens={citizens}
                   users={users}
@@ -3363,7 +3478,7 @@ function AppContent() {
             </ErrorBoundary>
 
             <ErrorBoundary>
-              {activeTab === 'audit' && isManager && (
+              {activeTab === 'audit' && canManage && (
                 <AuditLog 
                   auditLog={auditLog}
                   setAuditLog={setAuditLog}
@@ -3372,7 +3487,7 @@ function AppContent() {
             </ErrorBoundary>
 
             <ErrorBoundary>
-              {activeTab === 'all_reports' && isManager && (
+              {activeTab === 'all_reports' && canManage && (
                 <AllReports 
                   reports={reports}
                   filteredReports={filteredReports}
@@ -3393,13 +3508,13 @@ function AppContent() {
             </ErrorBoundary>
 
             <ErrorBoundary>
-              {activeTab === 'alerts' && (isManager || isSupervisor || isOfficer) && (
+              {activeTab === 'alerts' && (canManage || isSupervisor || isOfficer) && (
                 <AlertManagement 
                   alerts={alerts}
                   setAlerts={setAlerts}
                   users={users}
                   user={user}
-                  isManager={isManager}
+                  isManager={canManage}
                   isSupervisor={isSupervisor}
                   isOfficer={isOfficer}
                   teamMembers={teamMembers}

@@ -1,3 +1,4 @@
+import React from 'react';
 import toast from 'react-hot-toast';
 
 export function confirmToast(message, { confirmText = 'Confirm', cancelText = 'Cancel', danger = true } = {}) {

@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 180" width="240" height="180" role="img" aria-label="A phone storing records locally with no network connection">
+  <defs>
+    <linearGradient id="ofScreen" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#e8f2fb"/>
+      <stop offset="100%" stop-color="#cfe0f0"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="240" height="180" fill="none"/>
+
+  <!-- Device body -->
+  <rect x="78" y="26" width="84" height="132" rx="7" fill="#16324f"/>
+  <rect x="85" y="34" width="70" height="106" rx="3" fill="url(#ofScreen)"/>
+
+  <!-- Records held on the device: the local queue -->
+  <g fill="#16324f">
+    <rect x="93" y="44" width="42" height="7" rx="2"/>
+    <rect x="93" y="57" width="54" height="7" rx="2"/>
+    <rect x="93" y="70" width="34" height="7" rx="2"/>
+    <rect x="93" y="83" width="48" height="7" rx="2"/>
+  </g>
+
+  <!-- Saved confirmation -->
+  <circle cx="120" cy="116" r="15" fill="#12694a"/>
+  <path d="M112 116 L118 122 L129 109" fill="none" stroke="#ffffff" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <!-- Home indicator -->
+  <rect x="104" y="148" width="32" height="3" rx="1.5" fill="#8fa9c4" opacity="0.8"/>
+
+  <!-- Struck-through cloud: no signal, and that is fine -->
+  <g transform="translate(178 52)">
+    <path d="M-28 14 A 16 16 0 0 1 -24 -8 A 21 21 0 0 1 8 -13 A 17 17 0 0 1 31 4 A 13 13 0 0 1 28 14 Z" fill="#eef2f7" stroke="#8fa9c4" stroke-width="2.5"/>
+    <circle cx="0" cy="0" r="19" fill="none" stroke="#a32020" stroke-width="3.5"/>
+    <path d="M-13 13 L13 -13" stroke="#a32020" stroke-width="3.5" stroke-linecap="round"/>
+  </g>
+
+  <!-- Records pinned to the device: nothing is lost -->
+  <g fill="#9c7a16">
+    <rect x="26" y="52" width="42" height="16" rx="2"/>
+    <rect x="32" y="58" width="30" height="3" rx="1.5" fill="#ffffff" opacity="0.75"/>
+  </g>
+  <path d="M70 60 L80 60" stroke="#9c7a16" stroke-width="2.5" stroke-linecap="round"/>
+
+  <g fill="#12694a">
+    <rect x="22" y="82" width="46" height="16" rx="2"/>
+    <rect x="28" y="88" width="34" height="3" rx="1.5" fill="#ffffff" opacity="0.75"/>
+  </g>
+  <path d="M70 90 L80 90" stroke="#12694a" stroke-width="2.5" stroke-linecap="round"/>
+
+  <g fill="#16324f">
+    <rect x="28" y="112" width="40" height="16" rx="2"/>
+    <rect x="34" y="118" width="28" height="3" rx="1.5" fill="#ffffff" opacity="0.75"/>
+  </g>
+  <path d="M70 120 L80 120" stroke="#16324f" stroke-width="2.5" stroke-linecap="round"/>
+</svg>

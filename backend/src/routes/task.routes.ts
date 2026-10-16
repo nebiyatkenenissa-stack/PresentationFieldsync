@@ -22,7 +22,7 @@ router.get('/employee/:employeeId', async (req, res) => {
 
 router.post('/', async (req, res) => {
   try {
-    const row = await taskModel.create(req.body);
+    const row = await taskModel.create({ ...req.body, targetRole: null });
     res.status(201).json(row);
   } catch (error: any) {
     res.status(500).json({ error: error.message });

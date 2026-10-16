@@ -5,6 +5,9 @@ fieldsync/
 *.log
 .env
 
+# Redirected build/lint output (frontend/build-out.txt, frontend/lint-out.txt)
+*-out.txt
+
 # Backend
 backend/node_modules/
 backend/dist/

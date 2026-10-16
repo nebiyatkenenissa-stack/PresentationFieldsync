@@ -1,6 +1,7 @@
 // src/utils/constants.js
 
 export const SAMPLE_USERS = [
+  { id: 'a1', employeeId: 'ADM001', name: 'ዳይቱ ሥራና', email: 'admin@fieldsync.com', password: 'admin123', role: 'admin', region: 'All', status: 'active', phone: '0911000000', shift: 'Day', department: 'System Administration' },
   { id: 'm1', employeeId: 'MGR001', name: 'አበበ በቀለ', email: 'abebe@fieldsync.com', password: 'manager123', role: 'manager', region: 'All', status: 'active', phone: '0911000001', shift: 'Day', department: 'Administration' },
   { id: 's1', employeeId: 'SUP001', name: 'ብርሃን ገብረእግዚአብሔር', email: 'birhan@fieldsync.com', password: 'super123', role: 'supervisor', region: 'Amhara > West Gojjam > Merawi > Kebele 01', managerId: 'm1', status: 'active', phone: '+251-911-000101', shift: 'Day' },
   { id: 's2', employeeId: 'SUP002', name: 'ሣህለ ሙሉጌታ', email: 'sahle@fieldsync.com', password: 'super123', role: 'supervisor', region: 'Amhara > West Gojjam > Mecha > Kebele 02', managerId: 'm1', status: 'active', phone: '+251-911-000102', shift: 'Day' },
@@ -21,6 +22,7 @@ export const SAMPLE_USERS = [
 
 // Login credentials summary
 export const LOGIN_INFO = {
+  admin: { email: 'admin@fieldsync.com', password: 'admin123', name: 'ዳይቱ ሥራና' },
   manager: { email: 'abebe@fieldsync.com', password: 'manager123', name: 'አበበ በቀለ' },
   supervisor: { email: 'birhan@fieldsync.com', password: 'super123', name: 'ብርሃን ገብረእግዚአብሔር' },
   officer: { email: 'meseret@fieldsync.com', password: 'officer123', name: 'መሠረት አለሙ', pin: '1234' }
@@ -28,7 +30,7 @@ export const LOGIN_INFO = {
 
 export const REGIONS = ['Amhara > West Gojjam > Merawi', 'Amhara > West Gojjam > Mecha', 'Oromia > East Shewa > Adama', 'All'];
 
-export const ROLES = ['manager', 'supervisor', 'field_officer'];
+export const ROLES = ['admin', 'manager', 'supervisor', 'field_officer'];
 
 export const SHIFTS = ['Day', 'Night', 'Flexible'];
 

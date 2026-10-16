@@ -604,7 +604,7 @@ function AlertManagement({ alerts, setAlerts, users, user, isManager, isSupervis
               </div>
               {modalMode !== 'bottleneck' && (
               <>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+              <div className="form-row">
                 <div>
                   <label style={{fontSize: '13px', fontWeight: '500'}}>{t('alerts.priority')}</label>
                   <select value={newAlert.priority} onChange={e => setNewAlert({...newAlert, priority: e.target.value})} style={{padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '14px', width: '100%'}}>
