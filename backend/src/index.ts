@@ -155,6 +155,13 @@ pool.connect(async (err) => {
 
 if (fs.existsSync(path.join(frontendDist, 'index.html'))) {
   app.use(express.static(frontendDist, { index: false, maxAge: '1y' }));
+  // A missing upload must stay a 404. Without this the catch-all below would
+  // answer /uploads/whatever.jpg with index.html and a 200, so the browser
+  // would treat the HTML as an image and the client would never see the load
+  // failure that should trigger the initials fallback.
+  app.use(/^\/(uploads|api)\//, (_req, res) => {
+    res.status(404).json({ error: 'Not found' });
+  });
   // Path-less middleware on purpose: every request that did not match a static
   // file or an API route is handed index.html, so client-side routes deep-link
   // correctly. Express 5 wildcard patterns ('/*splat') skip the bare '/' root.
