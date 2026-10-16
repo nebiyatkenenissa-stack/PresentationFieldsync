@@ -155,7 +155,10 @@ pool.connect(async (err) => {
 
 if (fs.existsSync(path.join(frontendDist, 'index.html'))) {
   app.use(express.static(frontendDist, { index: false, maxAge: '1y' }));
-  app.get('/*splat', (_req, res) => {
+  // Path-less middleware on purpose: every request that did not match a static
+  // file or an API route is handed index.html, so client-side routes deep-link
+  // correctly. Express 5 wildcard patterns ('/*splat') skip the bare '/' root.
+  app.use((_req, res) => {
     res.setHeader('Cache-Control', 'no-cache');
     res.sendFile(path.join(frontendDist, 'index.html'));
   });
