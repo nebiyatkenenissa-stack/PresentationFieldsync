@@ -347,6 +347,47 @@ function UserManagement({
         }
         if (!online) toast('📋 User saved offline. Will sync when online.');
       }
+      // ===== NOTIFY SUPERVISOR + THE FIELD OFFICER =====
+      // When the manager edits a field officer, both the officer's supervisor
+      // and the officer themselves must be told about the change.
+      const wasOfficer = editingUser.role === 'field_officer';
+      const isOfficer = updatedUser.role === 'field_officer';
+      if ((wasOfficer || isOfficer) && addNotification) {
+        const supervisorId = updatedUser.supervisorId || editingUser.supervisorId;
+        const supervisor = (users || []).find(u => u.id === supervisorId);
+        if (supervisor) {
+          addNotification(
+            supervisor.id,
+            'Field Officer Updated',
+            `${updatedUser.name}'s information was updated by the manager.`,
+            'info',
+            '/users'
+          );
+        }
+        // If the officer moved to a different supervisor, warn the old one too.
+        if (editingUser.supervisorId && editingUser.supervisorId !== supervisorId) {
+          const oldSupervisor = (users || []).find(u => u.id === editingUser.supervisorId);
+          if (oldSupervisor) {
+            addNotification(
+              oldSupervisor.id,
+              'Field Officer Reassigned',
+              `${updatedUser.name} is no longer assigned to you.`,
+              'warning',
+              '/users'
+            );
+          }
+        }
+        if (isOfficer) {
+          addNotification(
+            updatedUser.id,
+            'Your Information Was Updated',
+            'Your account details were updated by your manager.',
+            'info',
+            '/profile'
+          );
+        }
+      }
+
       toast(`✅ User ${updatedUser.name} updated successfully.`);
       setEditingUser(null);
     } catch (err) {

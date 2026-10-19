@@ -1,0 +1,290 @@
+<mxfile host="app.diagrams.net" modified="2026-10-08T00:00:00.000Z" version="24.0.0" type="device">
+  <!-- ================= PAGE 1: CLASS DIAGRAM ================= -->
+  <diagram name="Class Diagram" id="page-class">
+    <mxGraphModel dx="1600" dy="1100" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="0" pageScale="1" pageWidth="1654" pageHeight="1169" math="0" shadow="0">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+
+        <mxCell id="title1" value="FieldSync &lt;b&gt;Class Diagram&lt;/b&gt; (backend entities &amp; relations)" style="text;html=1;align=center;fontSize=16;" vertex="1" parent="1"><mxGeometry x="420" y="10" width="500" height="30" as="geometry"/></mxCell>
+
+        <!-- USER -->
+        <mxCell id="cUser" value="User" style="swimlane;whiteSpace=wrap;html=1;startSize=26;fontStyle=1;fillColor=#dae8fc;strokeColor=#6c8ebf;childLayout=stackLayout;" vertex="1" parent="1"><mxGeometry x="80" y="70" width="240" height="300" as="geometry"/></mxCell>
+        <mxCell value="+ id : string" style="text;html=1;align=left;" vertex="1" parent="cUser"><mxGeometry width="240" height="22" as="geometry"/></mxCell>
+        <mxCell value="+ employeeId : string" style="text;html=1;align=left;" vertex="1" parent="cUser"><mxGeometry width="240" height="22" as="geometry"/></mxCell>
+        <mxCell value="+ name, email : string" style="text;html=1;align=left;" vertex="1" parent="cUser"><mxGeometry width="240" height="22" as="geometry"/></mxCell>
+        <mxCell value="+ role : enum (admin, manager)" style="text;html=1;align=left;" vertex="1" parent="cUser"><mxGeometry width="240" height="22" as="geometry"/></mxCell>
+        <mxCell value="        supervisor, field_officer" style="text;html=1;align=left;" vertex="1" parent="cUser"><mxGeometry width="240" height="22" as="geometry"/></mxCell>
+        <mxCell value="+ status, shift, dept : string" style="text;html=1;align=left;" vertex="1" parent="cUser"><mxGeometry width="240" height="22" as="geometry"/></mxCell>
+        <mxCell value="+ locationPath : string" style="text;html=1;align=left;" vertex="1" parent="cUser"><mxGeometry width="240" height="22" as="geometry"/></mxCell>
+        <mxCell value="-----" style="text;html=1;align=left;" vertex="1" parent="cUser"><mxGeometry width="240" height="22" as="geometry"/></mxCell>
+        <mxCell value="+ login(), changePassword()" style="text;html=1;align=left;" vertex="1" parent="cUser"><mxGeometry width="240" height="22" as="geometry"/></mxCell>
+        <mxCell value="+ updateProfile()" style="text;html=1;align=left;" vertex="1" parent="cUser"><mxGeometry width="240" height="22" as="geometry"/></mxCell>
+
+        <!-- CITIZEN -->
+        <mxCell id="cCit" value="Citizen" style="swimlane;whiteSpace=wrap;html=1;startSize=26;fontStyle=1;fillColor=#e1d5e7;strokeColor=#9673a6;childLayout=stackLayout;" vertex="1" parent="1"><mxGeometry x="420" y="70" width="240" height="220" as="geometry"/></mxCell>
+        <mxCell value="+ id, nationalId : string" style="text;html=1;align=left;" vertex="1" parent="cCit"><mxGeometry width="240" height="22" as="geometry"/></mxCell>
+        <mxCell value="+ name, grandfatherName" style="text;html=1;align=left;" vertex="1" parent="cCit"><mxGeometry width="240" height="22" as="geometry"/></mxCell>
+        <mxCell value="+ fatherName, motherName" style="text;html=1;align=left;" vertex="1" parent="cCit"><mxGeometry width="240" height="22" as="geometry"/></mxCell>
+        <mxCell value="+ gender, photo, region" style="text;html=1;align=left;" vertex="1" parent="cCit"><mxGeometry width="240" height="22" as="geometry"/></mxCell>
+        <mxCell value="+ birthCertificateNo" style="text;html=1;align=left;" vertex="1" parent="cCit"><mxGeometry width="240" height="22" as="geometry"/></mxCell>
+        <mxCell value="+ registeredBy : User" style="text;html=1;align=left;" vertex="1" parent="cCit"><mxGeometry width="240" height="22" as="geometry"/></mxCell>
+        <mxCell value="+ createdAt : datetime" style="text;html=1;align=left;" vertex="1" parent="cCit"><mxGeometry width="240" height="22" as="geometry"/></mxCell>
+
+        <!-- REPORT -->
+        <mxCell id="cRep" value="Report" style="swimlane;whiteSpace=wrap;html=1;startSize=26;fontStyle=1;fillColor=#e1d5e7;strokeColor=#9673a6;childLayout=stackLayout;" vertex="1" parent="1"><mxGeometry x="760" y="70" width="240" height="260" as="geometry"/></mxCell>
+        <mxCell value="+ reportId, siteName" style="text;html=1;align=left;" vertex="1" parent="cRep"><mxGeometry width="240" height="22" as="geometry"/></mxCell>
+        <mxCell value="+ employeeId, supervisorId" style="text;html=1;align=left;" vertex="1" parent="cRep"><mxGeometry width="240" height="22" as="geometry"/></mxCell>
+        <mxCell value="+ reportDate, region" style="text;html=1;align=left;" vertex="1" parent="cRep"><mxGeometry width="240" height="22" as="geometry"/></mxCell>
+        <mxCell value="+ registrations, workHours" style="text;html=1;align=left;" vertex="1" parent="cRep"><mxGeometry width="240" height="22" as="geometry"/></mxCell>
+        <mxCell value="+ activities, issues" style="text;html=1;align=left;" vertex="1" parent="cRep"><mxGeometry width="240" height="22" as="geometry"/></mxCell>
+        <mxCell value="+ latitude, longitude" style="text;html=1;align=left;" vertex="1" parent="cRep"><mxGeometry width="240" height="22" as="geometry"/></mxCell>
+        <mxCell value="+ status : submitted|approved" style="text;html=1;align=left;" vertex="1" parent="cRep"><mxGeometry width="240" height="22" as="geometry"/></mxCell>
+        <mxCell value="+ submittedAt : datetime" style="text;html=1;align=left;" vertex="1" parent="cRep"><mxGeometry width="240" height="22" as="geometry"/></mxCell>
+
+        <!-- ATTENDANCE -->
+        <mxCell id="cAtt" value="Attendance" style="swimlane;whiteSpace=wrap;html=1;startSize=26;fontStyle=1;fillColor=#d5e8d4;strokeColor=#82b366;childLayout=stackLayout;" vertex="1" parent="1"><mxGeometry x="80" y="430" width="240" height="220" as="geometry"/></mxCell>
+        <mxCell value="+ employeeId : User" style="text;html=1;align=left;" vertex="1" parent="cAtt"><mxGeometry width="240" height="22" as="geometry"/></mxCell>
+        <mxCell value="+ date, status" style="text;html=1;align=left;" vertex="1" parent="cAtt"><mxGeometry width="240" height="22" as="geometry"/></mxCell>
+        <mxCell value="+ checkIn, checkOut" style="text;html=1;align=left;" vertex="1" parent="cAtt"><mxGeometry width="240" height="22" as="geometry"/></mxCell>
+        <mxCell value="+ workHours, region" style="text;html=1;align=left;" vertex="1" parent="cAtt"><mxGeometry width="240" height="22" as="geometry"/></mxCell>
+        <mxCell value="+ supervisorId : User" style="text;html=1;align=left;" vertex="1" parent="cAtt"><mxGeometry width="240" height="22" as="geometry"/></mxCell>
+        <mxCell value="+ submittedToManager : bool" style="text;html=1;align=left;" vertex="1" parent="cAtt"><mxGeometry width="240" height="22" as="geometry"/></mxCell>
+        <mxCell value="+ submittedAt : datetime" style="text;html=1;align=left;" vertex="1" parent="cAtt"><mxGeometry width="240" height="22" as="geometry"/></mxCell>
+
+        <!-- LEAVE -->
+        <mxCell id="cLeave" value="Leave" style="swimlane;whiteSpace=wrap;html=1;startSize=26;fontStyle=1;fillColor=#d5e8d4;strokeColor=#82b366;childLayout=stackLayout;" vertex="1" parent="1"><mxGeometry x="420" y="350" width="240" height="160" as="geometry"/></mxCell>
+        <mxCell value="+ employeeId : User" style="text;html=1;align=left;" vertex="1" parent="cLeave"><mxGeometry width="240" height="22" as="geometry"/></mxCell>
+        <mxCell value="+ leaveType, reason" style="text;html=1;align=left;" vertex="1" parent="cLeave"><mxGeometry width="240" height="22" as="geometry"/></mxCell>
+        <mxCell value="+ fromDate, toDate" style="text;html=1;align=left;" vertex="1" parent="cLeave"><mxGeometry width="240" height="22" as="geometry"/></mxCell>
+        <mxCell value="+ status : pending|approved" style="text;html=1;align=left;" vertex="1" parent="cLeave"><mxGeometry width="240" height="22" as="geometry"/></mxCell>
+        <mxCell value="+ approvedBy : User" style="text;html=1;align=left;" vertex="1" parent="cLeave"><mxGeometry width="240" height="22" as="geometry"/></mxCell>
+
+        <!-- TASK -->
+        <mxCell id="cTask" value="Task" style="swimlane;whiteSpace=wrap;html=1;startSize=26;fontStyle=1;fillColor=#d5e8d4;strokeColor=#82b366;childLayout=stackLayout;" vertex="1" parent="1"><mxGeometry x="760" y="390" width="240" height="180" as="geometry"/></mxCell>
+        <mxCell value="+ id, title, description" style="text;html=1;align=left;" vertex="1" parent="cTask"><mxGeometry width="240" height="22" as="geometry"/></mxCell>
+        <mxCell value="+ employeeId : User" style="text;html=1;align=left;" vertex="1" parent="cTask"><mxGeometry width="240" height="22" as="geometry"/></mxCell>
+        <mxCell value="+ assignedBy : User" style="text;html=1;align=left;" vertex="1" parent="cTask"><mxGeometry width="240" height="22" as="geometry"/></mxCell>
+        <mxCell value="+ deadline, priority" style="text;html=1;align=left;" vertex="1" parent="cTask"><mxGeometry width="240" height="22" as="geometry"/></mxCell>
+        <mxCell value="+ status : pending|done" style="text;html=1;align=left;" vertex="1" parent="cTask"><mxGeometry width="240" height="22" as="geometry"/></mxCell>
+        <mxCell value="+ completedAt : datetime" style="text;html=1;align=left;" vertex="1" parent="cTask"><mxGeometry width="240" height="22" as="geometry"/></mxCell>
+
+        <!-- SUPERVISOR REPORT -->
+        <mxCell id="cSup" value="SupervisorReport" style="swimlane;whiteSpace=wrap;html=1;startSize=26;fontStyle=1;fillColor=#fff2cc;strokeColor=#d6b656;childLayout=stackLayout;" vertex="1" parent="1"><mxGeometry x="80" y="720" width="240" height="160" as="geometry"/></mxCell>
+        <mxCell value="+ supervisorId : User" style="text;html=1;align=left;" vertex="1" parent="cSup"><mxGeometry width="240" height="22" as="geometry"/></mxCell>
+        <mxCell value="+ period, officerCount" style="text;html=1;align=left;" vertex="1" parent="cSup"><mxGeometry width="240" height="22" as="geometry"/></mxCell>
+        <mxCell value="+ registrations, issues" style="text;html=1;align=left;" vertex="1" parent="cSup"><mxGeometry width="240" height="22" as="geometry"/></mxCell>
+        <mxCell value="+ recommendations" style="text;html=1;align=left;" vertex="1" parent="cSup"><mxGeometry width="240" height="22" as="geometry"/></mxCell>
+        <mxCell value="+ submittedAt : datetime" style="text;html=1;align=left;" vertex="1" parent="cSup"><mxGeometry width="240" height="22" as="geometry"/></mxCell>
+
+        <!-- SCREENTIME / ALERT / AUDIT / PERMISSION / VERIFICATION / LOCATION -->
+        <mxCell id="cScreen" value="ScreenTime" style="swimlane;whiteSpace=wrap;html=1;startSize=26;fontStyle=1;fillColor=#fff2cc;strokeColor=#d6b656;childLayout=stackLayout;" vertex="1" parent="1"><mxGeometry x="420" y="570" width="240" height="110" as="geometry"/></mxCell>
+        <mxCell value="+ employeeId : User" style="text;html=1;align=left;" vertex="1" parent="cScreen"><mxGeometry width="240" height="22" as="geometry"/></mxCell>
+        <mxCell value="+ date, duration" style="text;html=1;align=left;" vertex="1" parent="cScreen"><mxGeometry width="240" height="22" as="geometry"/></mxCell>
+        <mxCell value="+ deviceInfo" style="text;html=1;align=left;" vertex="1" parent="cScreen"><mxGeometry width="240" height="22" as="geometry"/></mxCell>
+
+        <mxCell id="cAlert" value="Alert" style="swimlane;whiteSpace=wrap;html=1;startSize=26;fontStyle=1;fillColor=#fff2cc;strokeColor=#d6b656;childLayout=stackLayout;" vertex="1" parent="1"><mxGeometry x="760" y="630" width="240" height="110" as="geometry"/></mxCell>
+        <mxCell value="+ id, type, message" style="text;html=1;align=left;" vertex="1" parent="cAlert"><mxGeometry width="240" height="22" as="geometry"/></mxCell>
+        <mxCell value="+ userId : User" style="text;html=1;align=left;" vertex="1" parent="cAlert"><mxGeometry width="240" height="22" as="geometry"/></mxCell>
+        <mxCell value="+ createdAt, read : bool" style="text;html=1;align=left;" vertex="1" parent="cAlert"><mxGeometry width="240" height="22" as="geometry"/></mxCell>
+
+        <mxCell id="cPerm" value="Permission" style="swimlane;whiteSpace=wrap;html=1;startSize=26;fontStyle=1;fillColor=#d5e8d4;strokeColor=#82b366;childLayout=stackLayout;" vertex="1" parent="1"><mxGeometry x="420" y="740" width="240" height="130" as="geometry"/></mxCell>
+        <mxCell value="+ employeeId : User" style="text;html=1;align=left;" vertex="1" parent="cPerm"><mxGeometry width="240" height="22" as="geometry"/></mxCell>
+        <mxCell value="+ type, date, reason" style="text;html=1;align=left;" vertex="1" parent="cPerm"><mxGeometry width="240" height="22" as="geometry"/></mxCell>
+        <mxCell value="+ status : pending|approved" style="text;html=1;align=left;" vertex="1" parent="cPerm"><mxGeometry width="240" height="22" as="geometry"/></mxCell>
+        <mxCell value="+ approvedBy : User" style="text;html=1;align=left;" vertex="1" parent="cPerm"><mxGeometry width="240" height="22" as="geometry"/></mxCell>
+
+        <mxCell id="cVer" value="Verification" style="swimlane;whiteSpace=wrap;html=1;startSize=26;fontStyle=1;fillColor=#f8cecc;strokeColor=#b85450;childLayout=stackLayout;" vertex="1" parent="1"><mxGeometry x="760" y="800" width="240" height="130" as="geometry"/></mxCell>
+        <mxCell value="+ citizenId : Citizen" style="text;html=1;align=left;" vertex="1" parent="cVer"><mxGeometry width="240" height="22" as="geometry"/></mxCell>
+        <mxCell value="+ requestedBy : User" style="text;html=1;align=left;" vertex="1" parent="cVer"><mxGeometry width="240" height="22" as="geometry"/></mxCell>
+        <mxCell value="+ response, notes" style="text;html=1;align=left;" vertex="1" parent="cVer"><mxGeometry width="240" height="22" as="geometry"/></mxCell>
+        <mxCell value="+ status : pending|verified" style="text;html=1;align=left;" vertex="1" parent="cVer"><mxGeometry width="240" height="22" as="geometry"/></mxCell>
+
+        <mxCell id="cAud" value="AuditLog" style="swimlane;whiteSpace=wrap;html=1;startSize=26;fontStyle=1;fillColor=#f8cecc;strokeColor=#b85450;childLayout=stackLayout;" vertex="1" parent="1"><mxGeometry x="80" y="950" width="240" height="110" as="geometry"/></mxCell>
+        <mxCell value="+ userId : User" style="text;html=1;align=left;" vertex="1" parent="cAud"><mxGeometry width="240" height="22" as="geometry"/></mxCell>
+        <mxCell value="+ action, entity" style="text;html=1;align=left;" vertex="1" parent="cAud"><mxGeometry width="240" height="22" as="geometry"/></mxCell>
+        <mxCell value="+ createdAt, ip" style="text;html=1;align=left;" vertex="1" parent="cAud"><mxGeometry width="240" height="22" as="geometry"/></mxCell>
+
+        <mxCell id="cLoc" value="Location" style="swimlane;whiteSpace=wrap;html=1;startSize=26;fontStyle=1;fillColor=#f8cecc;strokeColor=#b85450;childLayout=stackLayout;" vertex="1" parent="1"><mxGeometry x="420" y="920" width="240" height="140" as="geometry"/></mxCell>
+        <mxCell value="+ country, region" style="text;html=1;align=left;" vertex="1" parent="cLoc"><mxGeometry width="240" height="22" as="geometry"/></mxCell>
+        <mxCell value="+ zone, woreda" style="text;html=1;align=left;" vertex="1" parent="cLoc"><mxGeometry width="240" height="22" as="geometry"/></mxCell>
+        <mxCell value="+ kebele, community" style="text;html=1;align=left;" vertex="1" parent="cLoc"><mxGeometry width="240" height="22" as="geometry"/></mxCell>
+        <mxCell value="+ parentId : Location" style="text;html=1;align=left;" vertex="1" parent="cLoc"><mxGeometry width="240" height="22" as="geometry"/></mxCell>
+
+        <!-- RELATIONSHIPS -->
+        <mxCell id="r1" style="endArrow=block;endFill=0;startArrow=oval;startFill=1;html=1;" edge="1" source="cUser" target="cCit" parent="1"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell value="1 registers *" style="edgeLabel;html=1;align=center;" vertex="1" parent="r1"><mxGeometry relative="1" x="-0.2" y="-20" as="geometry"/></mxCell>
+
+        <mxCell id="r2" style="endArrow=block;endFill=0;startArrow=oval;startFill=1;html=1;" edge="1" source="cUser" target="cRep" parent="1"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell value="1 submits *" style="edgeLabel;html=1;" vertex="1" parent="r2"><mxGeometry relative="1" x="-0.3" y="-20" as="geometry"/></mxCell>
+
+        <mxCell id="r3" style="endArrow=block;endFill=0;startArrow=oval;startFill=1;html=1;" edge="1" source="cAtt" target="cUser" parent="1"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell value="* recorded for 1" style="edgeLabel;html=1;" vertex="1" parent="r3"><mxGeometry relative="1" x="-0.4" y="20" as="geometry"/></mxCell>
+
+        <mxCell id="r4" style="endArrow=block;endFill=0;startArrow=oval;startFill=1;html=1;" edge="1" source="cTask" target="cUser" parent="1"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell value="* assigned to 1" style="edgeLabel;html=1;" vertex="1" parent="r4"><mxGeometry relative="1" x="-0.4" y="20" as="geometry"/></mxCell>
+
+        <mxCell id="r5" style="endArrow=block;endFill=0;startArrow=oval;startFill=1;html=1;" edge="1" source="cSup" target="cUser" parent="1"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell value="* by supervisor 1" style="edgeLabel;html=1;" vertex="1" parent="r5"><mxGeometry relative="1" x="-0.5" y="20" as="geometry"/></mxCell>
+
+        <mxCell id="r6" style="endArrow=block;endFill=0;startArrow=oval;startFill=1;html=1;" edge="1" source="cVer" target="cCit" parent="1"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell value="* about 1" style="edgeLabel;html=1;" vertex="1" parent="r6"><mxGeometry relative="1" x="-0.3" y="-20" as="geometry"/></mxCell>
+
+        <mxCell id="r7" style="endArrow=block;endFill=0;startArrow=oval;startFill=1;html=1;dashed=1;" edge="1" source="cUser" target="cUser" parent="1"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell value="supervisor 1 manages * officers" style="edgeLabel;html=1;" vertex="1" parent="r7"><mxGeometry relative="1" x="20" y="-30" as="geometry"/></mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+
+  <!-- ================= PAGE 2: SEQUENCE DIAGRAM ================= -->
+  <diagram name="Sequence Diagram - Report Submission" id="page-seq">
+    <mxGraphModel dx="1600" dy="1100" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="0" pageScale="1" pageWidth="1654" pageHeight="1169" math="0" shadow="0">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+        <mxCell id="t2" value="FieldSync &lt;b&gt;Sequence Diagram&lt;/b&gt; — Submit Daily Report" style="text;html=1;fontSize=16;" vertex="1" parent="1"><mxGeometry x="340" y="10" width="600" height="30" as="geometry"/></mxCell>
+
+        <!-- participants -->
+        <mxCell id="pFO" value="Field Officer" style="umlActor;fontSize=11;html=1;" vertex="1" parent="1"><mxGeometry x="80" y="70" width="30" height="50" as="geometry"/></mxCell>
+        <mxCell id="pFE" value="ReportForm (React)" style="rounded=1;fillColor=#dae8fc;strokeColor=#6c8ebf;html=1;fontSize=11;" vertex="1" parent="1"><mxGeometry x="240" y="80" width="120" height="30" as="geometry"/></mxCell>
+        <mxCell id="pAPI" value="Express API" style="rounded=1;fillColor=#dae8fc;strokeColor=#6c8ebf;html=1;fontSize=11;" vertex="1" parent="1"><mxGeometry x="460" y="80" width="110" height="30" as="geometry"/></mxCell>
+        <mxCell id="pCTL" value="ReportController" style="rounded=1;fillColor=#d5e8d4;strokeColor=#82b366;html=1;fontSize=11;" vertex="1" parent="1"><mxGeometry x="660" y="80" width="120" height="30" as="geometry"/></mxCell>
+        <mxCell id="pDB" value="PostgreSQL" style="shape=cylinder3;fillColor=#f8cecc;strokeColor=#b85450;html=1;fontSize=11;size=12;" vertex="1" parent="1"><mxGeometry x="880" y="80" width="70" height="40" as="geometry"/></mxCell>
+        <mxCell id="pSUP" value="Supervisor" style="umlActor;fontSize=11;html=1;" vertex="1" parent="1"><mxGeometry x="1080" y="70" width="30" height="50" as="geometry"/></mxCell>
+
+        <!-- lifelines -->
+        <mxCell id="lFO" value="" style="endArrow=none;dashed=1;html=1;strokeColor=#666666;" vertex="1" parent="1"><mxGeometry x="95" y="140" width="0" height="620" as="geometry"/></mxCell>
+        <mxCell id="lFE" value="" style="endArrow=none;dashed=1;html=1;strokeColor=#666666;strokeWidth=2;" vertex="1" parent="1"><mxGeometry x="300" y="110" width="0" height="660" as="geometry"/></mxCell>
+        <mxCell id="lAPI" value="" style="endArrow=none;dashed=1;html=1;strokeColor=#666666;strokeWidth=2;" vertex="1" parent="1"><mxGeometry x="515" y="110" width="0" height="660" as="geometry"/></mxCell>
+        <mxCell id="lCTL" value="" style="endArrow=none;dashed=1;html=1;strokeColor=#666666;strokeWidth=2;" vertex="1" parent="1"><mxGeometry x="720" y="110" width="0" height="660" as="geometry"/></mxCell>
+        <mxCell id="lDB" value="" style="endArrow=none;dashed=1;html=1;strokeColor=#666666;strokeWidth=2;" vertex="1" parent="1"><mxGeometry x="915" y="120" width="0" height="650" as="geometry"/></mxCell>
+        <mxCell id="lSUP" value="" style="endArrow=none;dashed=1;html=1;strokeColor=#666666;" vertex="1" parent="1"><mxGeometry x="1095" y="140" width="0" height="620" as="geometry"/></mxCell>
+
+        <!-- messages -->
+        <mxCell id="m1" style="endArrow=block;html=1;fontSize=11;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="95" y="180" as="sourcePoint"/><mxPoint x="300" y="180" as="targetPoint"/></mxGeometry></mxCell>
+        <mxCell id="m1l" value="fill report form (site, registrations, issues)" style="edgeLabel;html=1;fontSize=10;" vertex="1" parent="m1"><mxGeometry relative="1" x="0" y="-12" as="geometry"/></mxCell>
+
+        <mxCell id="m2" style="endArrow=block;html=1;fontSize=11;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="300" y="240" as="sourcePoint"/><mxPoint x="515" y="240" as="targetPoint"/></mxGeometry></mxCell>
+        <mxCell id="m2l" value="POST /api/reports {data, GPS, photo}" style="edgeLabel;html=1;fontSize=10;" vertex="1" parent="m2"><mxGeometry relative="1" x="0" y="-12" as="geometry"/></mxCell>
+
+        <mxCell id="m3" style="endArrow=block;html=1;fontSize=11;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="515" y="300" as="sourcePoint"/><mxPoint x="720" y="300" as="targetPoint"/></mxGeometry></mxCell>
+        <mxCell id="m3l" value="create(req.body)" style="edgeLabel;html=1;fontSize=10;" vertex="1" parent="m3"><mxGeometry relative="1" x="0" y="-12" as="geometry"/></mxCell>
+
+        <mxCell id="m4" style="endArrow=block;html=1;fontSize=11;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="720" y="360" as="sourcePoint"/><mxPoint x="915" y="360" as="targetPoint"/></mxGeometry></mxCell>
+        <mxCell id="m4l" value="INSERT INTO reports ..." style="edgeLabel;html=1;fontSize=10;" vertex="1" parent="m4"><mxGeometry relative="1" x="0" y="-12" as="geometry"/></mxCell>
+
+        <mxCell id="m5" style="endArrow=open;dashed=1;html=1;fontSize=11;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="915" y="420" as="sourcePoint"/><mxPoint x="720" y="420" as="targetPoint"/></mxGeometry></mxCell>
+        <mxCell id="m5l" value="report row (201)" style="edgeLabel;html=1;fontSize=10;" vertex="1" parent="m5"><mxGeometry relative="1" x="0" y="-12" as="geometry"/></mxCell>
+
+        <mxCell id="m6" style="endArrow=open;dashed=1;html=1;fontSize=11;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="720" y="480" as="sourcePoint"/><mxPoint x="515" y="480" as="targetPoint"/></mxGeometry></mxCell>
+        <mxCell id="m6l" value="report object" style="edgeLabel;html=1;fontSize=10;" vertex="1" parent="m6"><mxGeometry relative="1" x="0" y="-12" as="geometry"/></mxCell>
+
+        <mxCell id="m7" style="endArrow=open;dashed=1;html=1;fontSize=11;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="515" y="540" as="sourcePoint"/><mxPoint x="300" y="540" as="targetPoint"/></mxGeometry></mxCell>
+        <mxCell id="m7l" value="201 Created / saved" style="edgeLabel;html=1;fontSize=10;" vertex="1" parent="m7"><mxGeometry relative="1" x="0" y="-12" as="geometry"/></mxCell>
+
+        <mxCell id="m8" style="endArrow=open;dashed=1;html=1;fontSize=11;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="300" y="600" as="sourcePoint"/><mxPoint x="95" y="600" as="targetPoint"/></mxGeometry></mxCell>
+        <mxCell id="m8l" value="show success" style="edgeLabel;html=1;fontSize=10;" vertex="1" parent="m8"><mxGeometry relative="1" x="0" y="-12" as="geometry"/></mxCell>
+
+        <mxCell id="m9" style="endArrow=block;html=1;fontSize=11;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="915" y="660" as="sourcePoint"/><mxPoint x="1095" y="660" as="targetPoint"/></mxGeometry></mxCell>
+        <mxCell id="m9l" value="notify: new report pending review" style="edgeLabel;html=1;fontSize=10;" vertex="1" parent="m9"><mxGeometry relative="1" x="0" y="-12" as="geometry"/></mxCell>
+
+        <mxCell id="note1" value="Offline: React saves to local IndexedDB and syncs later via sync controller." style="shape=note;fillColor=#fff2cc;strokeColor=#d6b656;html=1;fontSize=10;verticalAlign=top;" vertex="1" parent="1"><mxGeometry x="1060" y="180" width="300" height="60" as="geometry"/></mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+
+  <!-- ================= PAGE 3: ACTIVITY DIAGRAM ================= -->
+  <diagram name="Activity Diagram - Field Work Session" id="page-act">
+    <mxGraphModel dx="1600" dy="1100" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="0" pageScale="1" pageWidth="1654" pageHeight="1169" math="0" shadow="0">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+        <mxCell id="t3" value="FieldSync &lt;b&gt;Activity Diagram&lt;/b&gt; — Daily Field Work Session" style="text;html=1;fontSize=16;" vertex="1" parent="1"><mxGeometry x="420" y="10" width="600" height="30" as="geometry"/></mxCell>
+
+        <mxCell id="s0" value="" style="ellipse;fillColor=black;strokeColor=black;" vertex="1" parent="1"><mxGeometry x="120" y="60" width="24" height="24" as="geometry"/></mxCell>
+        <mxCell id="a1" value="Login with credentials" style="rounded=1;fillColor=#dae8fc;strokeColor=#6c8ebf;html=1;" vertex="1" parent="1"><mxGeometry x="70" y="110" width="130" height="40" as="geometry"/></mxCell>
+        <mxCell id="a2" value="Start work session / check-in" style="rounded=1;fillColor=#dae8fc;strokeColor=#6c8ebf;html=1;" vertex="1" parent="1"><mxGeometry x="60" y="180" width="150" height="40" as="geometry"/></mxCell>
+        <mxCell id="d1" value="Network online?" style="rhombus;fillColor=#fff2cc;strokeColor=#d6b656;html=1;" vertex="1" parent="1"><mxGeometry x="85" y="250" width="100" height="60" as="geometry"/></mxCell>
+        <mxCell id="a3" value="Sync pending records to server" style="rounded=1;fillColor=#d5e8d4;strokeColor=#82b366;html=1;" vertex="1" parent="1"><mxGeometry x="60" y="340" width="150" height="50" as="geometry"/></mxCell>
+        <mxCell id="a4" value="Register citizens, take GPS, &amp; submit report" style="rounded=1;fillColor=#e1d5e7;strokeColor=#9673a6;html=1;" vertex="1" parent="1"><mxGeometry x="50" y="430" width="170" height="50" as="geometry"/></mxCell>
+        <mxCell id="d2" value="More work?" style="rhombus;fillColor=#fff2cc;strokeColor=#d6b656;html=1;" vertex="1" parent="1"><mxGeometry x="85" y="510" width="100" height="60" as="geometry"/></mxCell>
+        <mxCell id="a5" value="Save locally; queue for later sync" style="rounded=1;fillColor=#f8cecc;strokeColor=#b85450;html=1;" vertex="1" parent="1"><mxGeometry x="300" y="340" width="170" height="50" as="geometry"/></mxCell>
+        <mxCell id="a6" value="Check-out &amp; end session" style="rounded=1;fillColor=#dae8fc;strokeColor=#6c8ebf;html=1;" vertex="1" parent="1"><mxGeometry x="60" y="610" width="150" height="40" as="geometry"/></mxCell>
+        <mxCell id="s1" value="" style="ellipse;fillColor=black;strokeColor=black;strokeWidth=4;" vertex="1" parent="1"><mxGeometry x="120" y="680" width="24" height="24" as="geometry"/></mxCell>
+
+        <mxCell id="e1" style="endArrow=block;html=1;" edge="1" source="s0" target="a1" parent="1"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e2" style="endArrow=block;html=1;" edge="1" source="a1" target="a2" parent="1"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e3" style="endArrow=block;html=1;" edge="1" source="a2" target="d1" parent="1"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e4" style="endArrow=block;html=1;" edge="1" source="d1" target="a3" parent="1"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="l4" value="yes" style="edgeLabel;html=1;" vertex="1" parent="e4"><mxGeometry relative="1" x="10" y="-10" as="geometry"/></mxCell>
+        <mxCell id="e5" style="endArrow=block;html=1;" edge="1" source="d1" target="a5" parent="1"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="l5" value="no" style="edgeLabel;html=1;" vertex="1" parent="e5"><mxGeometry relative="1" x="-10" y="-10" as="geometry"/></mxCell>
+        <mxCell id="e6" style="endArrow=block;html=1;" edge="1" source="a3" target="a4" parent="1"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e7" style="endArrow=block;html=1;" edge="1" source="a5" target="a4" parent="1"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e8" style="endArrow=block;html=1;" edge="1" source="a4" target="d2" parent="1"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e9" style="endArrow=block;html=1;" edge="1" source="d2" target="d1" parent="1"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="l9" value="yes" style="edgeLabel;html=1;" vertex="1" parent="e9"><mxGeometry relative="1" x="10" y="-10" as="geometry"/></mxCell>
+        <mxCell id="e10" style="endArrow=block;html=1;" edge="1" source="d2" target="a6" parent="1"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="l10" value="no" style="edgeLabel;html=1;" vertex="1" parent="e10"><mxGeometry relative="1" x="-10" y="-10" as="geometry"/></mxCell>
+        <mxCell id="e11" style="endArrow=block;html=1;" edge="1" source="a6" target="s1" parent="1"><mxGeometry relative="1" as="geometry"/></mxCell>
+
+        <mxCell id="note2" value="App runs offline-first; all records queue into local storage and sync when the device is back online." style="shape=note;fillColor=#fff2cc;strokeColor=#d6b656;html=1;fontSize=11;verticalAlign=top;" vertex="1" parent="1"><mxGeometry x="540" y="240" width="300" height="70" as="geometry"/></mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+
+  <!-- ================= PAGE 4: USE CASE DIAGRAM ================= -->
+  <diagram name="Use Case Diagram" id="page-usecase">
+    <mxGraphModel dx="1600" dy="1100" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="0" pageScale="1" pageWidth="1654" pageHeight="1169" math="0" shadow="0">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+        <mxCell id="t4" value="FieldSync &lt;b&gt;Use Case Diagram&lt;/b&gt;" style="text;html=1;fontSize=16;" vertex="1" parent="1"><mxGeometry x="520" y="10" width="360" height="30" as="geometry"/></mxCell>
+
+        <mxCell id="boundary" value="FieldSync System" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#000000;fontStyle=1;verticalAlign=top;" vertex="1" parent="1"><mxGeometry x="260" y="60" width="620" height="900" as="geometry"/></mxCell>
+
+        <mxCell id="actFO" value="Field Officer" style="shape=umlActor;verticalLabelPosition=bottom;verticalAlign=top;html=1;fontSize=13;" vertex="1" parent="1"><mxGeometry x="90" y="220" width="40" height="60" as="geometry"/></mxCell>
+        <mxCell id="actSUP" value="Supervisor" style="shape=umlActor;verticalLabelPosition=bottom;verticalAlign=top;html=1;fontSize=13;" vertex="1" parent="1"><mxGeometry x="90" y="520" width="40" height="60" as="geometry"/></mxCell>
+        <mxCell id="actMGR" value="Manager" style="shape=umlActor;verticalLabelPosition=bottom;verticalAlign=top;html=1;fontSize=13;" vertex="1" parent="1"><mxGeometry x="90" y="800" width="40" height="60" as="geometry"/></mxCell>
+        <mxCell id="actAdmin" value="Admin" style="shape=umlActor;verticalLabelPosition=bottom;verticalAlign=top;html=1;fontSize=13;" vertex="1" parent="1"><mxGeometry x="950" y="60" width="40" height="60" as="geometry"/></mxCell>
+
+        <mxCell id="u1" value="Login / Session" style="ellipse;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#000;fontSize=12;" vertex="1" parent="1"><mxGeometry x="420" y="80" width="180" height="46" as="geometry"/></mxCell>
+        <mxCell id="u2" value="Register Citizens" style="ellipse;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#000;fontSize=12;" vertex="1" parent="1"><mxGeometry x="420" y="150" width="180" height="46" as="geometry"/></mxCell>
+        <mxCell id="u3" value="Record Attendance" style="ellipse;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#000;fontSize=12;" vertex="1" parent="1"><mxGeometry x="420" y="220" width="180" height="46" as="geometry"/></mxCell>
+        <mxCell id="u4" value="Submit Daily Reports" style="ellipse;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#000;fontSize=12;" vertex="1" parent="1"><mxGeometry x="420" y="290" width="180" height="46" as="geometry"/></mxCell>
+        <mxCell id="u5" value="Leave / Permission Requests" style="ellipse;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#000;fontSize=11;" vertex="1" parent="1"><mxGeometry x="410" y="360" width="200" height="46" as="geometry"/></mxCell>
+        <mxCell id="u6" value="Respond to Verification" style="ellipse;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#000;fontSize=11;" vertex="1" parent="1"><mxGeometry x="410" y="430" width="200" height="46" as="geometry"/></mxCell>
+
+        <mxCell id="u7" value="Monitor Officers" style="ellipse;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#000;fontSize=12;" vertex="1" parent="1"><mxGeometry x="420" y="510" width="180" height="46" as="geometry"/></mxCell>
+        <mxCell id="u8" value="Review &amp; Approve Reports" style="ellipse;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#000;fontSize=11;" vertex="1" parent="1"><mxGeometry x="405" y="580" width="210" height="46" as="geometry"/></mxCell>
+        <mxCell id="u9" value="Manage Leave / Permissions" style="ellipse;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#000;fontSize=11;" vertex="1" parent="1"><mxGeometry x="400" y="650" width="220" height="46" as="geometry"/></mxCell>
+        <mxCell id="u10" value="Counsel Screen Time" style="ellipse;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#000;fontSize=11;" vertex="1" parent="1"><mxGeometry x="415" y="720" width="190" height="46" as="geometry"/></mxCell>
+
+        <mxCell id="u11" value="View Attendance Dashboard" style="ellipse;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#000;fontSize=11;" vertex="1" parent="1"><mxGeometry x="398" y="800" width="224" height="46" as="geometry"/></mxCell>
+        <mxCell id="u12" value="Generate Supervisor Reports" style="ellipse;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#000;fontSize=11;" vertex="1" parent="1"><mxGeometry x="400" y="870" width="220" height="46" as="geometry"/></mxCell>
+
+        <mxCell id="u13" value="Manage Users &amp; Roles" style="ellipse;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#000;fontSize=11;" vertex="1" parent="1"><mxGeometry x="690" y="140" width="160" height="46" as="geometry"/></mxCell>
+        <mxCell id="u14" value="Audit &amp; Analytics" style="ellipse;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#000;fontSize=12;" vertex="1" parent="1"><mxGeometry x="700" y="220" width="150" height="46" as="geometry"/></mxCell>
+        <mxCell id="u15" value="Configure Locations" style="ellipse;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#000;fontSize=12;" vertex="1" parent="1"><mxGeometry x="690" y="300" width="170" height="46" as="geometry"/></mxCell>
+
+        <!-- associations -->
+        <mxCell id="a1" style="endArrow=none;html=1;" edge="1" source="actFO" target="u1" parent="1"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="a2" style="endArrow=none;html=1;" edge="1" source="actFO" target="u2" parent="1"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="a3" style="endArrow=none;html=1;" edge="1" source="actFO" target="u3" parent="1"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="a4" style="endArrow=none;html=1;" edge="1" source="actFO" target="u4" parent="1"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="a5" style="endArrow=none;html=1;" edge="1" source="actFO" target="u5" parent="1"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="a6" style="endArrow=none;html=1;" edge="1" source="actFO" target="u6" parent="1"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="a7" style="endArrow=none;html=1;" edge="1" source="actSUP" target="u7" parent="1"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="a8" style="endArrow=none;html=1;" edge="1" source="actSUP" target="u8" parent="1"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="a9" style="endArrow=none;html=1;" edge="1" source="actSUP" target="u9" parent="1"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="a10b" style="endArrow=none;html=1;" edge="1" source="actSUP" target="u10" parent="1"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="a10" style="endArrow=none;html=1;" edge="1" source="actMGR" target="u11" parent="1"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="a11" style="endArrow=none;html=1;" edge="1" source="actMGR" target="u12" parent="1"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="a12" style="endArrow=none;html=1;" edge="1" source="actAdmin" target="u13" parent="1"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="a13" style="endArrow=none;html=1;" edge="1" source="actAdmin" target="u14" parent="1"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="a14" style="endArrow=none;html=1;" edge="1" source="actAdmin" target="u15" parent="1"><mxGeometry relative="1" as="geometry"/></mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
+

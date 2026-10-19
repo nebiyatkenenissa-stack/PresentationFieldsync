@@ -4,7 +4,7 @@ import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import toast from 'react-hot-toast';
 import { db, checkRealInternet, syncQueue, clearStuckCitizens } from '../../services/database';
-import { exportCSV, exportJSON, getProfilePhotoUrl, getRegionOptions } from '../../utils/helpers';
+import { exportCSV, exportJSON, getRegionOptions } from '../../utils/helpers';
 import useRegions from '../../hooks/useRegions';
 import { buildRecordLocationPath, regionOfPath } from '../../utils/regions';
 import UserAvatar from '../common/UserAvatar';
@@ -562,15 +562,11 @@ function CitizensDatabase({ citizens, users }) {
               {filteredCitizens.map(c => (
                 <tr key={c.id} style={{ borderBottom: '1px solid #e5e7eb' }}>
                   <td style={{ padding: '12px 16px', textAlign: 'center' }}>
-                    {c.photo ? (
-                      <img
-                        src={getProfilePhotoUrl(c.photo)}
-                        alt="Citizen"
-                        style={{ width: '40px', height: '40px', borderRadius: '50%', objectFit: 'cover' }}
-                      />
-                    ) : (
-                      <span style={{ fontSize: '22px' }}>👤</span>
-                    )}
+                    <UserAvatar
+                      photo={c.photo}
+                      name={`${c.firstName || ''} ${c.lastName || ''}`.trim()}
+                      size={40}
+                    />
                   </td>
                   <td style={{ padding: '12px 16px', fontWeight: '600' }}>
                     {c.firstName} {c.lastName}{c.grandfatherName ? ` ${c.grandfatherName}` : ''}

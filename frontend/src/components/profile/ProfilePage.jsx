@@ -4,7 +4,7 @@
 import React, { useState, useEffect } from 'react';
 import toast from 'react-hot-toast';
 import { db, syncQueue, checkRealInternet, getApiBase } from '../../services/database';
-import { getProfilePhotoUrl } from '../../utils/helpers';
+import { DEFAULT_AVATAR_URL, getProfilePhotoUrl } from '../../utils/helpers';
 
 // Convert a File object to a base64 data URL string for local caching.
 const fileToBase64 = (file) => {
@@ -120,7 +120,6 @@ function ProfilePage({ user, setUser, setUsers }) {
   const [photoFailed, setPhotoFailed] = useState(false);
   const [selectedProfileFile, setSelectedProfileFile] = useState(null);
   const [showPassword, setShowPassword] = useState(false);
-  const [showCurrentPassword, setShowCurrentPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [saving, setSaving] = useState(false);
   const [verificationWarning, setVerificationWarning] = useState(null);
@@ -450,13 +449,9 @@ function ProfilePage({ user, setUser, setUsers }) {
     }
   };
 
-  const initials = (user?.name || 'U')
-    .split(' ')
-    .map(p => p[0])
-    .filter(Boolean)
-    .slice(0, 2)
-    .join('')
-    .toUpperCase();
+  // No uploaded photo, or the upload failed to load: show the bundled default
+  // avatar instead of a broken image.
+  const displayPhotoUrl = (photoPreview && !photoFailed) ? photoPreview : DEFAULT_AVATAR_URL;
 
   const sectionHeaderStyle = {
     display: 'flex',
@@ -506,23 +501,12 @@ function ProfilePage({ user, setUser, setUsers }) {
                 alignItems: 'center',
                 justifyContent: 'center'
               }}>
-                {photoPreview && !photoFailed ? (
-                  <img
-                    src={photoPreview}
-                    alt="Profile"
-                    style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                    onError={() => setPhotoFailed(true)}
-                  />
-                ) : (
-                  <span style={{
-                    fontSize: '38px',
-                    fontWeight: '700',
-                    color: '#1e3a5f',
-                    fontFamily: 'inherit'
-                  }}>
-                    {initials}
-                  </span>
-                )}
+                <img
+                  src={displayPhotoUrl}
+                  alt="Profile"
+                  style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                  onError={() => { if (displayPhotoUrl !== DEFAULT_AVATAR_URL) setPhotoFailed(true); }}
+                />
               </div>
               <label
                 style={{
@@ -664,8 +648,6 @@ function ProfilePage({ user, setUser, setUsers }) {
                   value={form.currentPassword}
                   onChange={set('currentPassword')}
                   placeholder="Required to change password"
-                  visible={showCurrentPassword}
-                  onToggleVisible={() => setShowCurrentPassword(v => !v)}
                 />
               </Field>
               <Field label="New Password">

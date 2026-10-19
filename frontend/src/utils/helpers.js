@@ -111,6 +111,10 @@ export const getProfilePhotoUrl = (path) => {
   return `${getServerBase()}${path}`;
 };
 
+// Bundled placeholder avatar, served from /public so it is same-origin and
+// precached by the service worker. Used whenever a user has no profile photo.
+export const DEFAULT_AVATAR_URL = '/default-avatar.svg';
+
 // Region options for a filter dropdown. Returns ['All', ...realRegionNames] where
 // the names come from the real region list (utils/regions.js) and any region
 // found in the supplied users list. Kebele / woreda / zone values are never

@@ -231,6 +231,7 @@ async function addMissingColumns() {
     try {
         await pool.query(`
             ALTER TABLE users ADD COLUMN IF NOT EXISTS phone VARCHAR(50);
+            ALTER TABLE users ADD COLUMN IF NOT EXISTS gender VARCHAR(20);
             ALTER TABLE users ADD COLUMN IF NOT EXISTS shift VARCHAR(20) DEFAULT 'Day';
             ALTER TABLE users ADD COLUMN IF NOT EXISTS department VARCHAR(100);
             ALTER TABLE users ADD COLUMN IF NOT EXISTS profile_photo TEXT;
@@ -246,10 +247,9 @@ async function addMissingColumns() {
             -- Ensure region column can hold long location paths
             ALTER TABLE users ALTER COLUMN region TYPE TEXT;
             ALTER TABLE users ALTER COLUMN location_path TYPE TEXT;
-            -- Reports, attendance and supervisor reports also store
+            -- Reports and supervisor reports also store
             -- hierarchical location paths as region
             ALTER TABLE reports ALTER COLUMN region TYPE TEXT;
-            ALTER TABLE attendance ALTER COLUMN region TYPE TEXT;
             ALTER TABLE supervisor_reports ALTER COLUMN region TYPE TEXT;
             ALTER TABLE supervisor_reports ALTER COLUMN officer_region TYPE TEXT;
             -- GPS columns for reports and citizens
@@ -257,6 +257,7 @@ async function addMissingColumns() {
             ALTER TABLE reports ADD COLUMN IF NOT EXISTS longitude DOUBLE PRECISION;
             ALTER TABLE reports ADD COLUMN IF NOT EXISTS gps_accuracy DOUBLE PRECISION;
             ALTER TABLE reports ADD COLUMN IF NOT EXISTS gps_captured_at TIMESTAMP;
+            ALTER TABLE citizens ADD COLUMN IF NOT EXISTS gender VARCHAR(20);
             ALTER TABLE citizens ADD COLUMN IF NOT EXISTS latitude DOUBLE PRECISION;
             ALTER TABLE citizens ADD COLUMN IF NOT EXISTS longitude DOUBLE PRECISION;
             ALTER TABLE citizens ADD COLUMN IF NOT EXISTS gps_accuracy DOUBLE PRECISION;
@@ -519,78 +520,6 @@ app.delete('/api/reports/:id', async (req, res) => {
 });
 
 // ============================================================
-// ATTENDANCE ROUTES
-// ============================================================
-app.get('/api/attendance', async (req, res) => {
-    try {
-        const result = await pool.query('SELECT * FROM attendance ORDER BY date DESC');
-        res.json(result.rows);
-    } catch (error) {
-        res.status(500).json({ error: error.message });
-    }
-});
-
-app.get('/api/attendance/employee/:employeeId', async (req, res) => {
-    try {
-        const { employeeId } = req.params;
-        const result = await pool.query(
-            'SELECT * FROM attendance WHERE employee_id = $1 ORDER BY date DESC',
-            [employeeId]
-        );
-        res.json(result.rows);
-    } catch (error) {
-        res.status(500).json({ error: error.message });
-    }
-});
-
-app.post('/api/attendance', async (req, res) => {
-    try {
-        const data = req.body;
-        const result = await pool.query(
-            `INSERT INTO attendance (
-                employee_id, employee_name, date, status,
-                check_in, check_out, work_hours, region,
-                supervisor_id, supervisor_name, notes,
-                submitted_to_manager, submitted_at
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
-            RETURNING *`,
-            [
-                data.employeeId, data.employeeName, data.date,
-                data.status, data.checkIn, data.checkOut,
-                data.workHours, data.region, data.supervisorId,
-                data.supervisorName, data.notes,
-                data.submittedToManager || false,
-                data.submittedAt || new Date().toISOString()
-            ]
-        );
-        res.status(201).json(result.rows[0]);
-    } catch (error) {
-        res.status(500).json({ error: error.message });
-    }
-});
-
-app.put('/api/attendance/:id', async (req, res) => {
-    try {
-        const { id } = req.params;
-        const { approved, approved_by, seen_by_manager } = req.body;
-        const result = await pool.query(
-            `UPDATE attendance 
-             SET approved = $1, approved_by = $2, approved_at = CURRENT_TIMESTAMP,
-                 seen_by_manager = $3, seen_at = CURRENT_TIMESTAMP
-             WHERE id = $4
-             RETURNING *`,
-            [approved, approved_by, seen_by_manager, id]
-        );
-        if (result.rows.length === 0) {
-            return res.status(404).json({ error: 'Attendance record not found' });
-        }
-        res.json(result.rows[0]);
-    } catch (error) {
-        res.status(500).json({ error: error.message });
-    }
-});
-
-// ============================================================
 // CITIZEN ROUTES
 // ============================================================
 app.get('/api/citizens', async (req, res) => {
@@ -655,7 +584,7 @@ app.get('/api/users', async (req, res) => {
     try {
         const result = await pool.query(
             `SELECT id, employee_id, name, email, role, region, supervisor_id, 
-                    status, password_hash, phone, shift, department, profile_photo,
+                    status, password_hash, phone, shift, department, profile_photo, gender,
                     must_change_password, country_id, region_id, zone_id, woreda_id, kebele_id, community_id,
                     location_path, created_at, updated_at 
              FROM users ORDER BY name`
@@ -671,7 +600,7 @@ app.get('/api/users/:id', async (req, res) => {
         const { id } = req.params;
         const result = await pool.query(
             `SELECT id, employee_id, name, email, role, region, supervisor_id, 
-                    status, password_hash, phone, shift, department, profile_photo,
+                    status, password_hash, phone, shift, department, profile_photo, gender,
                     must_change_password, country_id, region_id, zone_id, woreda_id, kebele_id, community_id,
                     location_path, created_at, updated_at 
              FROM users WHERE id = $1`,
@@ -711,8 +640,9 @@ app.post('/api/users/resend-credentials', async (req, res) => {
             [hashedPassword, user.id]
         );
 
-        if (user.role === 'manager') {
-            return res.json({ ok: true, temporaryPassword: tempPassword, note: 'Manager password reset (no email sent).' });
+        if (user.role === 'manager' || user.role === 'admin') {
+            const label = user.role === 'admin' ? 'Admin' : 'Manager';
+            return res.json({ ok: true, temporaryPassword: tempPassword, note: `${label} password reset (no email sent).` });
         }
 
         await transporter.sendMail({
@@ -753,7 +683,8 @@ app.post('/api/users', async (req, res) => {
         } else {
             // For other roles, if no password provided, use default
             if (!plainPassword) {
-                if (data.role === 'manager') plainPassword = 'manager123';
+                if (data.role === 'admin') plainPassword = 'admin123';
+                else if (data.role === 'manager') plainPassword = 'manager123';
                 else if (data.role === 'supervisor') plainPassword = 'super123';
                 else plainPassword = 'officer123';
             }
@@ -770,10 +701,10 @@ app.post('/api/users', async (req, res) => {
             `INSERT INTO users (
                 id, employee_id, name, email, password_hash,
                 role, region, supervisor_id, status, created_at,
-                phone, shift, department, profile_photo, must_change_password,
+                phone, shift, department, profile_photo, gender, must_change_password,
                 country_id, region_id, zone_id, woreda_id, kebele_id, community_id,
                 location_path
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23)
             ON CONFLICT (email) DO UPDATE SET
                 employee_id = EXCLUDED.employee_id,
                 name = EXCLUDED.name,
@@ -785,6 +716,7 @@ app.post('/api/users', async (req, res) => {
                 shift = EXCLUDED.shift,
                 department = EXCLUDED.department,
                 profile_photo = EXCLUDED.profile_photo,
+                gender = EXCLUDED.gender,
                 must_change_password = EXCLUDED.must_change_password,
                 country_id = EXCLUDED.country_id,
                 region_id = EXCLUDED.region_id,
@@ -804,6 +736,7 @@ app.post('/api/users', async (req, res) => {
                 data.shift || 'Day',
                 data.department || null,
                 data.profilePhoto || null,
+                data.gender || null,
                 mustChange,
                 data.country_id || null,
                 data.region_id || null,
@@ -923,7 +856,7 @@ app.put('/api/users/:id', async (req, res) => {
         const { id } = req.params;
         const {
             name, email, phone, shift, department,
-            profilePhoto
+            gender, profilePhoto
         } = req.body;
 
         const updates = [];
@@ -949,6 +882,10 @@ app.put('/api/users/:id', async (req, res) => {
         if (department !== undefined) {
             updates.push(`department = $${paramIndex++}`);
             values.push(department);
+        }
+        if (gender !== undefined) {
+            updates.push(`gender = $${paramIndex++}`);
+            values.push(gender || null);
         }
         if (profilePhoto !== undefined) {
             updates.push(`profile_photo = $${paramIndex++}`);
@@ -1259,31 +1196,6 @@ app.post('/api/sync', async (req, res) => {
                 );
                 break;
 
-            case 'attendance':
-                result = await pool.query(
-                    `INSERT INTO attendance (
-                        employee_id, employee_name, date, status,
-                        check_in, check_out, work_hours, region,
-                        supervisor_id, supervisor_name, notes,
-                        submitted_to_manager, submitted_at
-                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
-                    ON CONFLICT (id) DO UPDATE SET
-                        status = EXCLUDED.status,
-                        check_in = EXCLUDED.check_in,
-                        check_out = EXCLUDED.check_out,
-                        work_hours = EXCLUDED.work_hours
-                    RETURNING *`,
-                    [
-                        data.employeeId, data.employeeName, data.date,
-                        data.status, data.checkIn, data.checkOut,
-                        data.workHours, data.region, data.supervisorId,
-                        data.supervisorName, data.notes,
-                        data.submittedToManager || false,
-                        data.submittedAt || new Date().toISOString()
-                    ]
-                );
-                break;
-
             case 'citizen':
                 result = await pool.query(
                     `INSERT INTO citizens (
@@ -1429,7 +1341,7 @@ app.post('/api/sync', async (req, res) => {
                 break;
 
             case 'user':
-                const plainPw = data.password || (data.role === 'manager' ? 'manager123' : data.role === 'supervisor' ? 'super123' : 'officer123');
+                const plainPw = data.password || (data.role === 'admin' ? 'admin123' : data.role === 'manager' ? 'manager123' : data.role === 'supervisor' ? 'super123' : 'officer123');
                 const hashedPw = await bcrypt.hash(plainPw, 10);
                 // Use ON CONFLICT (email) to avoid duplicate email errors
                 const locationPath = data.locationPath || data.region || '';
@@ -1823,6 +1735,38 @@ app.get('/api/health', async (req, res) => {
 });
 
 // ============================================================
+// POST /api/admin/bootstrap
+// Creates the built-in administrator account when it does not exist yet, so a
+// fresh database always has a way in. Idempotent: an existing admin@fieldsync.com
+// is left untouched.
+// ============================================================
+app.post('/api/admin/bootstrap', async (_req, res) => {
+    try {
+        const email = process.env.ADMIN_EMAIL || 'admin@fieldsync.com';
+        const password = process.env.ADMIN_PASSWORD || 'admin123';
+        const employeeId = process.env.ADMIN_EMPLOYEE_ID || 'ADM001';
+
+        const existing = await pool.query('SELECT id FROM users WHERE LOWER(email) = LOWER($1)', [email]);
+        if (existing.rows.length > 0) {
+            return res.json({ ok: true, created: false, email, message: 'Administrator already exists.' });
+        }
+
+        const hashed = await bcrypt.hash(password, 10);
+        await pool.query(
+            `INSERT INTO users (id, employee_id, name, email, password_hash, role, region, status, department, must_change_password)
+             VALUES (gen_random_uuid()::text, $1, $2, $3, $4, 'admin', 'All', 'active', 'System Administration', TRUE)
+             ON CONFLICT (email) DO NOTHING`,
+            [employeeId, process.env.ADMIN_NAME || 'System Administrator', email, hashed]
+        );
+
+        res.json({ ok: true, created: true, email, message: 'Administrator account created.' });
+    } catch (error) {
+        console.error('Admin bootstrap error:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// ============================================================
 // START SERVER
 // ============================================================
 app.listen(PORT, () => {
@@ -1830,13 +1774,12 @@ app.listen(PORT, () => {
     console.log(`📡 Endpoints:`);
     console.log(`   GET  /api/test`);
     console.log(`   GET  /api/health`);
+    console.log(`   GET  /api/admin/diagnostics`);
+    console.log(`   POST /api/admin/bootstrap`);
     console.log(`   GET  /api/reports`);
     console.log(`   POST /api/reports`);
     console.log(`   PUT  /api/reports/:id`);
     console.log(`   DELETE /api/reports/:id`);
-    console.log(`   GET  /api/attendance`);
-    console.log(`   POST /api/attendance`);
-    console.log(`   PUT  /api/attendance/:id`);
     console.log(`   GET  /api/citizens`);
     console.log(`   POST /api/citizens`);
     console.log(`   GET  /api/users`);

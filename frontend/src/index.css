@@ -103,28 +103,31 @@
     --fs-focus-ring: 0 0 0 3px rgba(29, 79, 130, 0.28);
   }
 
+  /* Formal dark theme. Deliberately a comfortable slate rather than pure
+     black: the surfaces sit around #141a24–#242d3a so the interface stays
+     legible and calm instead of harsh. */
   [data-theme='dark'] {
-    --fs-bg: #0d1520;
-    --fs-surface: #141d2b;
-    --fs-surface-2: #19232f;
-    --fs-surface-3: #1f2b39;
-    --fs-header-bg: #ffffff;
-    --fs-sidebar-bg: #0a121d;
-    --fs-sidebar-bg-2: #070d16;
-    --fs-input-bg: #101823;
+    --fs-bg: #12161f;
+    --fs-surface: #1a2029;
+    --fs-surface-2: #212834;
+    --fs-surface-3: #29323f;
+    --fs-header-bg: #1a2029;
+    --fs-sidebar-bg: #0c1420;
+    --fs-sidebar-bg-2: #080e17;
+    --fs-input-bg: #121822;
 
-    --fs-ink: #e8edf4;
-    --fs-ink-2: #c2ccda;
-    --fs-muted: #94a3b5;
-    --fs-muted-2: #7c8899;
+    --fs-ink: #e9edf4;
+    --fs-ink-2: #c3ccd9;
+    --fs-muted: #a3afc0;
+    --fs-muted-2: #7f8b9c;
 
-    --fs-border: #2a3644;
-    --fs-border-strong: #3b4859;
-    --fs-hairline: #222d3a;
+    --fs-border: #2e3947;
+    --fs-border-strong: #3c4859;
+    --fs-hairline: #232c38;
 
-    --fs-navy: #1f4266;
-    --fs-navy-dark: #0d1520;
-    --fs-navy-hover: #2a5580;
+    --fs-navy: #2a5580;
+    --fs-navy-dark: #12161f;
+    --fs-navy-hover: #34669a;
 
     --fs-accent: #6ea8dc;
     --fs-accent-soft: #1a2b3d;
@@ -141,10 +144,10 @@
     --fs-amber: #d09a3c;
     --fs-amber-soft: #2a2113;
 
-    --fs-shadow: rgba(0, 0, 0, 0.55);
-    --fs-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
-    --fs-shadow-md: 0 2px 8px rgba(0, 0, 0, 0.45);
-    --fs-shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.6);
+    --fs-shadow: rgba(0, 0, 0, 0.5);
+    --fs-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.35);
+    --fs-shadow-md: 0 2px 8px rgba(0, 0, 0, 0.4);
+    --fs-shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.55);
     --fs-focus-ring: 0 0 0 3px rgba(110, 168, 220, 0.35);
   }
 

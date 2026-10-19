@@ -61,6 +61,7 @@ import CitizensDatabase from './components/citizens/CitizensDatabase';
 import AuditLog from './components/audit/AuditLog';
 import AllReports from './components/reports/AllReports';
 import AlertManagement from './components/alerts/AlertManagement';
+import NotificationPage from './components/notifications/NotificationPage';
 import TeamManagement from './components/team/TeamManagement';
 import ProfilePage from './components/profile/ProfilePage';
 import NetworkStatus from './components/common/NetworkStatus';
@@ -3265,8 +3266,20 @@ function AppContent() {
             </ErrorBoundary>
 
             <ErrorBoundary>
+              {activeTab === 'notifications' && (
+                <NotificationPage
+                  notifications={appNotifications}
+                  user={user}
+                  markNotificationRead={markNotificationRead}
+                  markAllNotificationsRead={markAllNotificationsRead}
+                  setActiveTab={setActiveTab}
+                />
+              )}
+            </ErrorBoundary>
+
+            <ErrorBoundary>
               {activeTab === 'register' && isOfficer && (
-                <CitizenRegistration 
+                <CitizenRegistration
                   citizenForm={citizenForm}
                   setCitizenForm={setCitizenForm}
                   handleCitizenRegister={handleCitizenRegister}
@@ -3479,9 +3492,11 @@ function AppContent() {
 
             <ErrorBoundary>
               {activeTab === 'audit' && canManage && (
-                <AuditLog 
+                <AuditLog
                   auditLog={auditLog}
                   setAuditLog={setAuditLog}
+                  user={user}
+                  setActiveTab={setActiveTab}
                 />
               )}
             </ErrorBoundary>

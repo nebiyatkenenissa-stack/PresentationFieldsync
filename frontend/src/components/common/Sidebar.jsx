@@ -22,6 +22,7 @@ function Sidebar({
   const getNavItems = () => {
     const items = [
       { id: 'dashboard', icon: '📊', label: t('nav.dashboard') },
+      { id: 'notifications', icon: '🔔', label: t('nav.notifications', { defaultValue: 'Notifications' }) },
       { id: 'profile', icon: '👤', label: t('nav.profile') }
     ];
 

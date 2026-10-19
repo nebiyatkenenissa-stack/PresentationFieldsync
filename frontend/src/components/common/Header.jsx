@@ -5,7 +5,7 @@ import { useTranslation } from 'react-i18next';
 import toast from 'react-hot-toast';
 import i18n from '../../utils/i18n';
 import { db, syncQueue, checkRealInternet } from '../../services/database';
-import { getProfilePhotoUrl } from '../../utils/helpers';
+import { DEFAULT_AVATAR_URL, getProfilePhotoUrl } from '../../utils/helpers';
 import ThemeToggle from './ThemeToggle';
 import LanguageSelector from './LanguageSelector';
 import { BellIcon } from './Icons';
@@ -34,16 +34,18 @@ function Header({
   const [isOnline, setIsOnline] = useState(propIsOnline || navigator.onLine);
   const [syncing, setSyncing] = useState(propSyncing || false);
   const [syncProgress, setSyncProgress] = useState(0);
-  const [profilePhotoFailed, setProfilePhotoFailed] = useState(false);
+  const [profilePhotoFailed, setProfilePhotoFailed] = useState(null);
 
-  const cachedPhotoUrl = user?.profilePhotoCache ? getProfilePhotoUrl(user.profilePhotoCache) : null;
-  const currentPhoto = user?.profilePhoto || user?.profile_photo || null;
-  // A failed load with no cached copy falls back to the initials avatar rather
-  // than leaving a broken image: uploaded files do not survive a cold start on
-  // the free Render instance.
-  const headerPhotoUrl = profilePhotoFailed
-    ? cachedPhotoUrl
-    : (currentPhoto ? getProfilePhotoUrl(currentPhoto) : null);
+  // Ordered chain of sources: the server path, then the cached base64 kept for
+  // when uploads do not survive a cold start, then the bundled default avatar.
+  // `profilePhotoFailed` holds the URL that just errored so each failure
+  // advances to the next candidate instead of getting stuck on a broken image.
+  const photoSources = [
+    user?.profilePhoto || user?.profile_photo ? getProfilePhotoUrl(user.profilePhoto || user.profile_photo) : null,
+    user?.profilePhotoCache ? getProfilePhotoUrl(user.profilePhotoCache) : null,
+    DEFAULT_AVATAR_URL
+  ].filter(Boolean);
+  const headerPhotoUrl = photoSources.find(s => s !== profilePhotoFailed) || DEFAULT_AVATAR_URL;
 
   // ===== CHECK NETWORK (real internet) =====
   const isFirstNetworkCheck = useRef(true);
@@ -579,16 +581,12 @@ function Header({
               fontWeight: '600',
               color: '#1e3a5f'
             }}>
-              {headerPhotoUrl ? (
-                <img 
-                  src={headerPhotoUrl} 
-                  alt="Profile" 
-                  style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                  onError={() => { if (!profilePhotoFailed && cachedPhotoUrl) setProfilePhotoFailed(true); }}
-                />
-              ) : (
-                user?.name?.charAt(0)?.toUpperCase() || '👤'
-              )}
+              <img 
+                src={headerPhotoUrl} 
+                alt="Profile" 
+                style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                    onError={() => { if (headerPhotoUrl !== DEFAULT_AVATAR_URL) setProfilePhotoFailed(headerPhotoUrl); }}
+              />
             </div>
             <div style={{ lineHeight: 1.2 }}>
               <div style={{ fontSize: '13px', fontWeight: '600', color: '#1e293b' }}>
@@ -637,16 +635,12 @@ function Header({
                   color: '#1e3a5f',
                   flexShrink: 0
                 }}>
-                  {headerPhotoUrl ? (
-                    <img 
-                      src={headerPhotoUrl} 
-                      alt="Profile" 
-                      style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                      onError={() => { if (!profilePhotoFailed && cachedPhotoUrl) setProfilePhotoFailed(true); }}
-                    />
-                  ) : (
-                    user?.name?.charAt(0)?.toUpperCase() || '👤'
-                  )}
+                  <img 
+                    src={headerPhotoUrl} 
+                    alt="Profile" 
+                    style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                onError={() => { if (headerPhotoUrl !== DEFAULT_AVATAR_URL) setProfilePhotoFailed(headerPhotoUrl); }}
+                  />
                 </div>
                 <div style={{ minWidth: 0 }}>
                   <div style={{ fontSize: '15px', fontWeight: '600', color: '#1e293b', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>

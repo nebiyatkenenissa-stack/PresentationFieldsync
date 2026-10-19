@@ -25,6 +25,9 @@ function AlertManagement({ alerts, setAlerts, users, user, isManager, isSupervis
     recipients: []
   });
 
+  // Division tabs: all | inbox | sent | unread | read
+  const [selectedTab, setSelectedTab] = useState('all');
+
   // Deleted alert ids (persisted per device so removed inbox items stay hidden)
   const [deletedIds, setDeletedIds] = useState(() => {
     try {
@@ -103,13 +106,17 @@ function AlertManagement({ alerts, setAlerts, users, user, isManager, isSupervis
     };
   }, []);
 
-  const filteredAlerts = (alerts || [])
+  // Base list: hide bottleneck messages and anything not yet synced to the
+  // server. Messages that haven't reached the server stay hidden and appear
+  // automatically once internet is back.
+  const baseAlerts = (alerts || [])
     .filter(a => a.type !== 'bottleneck')
-    // Messages that haven't reached the server yet stay hidden. They sync
-    // automatically when internet is back and appear at that same moment.
     .filter(a => a.pending !== true)
+    .filter(a => !deletedIds.includes(a.id));
+
+  // Inbox = messages addressed to me; Sent = messages I sent myself.
+  const receivedAlerts = baseAlerts
     .filter(a => a.sentBy !== user?.employeeId)
-    .filter(a => !deletedIds.includes(a.id))
     // A message is only shown to the users it was actually addressed to (the
     // selected recipients) or to everyone for broadcasts. Role-based heuristics
     // leaked messages to officers/supervisors that were never selected.
@@ -120,6 +127,27 @@ function AlertManagement({ alerts, setAlerts, users, user, isManager, isSupervis
         || a.targetEmployeeId === user?.employeeId;
       return isTargetedToMe;
     });
+
+  const sentAlerts = baseAlerts.filter(a => a.sentBy === user?.employeeId);
+
+  const allAlerts = [...receivedAlerts, ...sentAlerts].sort(
+    (a, b) => new Date(b.timestamp) - new Date(a.timestamp)
+  );
+
+  const unreadAlerts = receivedAlerts.filter(a => !a.read);
+  const readAlerts = receivedAlerts.filter(a => a.read);
+
+  const tabLists = {
+    all: allAlerts,
+    inbox: receivedAlerts,
+    sent: sentAlerts,
+    unread: unreadAlerts,
+    read: readAlerts
+  };
+
+  // The division currently selected in the tab bar. Kept under the old name so
+  // every existing handler (delete, download, empty-state) works unchanged.
+  const filteredAlerts = tabLists[selectedTab] || allAlerts;
 
   const getTargetUsers = () => {
     const targetUsers = [];
@@ -380,7 +408,47 @@ function AlertManagement({ alerts, setAlerts, users, user, isManager, isSupervis
     exportCSV(data, `messages_${getToday()}`);
   };
 
-  const unreadCount = filteredAlerts.filter(a => !a.read).length;
+  const unreadCount = unreadAlerts.length;
+
+  // Shared style for the division tab buttons.
+  const tabStyle = (active, activeBg) => ({
+    padding: '8px 16px',
+    border: 'none',
+    background: active ? activeBg : '#f3f4f6',
+    color: active ? 'white' : '#374151',
+    borderRadius: '6px',
+    cursor: 'pointer',
+    fontWeight: active ? '600' : '400',
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '6px',
+    fontSize: '13px'
+  });
+
+  const tabLabels = {
+    all: t('alerts.tab_all', { defaultValue: 'All' }),
+    inbox: t('alerts.tab_inbox', { defaultValue: 'Inbox' }),
+    sent: t('alerts.tab_sent', { defaultValue: 'Sent' }),
+    unread: t('alerts.tab_unread', { defaultValue: 'Unread' }),
+    read: t('alerts.tab_read', { defaultValue: 'Read' })
+  };
+  const tabCounts = {
+    all: allAlerts.length,
+    inbox: receivedAlerts.length,
+    sent: sentAlerts.length,
+    unread: unreadAlerts.length,
+    read: readAlerts.length
+  };
+  const tabColors = { all: '#1e3a5f', inbox: '#2563eb', sent: '#0f766e', unread: '#d97706', read: '#0b7e4b' };
+  const tabIcons = { all: '🗂️', inbox: '📥', sent: '📤', unread: '🔴', read: '✅' };
+
+  const divisionTitle = {
+    all: t('alerts.inbox_all', { defaultValue: 'All Messages' }),
+    inbox: t('alerts.inbox', { defaultValue: 'Inbox' }),
+    sent: t('alerts.sent', { defaultValue: 'Sent Messages' }),
+    unread: t('alerts.unread_messages', { defaultValue: 'Unread Messages' }),
+    read: t('alerts.read_messages', { defaultValue: 'Read Messages' })
+  }[selectedTab];
 
   return (
     <div className="alerts-view" style={{ padding: '20px' }}>
@@ -415,7 +483,7 @@ function AlertManagement({ alerts, setAlerts, users, user, isManager, isSupervis
             fontSize: '13px',
             fontWeight: '600'
           }}>
-            {t('alerts.messages', { count: filteredAlerts.length })}
+            {t('alerts.messages', { count: allAlerts.length })}
           </span>
           <span style={{
             background: 'rgba(248,113,113,0.25)',
@@ -468,6 +536,23 @@ function AlertManagement({ alerts, setAlerts, users, user, isManager, isSupervis
         </div>
       )}
 
+      {/* ===== DIVISION TABS (all / inbox / sent / unread / read) ===== */}
+      <div style={{
+        display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center',
+        background: 'white', borderRadius: '12px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
+        padding: '12px 16px', marginBottom: '16px'
+      }}>
+        {['all', 'inbox', 'sent', 'unread', 'read'].map(key => (
+          <button
+            key={key}
+            onClick={() => setSelectedTab(key)}
+            style={tabStyle(selectedTab === key, tabColors[key])}
+          >
+            {tabIcons[key]} {tabLabels[key]} ({tabCounts[key]})
+          </button>
+        ))}
+      </div>
+
       <div style={{
         background: 'white', borderRadius: '12px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
         padding: '24px', marginBottom: '24px'
@@ -477,7 +562,7 @@ function AlertManagement({ alerts, setAlerts, users, user, isManager, isSupervis
           marginBottom: '20px', flexWrap: 'wrap', gap: '10px'
         }}>
           <div>
-            <h3 style={{fontSize: '16px', fontWeight: '600'}}>{t('alerts.inbox')}</h3>
+            <h3 style={{fontSize: '16px', fontWeight: '600'}}>{divisionTitle}</h3>
             <p style={{fontSize: '13px', color: '#64748b'}}>
               {t('alerts.inbox_subtitle', { count: filteredAlerts.length })}
             </p>
@@ -519,13 +604,19 @@ function AlertManagement({ alerts, setAlerts, users, user, isManager, isSupervis
               <div>{t('alerts.no_messages')}</div>
             </div>
           )}
-          {filteredAlerts.map(a => (
+          {filteredAlerts.map(a => {
+            const isMine = a.sentBy === user?.employeeId;
+            const recipients = Array.isArray(a.targetUsers) ? a.targetUsers : [];
+            const recipientNames = recipients.length > 0
+              ? recipients.map(r => r.name).join(', ')
+              : (a.targetAll ? t('alerts.all_officers') : t('alerts.recipient', { defaultValue: 'Recipient' }));
+            return (
             <div key={a.id} onClick={() => markAlertRead(a.id)}
               style={{
                 display: 'flex', alignItems: 'flex-start', gap: '12px',
                 padding: '16px 20px', cursor: 'pointer',
-                background: !a.read ? '#fef3c7' : '#f8fafc',
-                border: !a.read ? '2px solid #d97706' : '1px solid #e5e7eb',
+                background: !a.read && !isMine ? '#fef3c7' : '#f8fafc',
+                border: !a.read && !isMine ? '2px solid #d97706' : '1px solid #e5e7eb',
                 borderRadius: '8px', position: 'relative'
               }}>
               <div style={{fontSize: '24px'}}>
@@ -533,16 +624,21 @@ function AlertManagement({ alerts, setAlerts, users, user, isManager, isSupervis
               </div>
               <div style={{flex: 1}}>
                 <div style={{fontWeight: '600', fontSize: '15px'}}>
+                  {isMine && <span style={{ marginRight: '8px', background: '#0f766e', color: 'white', padding: '1px 8px', borderRadius: '12px', fontSize: '10px', fontWeight: '600' }}>{t('alerts.sent_badge', { defaultValue: 'SENT' })}</span>}
                   {a.title}
                   {a.type === 'bottleneck' && <span style={{ marginLeft: '8px', background: '#d97706', color: 'white', padding: '1px 8px', borderRadius: '12px', fontSize: '10px', fontWeight: '600' }}>{t('alerts.bottleneck_only')}</span>}
-                  {!a.read && <span style={{ marginLeft: '8px', background: '#d97706', color: 'white', padding: '1px 8px', borderRadius: '12px', fontSize: '10px', fontWeight: '600' }}>{t('alerts.new_badge')}</span>}
+                  {!a.read && !isMine && <span style={{ marginLeft: '8px', background: '#d97706', color: 'white', padding: '1px 8px', borderRadius: '12px', fontSize: '10px', fontWeight: '600' }}>{t('alerts.new_badge')}</span>}
                 </div>
                 <div style={{color: '#374151', fontSize: '14px', marginTop: '2px'}}>{a.message}</div>
                 <div style={{ display: 'flex', gap: '16px', fontSize: '12px', color: '#64748b', marginTop: '4px', flexWrap: 'wrap' }}>
-                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
-                    <UserAvatar user={userByEmpId[a.sentBy]} name={a.sentByName} size={20} />
-                    <span>{t('alerts.from', { name: a.sentByName })}</span>
-                  </span>
+                  {isMine ? (
+                    <span>{t('alerts.to', { defaultValue: 'To' })}: {recipientNames}</span>
+                  ) : (
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                      <UserAvatar user={userByEmpId[a.sentBy]} name={a.sentByName} size={20} />
+                      <span>{t('alerts.from', { name: a.sentByName })}</span>
+                    </span>
+                  )}
                   <span>{new Date(a.timestamp).toLocaleString()}</span>
                   <span style={{
                     padding: '2px 8px', borderRadius: '12px',
@@ -564,7 +660,8 @@ function AlertManagement({ alerts, setAlerts, users, user, isManager, isSupervis
                 🗑️
               </button>
             </div>
-          ))}
+            );
+          })}
         </div>
       </div>
 

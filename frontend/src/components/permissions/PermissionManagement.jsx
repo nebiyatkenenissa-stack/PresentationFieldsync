@@ -519,6 +519,35 @@ setIsSubmitting(true);
     return displayPermissions;
   };
 
+  // ===== SHIFT CELL =====
+  // One shared cell for every table so the shift column always shows a real
+  // value. Older rows were synced before the shift/time-slot fields existed, so
+  // both are optional and fall back to the default shift label.
+  const renderShiftCell = (p) => {
+    const shift = p.shift || 'morning';
+    const isMorning = shift === 'morning';
+    const slot = p.startTime && p.endTime ? `${p.startTime} – ${p.endTime}` : null;
+    return (
+      <div>
+        <span style={{
+          padding: '3px 10px',
+          borderRadius: '12px',
+          fontSize: '12px',
+          fontWeight: '600',
+          background: isMorning ? '#fef3c7' : '#e0e7ff',
+          color: isMorning ? '#92400e' : '#3730a3'
+        }}>
+          {t(`permission.shift_${shift}`, { defaultValue: shift })}
+        </span>
+        {slot && (
+          <div style={{ fontSize: '11px', color: '#6b7f94', marginTop: '3px' }}>
+            {slot}{p.hours ? ` (${p.hours}h)` : ''}
+          </div>
+        )}
+      </div>
+    );
+  };
+
   // ===== MODAL RENDER =====
   const renderModal = () => {
     return (
@@ -907,8 +936,7 @@ setIsSubmitting(true);
 
           <div className="table-wrapper">
             <table>
-              <thead><tr><th>{t('permission.employee')}</th><th>{t('permission.permission_type')}</th><th>{t('permission.start')}</th><th>{t('permission.end')}</th><th>{t('permission.reason')}</th><th>{t('common.status')}</th><th>{t('permission.action')}</th></tr></thead>
-              <th>{t('permission.shift_column')}</th>
+              <thead><tr><th>{t('permission.employee')}</th><th>{t('permission.permission_type')}</th><th>{t('permission.shift_column')}</th><th>{t('permission.start')}</th><th>{t('permission.end')}</th><th>{t('permission.reason')}</th><th>{t('common.status')}</th><th>{t('permission.action')}</th></tr></thead>
               <tbody>
                 {getDisplayPermissions().length === 0 && (<tr><td colSpan="8" className="empty-state"><div className="empty-icon">📋</div><div>{t('permission.no_requests')}</div></td></tr>)}
                 {getDisplayPermissions().map(p => {
@@ -928,7 +956,7 @@ setIsSubmitting(true);
                         </div>
                       </td>
                       <td>{p.permissionType}</td>
-                      <td><span>{p.startTime && p.endTime ? `${p.startTime} – ${p.endTime}` : t(`permission.shift_${p.shift || 'morning'}`)}</span>{p.hours ? <span style={{ fontSize: '11px', color: '#6b7f94', marginLeft: '6px' }}>({p.hours}h)</span> : null}</td>
+                      <td>{renderShiftCell(p)}</td>
                       <td>{p.startDate}</td>
                       <td>{p.endDate}</td>
                       <td>
@@ -1070,8 +1098,7 @@ setIsSubmitting(true);
 
           <div className="table-wrapper">
             <table>
-              <thead><tr><th>{t('permission.employee')}</th><th>{t('permission.permission_type')}</th><th>{t('permission.start')}</th><th>{t('permission.end')}</th><th>{t('permission.reason')}</th><th>{t('common.status')}</th></tr></thead>
-              <th>{t('permission.shift_column')}</th>
+              <thead><tr><th>{t('permission.employee')}</th><th>{t('permission.permission_type')}</th><th>{t('permission.shift_column')}</th><th>{t('permission.start')}</th><th>{t('permission.end')}</th><th>{t('permission.reason')}</th><th>{t('common.status')}</th></tr></thead>
               <tbody>
                 {getDisplayPermissions().length === 0 && (<tr><td colSpan="7" className="empty-state"><div className="empty-icon">📋</div><div>{t('permission.no_requests')}</div></td></tr>)}
                 {getDisplayPermissions().map(p => (
@@ -1083,7 +1110,7 @@ setIsSubmitting(true);
                       </div>
                     </td>
                     <td>{p.permissionType}</td>
-                    <td><span>{p.startTime && p.endTime ? `${p.startTime} – ${p.endTime}` : t(`permission.shift_${p.shift || 'morning'}`)}</span>{p.hours ? <span style={{ fontSize: '11px', color: '#6b7f94', marginLeft: '6px' }}>({p.hours}h)</span> : null}</td>
+                    <td>{renderShiftCell(p)}</td>
                     <td>{p.startDate}</td>
                     <td>{p.endDate}</td>
                     <td>
@@ -1156,8 +1183,7 @@ setIsSubmitting(true);
 
           <div className="table-wrapper">
             <table>
-              <thead><tr><th>{t('permission.employee')}</th><th>{t('permission.permission_type')}</th><th>{t('permission.start')}</th><th>{t('permission.end')}</th><th>{t('permission.reason')}</th><th>{t('common.status')}</th><th>{t('permission.action')}</th></tr></thead>
-              <th>{t('permission.shift_column')}</th>
+              <thead><tr><th>{t('permission.employee')}</th><th>{t('permission.permission_type')}</th><th>{t('permission.shift_column')}</th><th>{t('permission.start')}</th><th>{t('permission.end')}</th><th>{t('permission.reason')}</th><th>{t('common.status')}</th><th>{t('permission.action')}</th></tr></thead>
               <tbody>
                 {getDisplayPermissions().length === 0 && (<tr><td colSpan="8" className="empty-state"><div className="empty-icon">📋</div><div>{t('permission.no_requests')}</div></td></tr>)}
                 {getDisplayPermissions().map(p => (
@@ -1169,7 +1195,7 @@ setIsSubmitting(true);
                       </div>
                     </td>
                     <td>{p.permissionType}</td>
-                    <td><span>{p.startTime && p.endTime ? `${p.startTime} – ${p.endTime}` : t(`permission.shift_${p.shift || 'morning'}`)}</span>{p.hours ? <span style={{ fontSize: '11px', color: '#6b7f94', marginLeft: '6px' }}>({p.hours}h)</span> : null}</td>
+                    <td>{renderShiftCell(p)}</td>
                     <td>{p.startDate}</td>
                     <td>{p.endDate}</td>
                     <td>
