@@ -3,7 +3,6 @@
 // per-row download (JSON) and delete, clear all.
 
 import React, { useState, useMemo, useEffect } from 'react';
-import { confirmToast } from '../../utils/confirmToast';
 import { exportCSV, exportJSON } from '../../utils/helpers';
 import { db, markReportsDeleted } from '../../services/database';
 import { getRegionOptions, getEmployeeRegionMap, getServerBase } from '../../utils/helpers';
@@ -19,7 +18,6 @@ function AllReports({ reports, users, supervisorReports, setReports, setSupervis
   const [submitterFilter, setSubmitterFilter] = useState('All');
   const [dateRange, setDateRange] = useState({ start: '', end: '' });
   const [viewingAttachments, setViewingAttachments] = useState(null);
-
   const regions = useRegions();
   const regionOptions = useMemo(() => getRegionOptions(users, regions), [users, regions]);
   const employeeRegionMap = useMemo(() => getEmployeeRegionMap(users), [users]);
@@ -127,10 +125,23 @@ function AllReports({ reports, users, supervisorReports, setReports, setSupervis
     }
 
     if (searchTerm) {
+      const term = searchTerm.toLowerCase();
       filtered = filtered.filter(r =>
-        r.siteName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        r.employeeName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        (resolveRegion(r) || r.region)?.toLowerCase().includes(searchTerm.toLowerCase())
+        r.siteName?.toLowerCase().includes(term) ||
+        r.employeeName?.toLowerCase().includes(term) ||
+        (resolveRegion(r) || r.region)?.toLowerCase().includes(term) ||
+        r.reportDate?.toLowerCase().includes(term) ||
+        r.submittedAt?.toLowerCase().includes(term) ||
+        r.operationalStatus?.toLowerCase().includes(term) ||
+        r.activities?.toLowerCase().includes(term) ||
+        r.issues?.toLowerCase().includes(term) ||
+        r.comments?.toLowerCase().includes(term) ||
+        r.equipmentStatus?.toLowerCase().includes(term) ||
+        r.weatherConditions?.toLowerCase().includes(term) ||
+        r.communityFeedback?.toLowerCase().includes(term) ||
+        r.challenges?.toLowerCase().includes(term) ||
+        String(r.registrations)?.includes(term) ||
+        String(r.workHours)?.includes(term)
       );
     }
 

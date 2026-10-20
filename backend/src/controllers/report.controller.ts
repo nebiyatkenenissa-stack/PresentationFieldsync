@@ -60,3 +60,24 @@ export async function remove(req: Request, res: Response): Promise<void> {
     res.status(500).json({ error: error.message });
   }
 }
+
+export async function updateStatus(req: Request, res: Response): Promise<void> {
+  try {
+    const id = String(req.params.id);
+    const { status, approvedBy, approvedAt, rejectReason } = req.body;
+    const row = await reportModel.updateStatus(
+      id,
+      status,
+      approvedBy,
+      approvedAt || new Date().toISOString(),
+      rejectReason
+    );
+    if (!row) {
+      res.status(404).json({ error: 'Report not found' });
+      return;
+    }
+    res.json(row);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+}

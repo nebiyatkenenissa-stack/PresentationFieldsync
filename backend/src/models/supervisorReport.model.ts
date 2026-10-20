@@ -144,3 +144,24 @@ export async function remove(id: string): Promise<any> {
   );
   return result.rows[0];
 }
+
+export async function updateStatus(
+  id: string,
+  status: string,
+  approvedBy: string,
+  approvedAt: string,
+  rejectReason?: string | null
+): Promise<any> {
+  const result = await pool.query(
+    `UPDATE supervisor_reports SET
+        status = $1,
+        approved_by = $2,
+        approved_at = $3,
+        reject_reason = $4,
+        synced = true
+    WHERE id = $5
+    RETURNING *`,
+    [status, approvedBy, approvedAt, rejectReason || null, id]
+  );
+  return result.rows[0];
+}

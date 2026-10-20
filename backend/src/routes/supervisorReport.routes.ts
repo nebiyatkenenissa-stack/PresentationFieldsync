@@ -39,12 +39,19 @@ router.post('/', async (req, res) => {
   }
 });
 
-router.put('/:id', async (req, res) => {
+router.put('/:id/status', async (req, res) => {
   try {
     const { id } = req.params;
-    const row = await supervisorReportModel.update(id, req.body);
+    const { status, approvedBy, approvedAt, rejectReason } = req.body;
+    const row = await supervisorReportModel.updateStatus(
+      id,
+      status,
+      approvedBy,
+      approvedAt || new Date().toISOString(),
+      rejectReason
+    );
     if (!row) {
-      res.status(404).json({ error: 'Report not found' });
+      res.status(404).json({ error: 'Supervisor report not found' });
       return;
     }
     res.json(row);

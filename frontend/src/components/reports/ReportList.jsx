@@ -71,8 +71,22 @@ function ReportList({ reports, user, users, isOfficer, isSupervisor, addNotifica
     })
     .filter(r => {
       if (searchTerm) {
-        return r.siteName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-               r.employeeName?.toLowerCase().includes(searchTerm.toLowerCase());
+        const term = searchTerm.toLowerCase();
+        return r.siteName?.toLowerCase().includes(term) ||
+               r.employeeName?.toLowerCase().includes(term) ||
+               r.region?.toLowerCase().includes(term) ||
+               r.reportDate?.toLowerCase().includes(term) ||
+               r.submittedAt?.toLowerCase().includes(term) ||
+               r.operationalStatus?.toLowerCase().includes(term) ||
+               r.activities?.toLowerCase().includes(term) ||
+               r.issues?.toLowerCase().includes(term) ||
+               r.comments?.toLowerCase().includes(term) ||
+               r.equipmentStatus?.toLowerCase().includes(term) ||
+               r.weatherConditions?.toLowerCase().includes(term) ||
+               r.communityFeedback?.toLowerCase().includes(term) ||
+               r.challenges?.toLowerCase().includes(term) ||
+               String(r.registrations)?.includes(term) ||
+               String(r.workHours)?.includes(term);
       }
       return true;
     })
@@ -255,6 +269,7 @@ function ReportList({ reports, user, users, isOfficer, isSupervisor, addNotifica
                         }`}>
                           {r.synced ? t('reportslist.synced') : t('reportslist.pending')}
                         </span>
+                        
                       </td>
                       <td className="py-3 px-3 text-sm">
                         {isNew && (

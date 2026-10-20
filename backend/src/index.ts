@@ -53,12 +53,12 @@ app.use('/api/screen-time', requireAuth, screenTimeRouter);
 app.use('/api/audit', requireAuth, auditRouter);
 app.use('/api/alerts', requireAuth, alertRouter);
 app.use('/api/verification', requireAuth, verificationRouter);
-app.use('/api/supervisor-reports', requireAuth, supervisorReportRouter);
+app.use('/api/supervisor-reports', supervisorReportRouter);
 
 app.use('/api/locations', locationRouter);
 app.use('/api/communities', communityRouter);
 app.use('/api/users', requireAuth, userRouter);
-app.use('/api/reports', requireAuth, reportRouter);
+app.use('/api/reports', reportRouter);
 app.use('/api/citizens', requireAuth, citizenRouter);
 app.use('/api/leaves', requireAuth, leaveRouter);
 app.use('/api/permissions', requireAuth, permissionRouter);

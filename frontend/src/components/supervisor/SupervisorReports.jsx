@@ -797,6 +797,7 @@ function SupervisorReports({
                       }}>
                         {r.synced ? t('supervisor.synced') : t('header.offline')}
                       </span>
+                      
                     </td>
                     <td style={{ padding: '12px 16px', textAlign: 'center', fontSize: '13px' }}>
                       {isNew && (
